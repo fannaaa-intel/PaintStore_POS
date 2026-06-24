@@ -109,6 +109,7 @@ Public Class ProcurementPOPanelBuilder
         Public UnitPrice As Decimal
         Public QtyRequested As Integer
         Public RequestedBy As String
+        Public ImagePath As String
     End Class
 
     ' ── STATE ────────────────────────────────────────────────────────────────────
@@ -394,35 +395,79 @@ Public Class ProcurementPOPanelBuilder
     End Sub
 
     Private Shared Function BuildFormHeader() As Panel
-        Dim region As New Panel With {.Height = 104, .BackColor = MintBg, .Padding = New Padding(24, 18, 24, 0)}
+        Dim region As New Panel With {.Height = 80, .BackColor = MintBg, .Padding = New Padding(0, 0, 24, 0)}
+
+        ' ← chevron icon (previous.png)
+        Dim iconPath As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        Dim picBack As New PictureBox With {
+            .Size = New Size(22, 22),
+            .Location = New Point(24, 34),
+            .BackColor = Color.Transparent,
+            .SizeMode = PictureBoxSizeMode.Zoom,
+            .Cursor = Cursors.Hand
+        }
+        If IO.File.Exists(iconPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPath)
+                ' Tint to MintDeep by re-drawing with a colour matrix
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                                0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                picBack.Image = bmp
+                raw.Dispose()
+            Catch
+                picBack.Image = Nothing
+            End Try
+        End If
+        AddHandler picBack.Click, Sub() RenderList()
+        AddHandler picBack.MouseEnter,
+            Sub()
+                picBack.BackColor = Color.FromArgb(30, 0, 130, 109)
+                picBack.Padding = New Padding(2)
+            End Sub
+        AddHandler picBack.MouseLeave,
+            Sub()
+                picBack.BackColor = Color.Transparent
+                picBack.Padding = New Padding(0)
+            End Sub
 
         Dim lblTitle As New Label With {
-        .Text = "New Purchase Order", .Font = New Font("Segoe UI", 25, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 12)
-    }
+            .Text = "New Purchase Order", .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(picBack.Right + 10, 22),
+            .BackColor = Color.Transparent
+        }
 
-        Dim backPill As Label = MakeBackPill()
-        backPill.Location = New Point(26, 60)
-        AddHandler backPill.Click, Sub() RenderList()
 
         btnSaveRef = New Button With {
-        .Text = "Save Purchase Order", .Size = New Size(210, 48),
-        .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
-        .Font = New Font("Segoe UI Semibold", 12), .Cursor = Cursors.Hand,
-        .TextAlign = ContentAlignment.MiddleCenter,
-        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-    }
+            .Text = "Save Purchase Order", .Size = New Size(210, 44),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
         btnSaveRef.FlatAppearance.BorderSize = 0
         RoundControl(btnSaveRef, 12)
         AddHover(btnSaveRef, MintPrimary, MintHover)
         AddHandler btnSaveRef.Click, Sub() CommitNewPO()
 
-        region.Controls.AddRange({lblTitle, backPill, btnSaveRef})
+        region.Controls.AddRange({picBack, lblTitle, btnSaveRef})
         AddHandler region.Resize, Sub()
-                                      btnSaveRef.Top = 24
+                                      btnSaveRef.Top = 18
                                       btnSaveRef.Left = region.Width - 24 - btnSaveRef.Width
                                   End Sub
-        btnSaveRef.Top = 24
+        btnSaveRef.Top = 18
         btnSaveRef.Left = 700
         Return region
     End Function
@@ -435,12 +480,14 @@ Public Class ProcurementPOPanelBuilder
         Dim pendings As List(Of PendingReqLite) = LoadPendingLite()
 
         Dim header As Panel = BuildCardHeader("Pending Requests",
-            If(pendings.Count = 0, "Nothing waiting", "Tap a request to add it as a line"))
+            If(pendings.Count = 0, "Nothing waiting",
+               pendings.Count & If(pendings.Count = 1, " request waiting", " requests waiting") &
+               "  " & ChrW(8226) & "  tap to add"))
         header.Dock = DockStyle.Top
 
         Dim rowsHost As New Panel With {
             .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True,
-            .Padding = New Padding(14, 10, 14, 10)
+            .Padding = New Padding(14, 12, 14, 12)
         }
         card.Controls.Add(rowsHost)
         card.Controls.Add(header)
@@ -458,12 +505,12 @@ Public Class ProcurementPOPanelBuilder
         Else
             Dim y As Integer = 4
             For Each req In pendings
-                Dim row As Panel = BuildPendingPickRow(req, 70)
+                Dim row As Panel = BuildPendingPickRow(req, 78)
                 row.Location = New Point(0, y)
                 row.Width = rowsHost.ClientSize.Width - 4
                 row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 rowsHost.Controls.Add(row)
-                y += 78
+                y += 88
             Next
             AddHandler rowsHost.Resize,
                 Sub()
@@ -480,14 +527,55 @@ Public Class ProcurementPOPanelBuilder
     Private Shared Function BuildPendingPickRow(req As PendingReqLite, height As Integer) As Panel
         Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent, .Cursor = Cursors.Hand}
         Dim hovered As Boolean = False
+        Dim initial As String = If(String.IsNullOrWhiteSpace(req.ProductName), "?",
+                                   req.ProductName.Trim().Substring(0, 1).ToUpperInvariant())
+
         AddHandler row.Paint,
             Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim g = e.Graphics
+                g.SmoothingMode = SmoothingMode.AntiAlias
+
+                ' card tile
                 Dim rect As New Rectangle(2, 2, row.Width - 6, row.Height - 6)
                 Using path As GraphicsPath = RoundRect(rect, 12)
-                    Using b As New SolidBrush(If(hovered, Color.FromArgb(230, 245, 239), TileBg))
-                        e.Graphics.FillPath(b, path)
+                    Using b As New SolidBrush(If(hovered, Color.FromArgb(228, 246, 239), TileBg))
+                        g.FillPath(b, path)
                     End Using
+                    Using pen As New Pen(If(hovered, Color.FromArgb(140, 212, 192), Color.FromArgb(223, 238, 233)), 1.2F)
+                        g.DrawPath(pen, path)
+                    End Using
+                End Using
+
+                ' avatar (rounded square, mint, white initial)
+                Dim av As New Rectangle(16, (row.Height - 44) \ 2, 44, 44)
+                Using path As GraphicsPath = RoundRect(av, 13)
+                    e.Graphics.SetClip(path)
+                    Dim imgLoaded As Boolean = False
+                    If Not String.IsNullOrWhiteSpace(req.ImagePath) Then
+                        Try
+                            Dim fullPath As String = req.ImagePath
+                            If Not IO.Path.IsPathRooted(fullPath) Then
+                                fullPath = IO.Path.Combine(Application.StartupPath, fullPath)
+                            End If
+                            If IO.File.Exists(fullPath) Then
+                                Using img As Image = Image.FromFile(fullPath)
+                                    g.DrawImage(img, av)
+                                End Using
+                                imgLoaded = True
+                            End If
+                        Catch
+                        End Try
+                    End If
+                    e.Graphics.ResetClip()
+                    If Not imgLoaded Then
+                        Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 90.0F)
+                            g.FillPath(br, path)
+                        End Using
+                        Using f As New Font("Segoe UI Semibold", 16, FontStyle.Bold), br As New SolidBrush(Color.White)
+                            Dim sz = g.MeasureString(initial, f)
+                            g.DrawString(initial, f, br, av.X + (av.Width - sz.Width) / 2.0F, av.Y + (av.Height - sz.Height) / 2.0F)
+                        End Using
+                    End If
                 End Using
             End Sub
         AddHandler row.MouseEnter, Sub()
@@ -499,34 +587,66 @@ Public Class ProcurementPOPanelBuilder
                                        row.Invalidate()
                                    End Sub
 
+        Const textX As Integer = 74
+
         Dim lblName As New Label With {
             .Text = req.ProductName, .Font = New Font("Segoe UI", 12, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(18, 13), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(textX, 16),
+            .BackColor = Color.Transparent
         }
-        Dim lblMeta As New Label With {
-            .Text = "Qty " & req.QtyRequested & "   " & ChrW(8226) & "   " & req.RequestedBy,
-            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 39), .BackColor = Color.Transparent
+
+        ' Qty chip
+        Dim pillQty As New Label With {
+            .Text = "Qty " & req.QtyRequested, .Font = New Font("Segoe UI Semibold", 8.5F),
+            .ForeColor = MintDeep, .BackColor = Color.FromArgb(210, 238, 229),
+            .AutoSize = True, .Padding = New Padding(8, 3, 8, 3),
+            .Location = New Point(textX, 43)
         }
+        RoundLabel(pillQty, 9)
+
+        Dim lblBy As New Label With {
+            .Text = ChrW(8226) & "  " & req.RequestedBy, .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
+        }
+
+        ' Add pill
         Dim lblAdd As New Label With {
-            .Text = "+ Add", .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            .Text = "+  Add", .Font = New Font("Segoe UI Semibold", 10),
+            .ForeColor = Color.White, .BackColor = MintPrimary,
+            .AutoSize = False, .TextAlign = ContentAlignment.MiddleCenter,
+            .Cursor = Cursors.Hand, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        row.Controls.AddRange({lblName, lblMeta, lblAdd})
+        RoundLabel(lblAdd, 9)
+        lblAdd.Size = New Size(74, 34)   ' set AFTER RoundLabel so region applies
+        AddHandler lblAdd.MouseEnter, Sub()
+                                          lblAdd.BackColor = MintHover
+                                          hovered = True : row.Invalidate()
+                                      End Sub
+        AddHandler lblAdd.MouseLeave, Sub()
+                                          lblAdd.BackColor = MintPrimary
+                                          hovered = False : row.Invalidate()
+                                      End Sub
+
+        row.Controls.AddRange({lblName, pillQty, lblBy, lblAdd})
 
         Dim capReq As PendingReqLite = req
         Dim doAdd As Action = Sub() AddLineFromRequest(capReq)
         AddHandler row.Click, Sub() doAdd()
         AddHandler lblName.Click, Sub() doAdd()
-        AddHandler lblMeta.Click, Sub() doAdd()
+        AddHandler pillQty.Click, Sub() doAdd()
+        AddHandler lblBy.Click, Sub() doAdd()
         AddHandler lblAdd.Click, Sub() doAdd()
 
         AddHandler row.Resize,
             Sub()
-                lblAdd.Left = row.Width - lblAdd.Width - 20
+                lblAdd.Left = row.Width - lblAdd.Width - 18
                 lblAdd.Top = (height - lblAdd.Height) \ 2
+                lblBy.Left = pillQty.Right + 8
+                lblBy.Top = pillQty.Top + (pillQty.Height - lblBy.Height) \ 2
             End Sub
+        ' initial placement
+        lblBy.Left = pillQty.Right + 8
+        lblBy.Top = pillQty.Top + (pillQty.Height - lblBy.Height) \ 2
 
         Return row
     End Function
@@ -660,53 +780,161 @@ Public Class ProcurementPOPanelBuilder
     End Function
 
     Private Shared Function BuildSettingsCard() As Panel
-        Dim card As New BufferedPanel With {.Height = 150, .BackColor = CardBg}
+        Dim card As New BufferedPanel With {.Height = 166, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
         Dim lblSection As New Label With {
-        .Text = "Order Details", .Font = New Font("Segoe UI", 15, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
-    }
-        card.Controls.Add(lblSection)
-
-        Dim labY As Integer = 56
-        Dim fldY As Integer = 80
+            .Text = "Order Details", .Font = New Font("Segoe UI", 15, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(22, 16),
+            .BackColor = Color.Transparent
+        }
+        Dim lblHint As New Label With {
+            .Text = "Who you're ordering from, and when.",
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(22, 42), .BackColor = Color.Transparent
+        }
 
         Dim lblSup As Label = MakeFieldLabel("Supplier")
-        lblSup.Location = New Point(20, labY)
+        Dim lblOrder As Label = MakeFieldLabel("Order Date")
+        Dim lblExp As Label = MakeFieldLabel("Expected Date")
+
+        ' --- Supplier ---
         cmbSupplierRef = New ComboBox With {
-        .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
-        .Font = New Font("Segoe UI", 11), .BackColor = CardBg
-    }
+            .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 11), .BackColor = CardBg
+        }
         For Each s In LoadSuppliers() : cmbSupplierRef.Items.Add(s) : Next
         If cmbSupplierRef.Items.Count > 0 Then cmbSupplierRef.SelectedIndex = 0
-        Dim supField As Panel = MakeField(cmbSupplierRef, 320)
-        supField.Location = New Point(20, fldY)
+        Dim supField As Panel = MakeField(cmbSupplierRef, 320, 48)
 
-        Dim lblOrder As Label = MakeFieldLabel("Order Date")
-        lblOrder.Location = New Point(360, labY)
+        ' --- Order Date ---
         dtOrderRef = New DateTimePicker With {
-        .Format = DateTimePickerFormat.Custom, .CustomFormat = "MMM d, yyyy",
-        .Font = New Font("Segoe UI", 11), .Value = DateTime.Today
-    }
+            .Format = DateTimePickerFormat.Custom, .CustomFormat = "MMM d, yyyy",
+            .Font = New Font("Segoe UI", 11), .Value = DateTime.Today
+        }
         ThemeCalendar(dtOrderRef)
-        Dim orderField As Panel = MakeField(dtOrderRef, 180)
-        orderField.Location = New Point(360, fldY)
+        Dim orderField As Panel = MakeField(dtOrderRef, 170, 48)
 
-        Dim lblExp As Label = MakeFieldLabel("Expected Date")
-        lblExp.Location = New Point(560, labY)
+        ' --- Expected Date ---
         dtExpectedRef = New DateTimePicker With {
-        .Format = DateTimePickerFormat.Custom, .CustomFormat = "MMM d, yyyy",
-        .Font = New Font("Segoe UI", 11), .ShowCheckBox = True, .Checked = True,
-        .Value = DateTime.Today.AddDays(7)
-    }
+            .Format = DateTimePickerFormat.Custom, .CustomFormat = "MMM d, yyyy",
+            .Font = New Font("Segoe UI", 11), .ShowCheckBox = True, .Checked = True,
+            .Value = DateTime.Today.AddDays(7)
+        }
         ThemeCalendar(dtExpectedRef)
-        Dim expField As Panel = MakeField(dtExpectedRef, 200)
-        expField.Location = New Point(560, fldY)
+        Dim expField As Panel = MakeField(dtExpectedRef, 210, 48)
 
-        card.Controls.AddRange({lblSection, lblSup, supField, lblOrder, orderField, lblExp, expField})
+        card.Controls.AddRange({lblSection, lblHint, lblSup, supField, lblOrder, orderField, lblExp, expField})
+
+        ' force native controls to repaint at their final width (kills the ghost arrow)
+        Dim repaintFields As Action =
+            Sub()
+                For Each fld As Control In New Control() {supField, orderField, expField}
+                    fld.Invalidate()
+                    If fld.Controls.Count > 0 Then fld.Controls(0).Refresh()
+                Next
+            End Sub
+
+        Dim doLayout As Action =
+            Sub()
+                If card.Width < 120 Then Return
+                Const padL As Integer = 22
+                Const padR As Integer = 22
+                Const gap As Integer = 16
+                Const labY As Integer = 74
+                Const fldY As Integer = 98
+                Const fldH As Integer = 48
+
+                Dim avail As Integer = card.Width - padL - padR - gap * 2
+                Dim supW As Integer = CInt(avail * 0.4)
+                Dim orderW As Integer = CInt(avail * 0.28)
+                Dim expW As Integer = avail - supW - orderW
+
+                If orderW < 150 Then orderW = 150
+                If expW < 190 Then expW = 190
+                supW = avail - orderW - expW
+                If supW < 170 Then supW = 170
+
+                Dim x As Integer = padL
+                lblSup.Location = New Point(x, labY)
+                supField.SetBounds(x, fldY, supW, fldH)
+
+                x = supField.Right + gap
+                lblOrder.Location = New Point(x, labY)
+                orderField.SetBounds(x, fldY, orderW, fldH)
+
+                x = orderField.Right + gap
+                lblExp.Location = New Point(x, labY)
+                expField.SetBounds(x, fldY, expW, fldH)
+
+                repaintFields()
+            End Sub
+
+        AddHandler card.Resize, Sub() doLayout()
+        AddHandler card.HandleCreated,
+            Sub()
+                ' run after the message pump settles, then once more, repainting each time
+                card.BeginInvoke(Sub()
+                                     doLayout()
+                                     card.BeginInvoke(Sub()
+                                                          doLayout()
+                                                          repaintFields()
+                                                      End Sub)
+                                 End Sub)
+            End Sub
+        doLayout()
         Return card
     End Function
+
+    ' Rounded, bordered field wrapper. Inner control is resized to fill the
+    ' wrapper AND invalidated on every resize so its dropdown button never ghosts.
+    Private Shared Function MakeField(inner As Control, w As Integer, Optional h As Integer = 46) As BufferedPanel
+        Dim host As New BufferedPanel With {.Size = New Size(w, h), .BackColor = CardBg}
+        Dim isFocused As Boolean = False
+
+        AddHandler host.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                Dim rect As New Rectangle(0, 0, host.Width - 1, host.Height - 1)
+                Using path As Drawing2D.GraphicsPath = RoundRect(rect, 10)
+                    Using b As New SolidBrush(CardBg)
+                        e.Graphics.FillPath(b, path)
+                    End Using
+                    Using pen As New Pen(If(isFocused, InputFocus, InputBorder), If(isFocused, 1.6F, 1.0F))
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+            End Sub
+
+        inner.BackColor = CardBg
+        inner.Width = w - 22
+        inner.Location = New Point(11, (h - inner.Height) \ 2)
+        host.Controls.Add(inner)
+
+        ' Resize the inner control explicitly, then repaint it (no ghost arrow).
+        AddHandler host.Resize,
+            Sub()
+                inner.Left = 11
+                inner.Top = (host.Height - inner.Height) \ 2
+                inner.Width = Math.Max(20, host.Width - 22)
+                inner.Refresh()      ' synchronous repaint clears the stale dropdown button
+                host.Invalidate()
+            End Sub
+
+        AddHandler inner.Enter, Sub()
+                                    isFocused = True
+                                    host.Invalidate()
+                                End Sub
+        AddHandler inner.Leave, Sub()
+                                    isFocused = False
+                                    host.Invalidate()
+                                End Sub
+        Return host
+    End Function
+
+
+    ' Wrapper now keeps the inner control sized to the wrapper on every resize,
+    ' so fields built with MakeField can flex when their bounds change.
 
     Private Shared Function BuildAddBar() As Panel
         Dim bar As New Panel With {.Height = 80, .BackColor = Color.Transparent}
@@ -840,92 +1068,158 @@ Public Class ProcurementPOPanelBuilder
 
 
     Private Shared Function BuildLineRow(ln As POLine, height As Integer) As Panel
-        Dim row As New Panel With {.Height = height, .BackColor = TileBg}
-        AddHandler row.Paint, Sub(s, e) RoundFill(CType(s, Panel), e, TileBg, 10)
-
-        Dim lblName As New Label With {
-            .Text = ln.ProductName, .Font = New Font("Segoe UI", 11.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(16, 11), .BackColor = Color.Transparent
-        }
-        Dim lblSku As New Label With {
-            .Text = ln.Sku & If(ln.RequestId > 0, "   " & ChrW(8226) & " from request", ""),
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(16, 37), .BackColor = Color.Transparent
-        }
-        row.Controls.AddRange({lblName, lblSku})
-
-        ' Qty editor
-        Dim lblQtyCap As New Label With {
-            .Text = "Qty", .Font = New Font("Segoe UI", 9, FontStyle.Bold), .ForeColor = FaintText,
-            .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        Dim txtQty As New TextBox With {
-            .Text = ln.Qty.ToString(), .Font = New Font("Segoe UI", 11), .Width = 58,
-            .TextAlign = HorizontalAlignment.Center, .BorderStyle = BorderStyle.FixedSingle,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        ' Unit cost editor
-        Dim lblCostCap As New Label With {
-            .Text = "Unit " & Peso, .Font = New Font("Segoe UI", 9, FontStyle.Bold), .ForeColor = FaintText,
-            .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        Dim txtCost As New TextBox With {
-            .Text = ln.UnitCost.ToString("0.00"), .Font = New Font("Segoe UI", 11), .Width = 86,
-            .TextAlign = HorizontalAlignment.Right, .BorderStyle = BorderStyle.FixedSingle,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        ' Line total
-        Dim lblLineTotal As New Label With {
-            .Text = Peso & ln.LineTotal.ToString("N2"), .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDeep, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        ' Remove
-        Dim lblRemove As New Label With {
-            .Text = ChrW(10005), .Font = New Font("Segoe UI", 12, FontStyle.Bold), .ForeColor = NegativeClr,
-            .AutoSize = True, .Cursor = Cursors.Hand, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        row.Controls.AddRange({lblQtyCap, txtQty, lblCostCap, txtCost, lblLineTotal, lblRemove})
+        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+        AddHandler row.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As New Rectangle(0, 0, row.Width - 1, row.Height - 1)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using b As New SolidBrush(TileBg)
+                        e.Graphics.FillPath(b, path)
+                    End Using
+                    Using pen As New Pen(Color.FromArgb(159, 225, 203), 1.2F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+            End Sub
 
         Dim capLine As POLine = ln
+
+        ' --- left: name + locked "unit x qty = total" calc line ---
+        Dim lblName As New Label With {
+            .Text = ln.ProductName, .Font = New Font("Segoe UI", 11.5F, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = False, .BackColor = Color.Transparent,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .Location = New Point(16, 11), .Size = New Size(240, 22)
+        }
+        Dim lblCalc As New Label With {
+            .Text = "", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = False, .BackColor = Color.Transparent,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .Location = New Point(16, 37), .Size = New Size(260, 18)
+        }
+        row.Controls.AddRange({lblName, lblCalc})
+
+        Dim refreshCalc As Action =
+            Sub()
+                Dim src As String = If(capLine.RequestId > 0, "    " & ChrW(8226) & " from request", "")
+                lblCalc.Text = Peso & capLine.UnitCost.ToString("N2") & "   " & ChrW(215) & "   " &
+                               capLine.Qty & "   =   " & Peso & capLine.LineTotal.ToString("N2") & src
+            End Sub
+
+        ' --- qty stepper (editable: - value + , or type in the middle) ---
+        Dim stepPanel As New BufferedPanel With {.Size = New Size(108, 32), .BackColor = CardBg}
+        AddHandler stepPanel.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, stepPanel.Width - 1, stepPanel.Height - 1)
+                Using path As GraphicsPath = RoundRect(r, 8)
+                    Using b As New SolidBrush(CardBg) : e.Graphics.FillPath(b, path) : End Using
+                    Using pen As New Pen(InputBorder, 1.2F) : e.Graphics.DrawPath(pen, path) : End Using
+                End Using
+            End Sub
+
+        Dim btnMinus As New Button With {
+            .Text = ChrW(8722), .Size = New Size(30, 30), .Location = New Point(1, 1),
+            .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 13),
+            .ForeColor = SubText, .BackColor = Color.Transparent, .Cursor = Cursors.Hand, .TabStop = False
+        }
+        btnMinus.FlatAppearance.BorderSize = 0
+
+        Dim txtQty As New TextBox With {
+            .Text = ln.Qty.ToString(), .Width = 44, .Location = New Point(32, 5),
+            .TextAlign = HorizontalAlignment.Center, .BorderStyle = BorderStyle.None,
+            .Font = New Font("Segoe UI Semibold", 11), .ForeColor = MintDark, .BackColor = CardBg
+        }
+
+        Dim btnPlus As New Button With {
+            .Text = "+", .Size = New Size(30, 30), .Location = New Point(77, 1),
+            .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 13),
+            .ForeColor = MintPrimary, .BackColor = Color.Transparent, .Cursor = Cursors.Hand, .TabStop = False
+        }
+        btnPlus.FlatAppearance.BorderSize = 0
+        stepPanel.Controls.AddRange({btnMinus, txtQty, btnPlus})
+
+        ' guard prevents the programmatic SetText from re-firing TextChanged work
+        Dim guard As Boolean = False
+        Dim commitQty As Action(Of Integer) =
+            Sub(q As Integer)
+                If q < 1 Then q = 1
+                capLine.Qty = q
+                guard = True
+                txtQty.Text = q.ToString()
+                guard = False
+                refreshCalc()
+                RecomputeGrand()
+            End Sub
+
+        AddHandler btnMinus.Click, Sub() commitQty(capLine.Qty - 1)
+        AddHandler btnPlus.Click, Sub() commitQty(capLine.Qty + 1)
+        AddHandler txtQty.KeyPress,
+            Sub(s, e)
+                If Not Char.IsControl(e.KeyChar) AndAlso Not Char.IsDigit(e.KeyChar) Then e.Handled = True
+            End Sub
+        AddHandler txtQty.Enter, Sub() txtQty.SelectAll()
         AddHandler txtQty.TextChanged,
             Sub()
-                capLine.Qty = SafeIntStr(txtQty.Text)
-                lblLineTotal.Text = Peso & capLine.LineTotal.ToString("N2")
+                If guard Then Return
+                capLine.Qty = SafeIntStr(txtQty.Text)   ' may be 0 mid-typing; normalised on Leave
+                refreshCalc()
                 RecomputeGrand()
             End Sub
-        AddHandler txtCost.TextChanged,
-            Sub()
-                capLine.UnitCost = SafeDecStr(txtCost.Text)
-                lblLineTotal.Text = Peso & capLine.LineTotal.ToString("N2")
-                RecomputeGrand()
+        AddHandler txtQty.Leave, Sub() commitQty(SafeIntStr(txtQty.Text))
+
+        ' --- remove (circular x) ---
+        Dim btnRemove As New Button With {
+            .Text = ChrW(10005), .Size = New Size(28, 28),
+            .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+            .ForeColor = NegativeClr, .BackColor = Color.FromArgb(252, 235, 235),
+            .Cursor = Cursors.Hand, .TabStop = False
+        }
+        btnRemove.FlatAppearance.BorderSize = 0
+        AddHandler btnRemove.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillEllipse(br, 0, 0, bb.Width - 1, bb.Height - 1)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
-        AddHandler lblRemove.Click,
+        AddHandler btnRemove.MouseEnter, Sub()
+                                             btnRemove.BackColor = NegativeClr
+                                             btnRemove.ForeColor = Color.White
+                                             btnRemove.Invalidate()
+                                         End Sub
+        AddHandler btnRemove.MouseLeave, Sub()
+                                             btnRemove.BackColor = Color.FromArgb(252, 235, 235)
+                                             btnRemove.ForeColor = NegativeClr
+                                             btnRemove.Invalidate()
+                                         End Sub
+        AddHandler btnRemove.Click,
             Sub()
                 newLines.Remove(capLine)
                 RebuildLines()
                 RecomputeGrand()
             End Sub
 
+        row.Controls.AddRange({stepPanel, btnRemove})
+
+        ' --- layout (right-aligned stepper + delete; text fills the rest) ---
         Dim layoutRow As Action =
             Sub()
-                If row.Width < 50 Then Return
-                lblRemove.Left = row.Width - lblRemove.Width - 22
-                lblRemove.Top = (height - lblRemove.Height) \ 2
+                If row.Width < 60 Then Return
+                Dim rightPad As Integer = 16
+                btnRemove.Left = row.Width - rightPad - btnRemove.Width
+                btnRemove.Top = (height - btnRemove.Height) \ 2
 
-                lblLineTotal.Left = lblRemove.Left - lblLineTotal.Width - 18
-                lblLineTotal.Top = (height - lblLineTotal.Height) \ 2
+                stepPanel.Left = btnRemove.Left - 14 - stepPanel.Width
+                stepPanel.Top = (height - stepPanel.Height) \ 2
 
-                txtCost.Left = lblLineTotal.Left - txtCost.Width - 18
-                txtCost.Top = (height - txtCost.Height) \ 2 + 5
-                lblCostCap.Left = txtCost.Left
-                lblCostCap.Top = txtCost.Top - 15
-
-                txtQty.Left = txtCost.Left - txtQty.Width - 18
-                txtQty.Top = (height - txtQty.Height) \ 2 + 5
-                lblQtyCap.Left = txtQty.Left
-                lblQtyCap.Top = txtQty.Top - 15
+                Dim textRight As Integer = stepPanel.Left - 12
+                lblName.Width = Math.Max(60, textRight - lblName.Left)
+                lblCalc.Width = Math.Max(60, textRight - lblCalc.Left)
             End Sub
         AddHandler row.Resize, Sub() layoutRow()
         AddHandler row.SizeChanged, Sub() layoutRow()
@@ -938,6 +1232,7 @@ Public Class ProcurementPOPanelBuilder
                                 End Sub)
             End Sub
 
+        refreshCalc()
         Return row
     End Function
 
@@ -1008,8 +1303,8 @@ Public Class ProcurementPOPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "pr.qty_requested, u.full_name AS reqby " &
+                                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.image_path, pr.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
@@ -1024,15 +1319,16 @@ Public Class ProcurementPOPanelBuilder
                                 .Sku = rdr("sku").ToString(),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .QtyRequested = SafeInt(rdr("qty_requested")),
-                                .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString())
+                               .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
+                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString())
                             })
                         End If
                     End Using
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not pre-load the request:" & Environment.NewLine & ex.Message,
-                          "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            AppModal.Show("Could not reach the database:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
@@ -1320,15 +1616,25 @@ Public Class ProcurementPOPanelBuilder
         body.Controls.Add(headCard)
 
         ' Header bar (title + back + action)
-        Dim header As New Panel With {.Height = 90, .BackColor = MintBg, .Padding = New Padding(24, 18, 24, 0), .Dock = DockStyle.Top}
+        Dim header As New Panel With {.Height = 80, .BackColor = MintBg, .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top}
+        Dim btnBackD As New Button With {
+            .Text = ChrW(8592), .Size = New Size(44, 44),
+            .FlatStyle = FlatStyle.Flat, .BackColor = Color.Transparent, .ForeColor = MintDeep,
+            .Font = New Font("Segoe UI", 16), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter, .TabStop = False,
+            .Location = New Point(16, 18)
+        }
+        btnBackD.FlatAppearance.BorderSize = 0
+        btnBackD.FlatAppearance.MouseOverBackColor = Color.Transparent
+        btnBackD.FlatAppearance.MouseDownBackColor = Color.Transparent
+        AddHandler btnBackD.Click, Sub() RenderList()
         Dim lblTitle As New Label With {
             .Text = "Purchase Order", .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 14)
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(btnBackD.Right + 6, 24),
+            .BackColor = Color.Transparent
         }
-        Dim backPill As Label = MakeBackPill()
-        backPill.Location = New Point(26, 56)
-        AddHandler backPill.Click, Sub() RenderList()
-        header.Controls.AddRange({lblTitle, backPill})
+        header.Controls.AddRange({btnBackD, lblTitle})
 
         ' Action button: Mark as Ordered (Draft) or Receive Goods (Ordered)
         If po.Status = "Draft" Then
@@ -1563,8 +1869,8 @@ Public Class ProcurementPOPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "pr.qty_requested, u.full_name AS reqby " &
+                             "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.image_path, pr.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
@@ -1579,7 +1885,8 @@ Public Class ProcurementPOPanelBuilder
                                 .Sku = rdr("sku").ToString(),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .QtyRequested = SafeInt(rdr("qty_requested")),
-                                .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString())
+                                .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
+                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString())
                             })
                         End While
                     End Using
@@ -1743,39 +2050,7 @@ Public Class ProcurementPOPanelBuilder
             End Sub
     End Sub
 
-    Private Shared Function MakeField(inner As Control, w As Integer, Optional h As Integer = 46) As BufferedPanel
-        Dim host As New BufferedPanel With {.Size = New Size(w, h), .BackColor = CardBg}
-        Dim isFocused As Boolean = False
 
-        AddHandler host.Paint,
-            Sub(s, e)
-                e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
-                Dim rect As New Rectangle(0, 0, host.Width - 1, host.Height - 1)
-                Using path As Drawing2D.GraphicsPath = RoundRect(rect, 10)
-                    Using b As New SolidBrush(CardBg)
-                        e.Graphics.FillPath(b, path)
-                    End Using
-                    Using pen As New Pen(If(isFocused, InputFocus, InputBorder), If(isFocused, 1.6F, 1.0F))
-                        e.Graphics.DrawPath(pen, path)
-                    End Using
-                End Using
-            End Sub
-
-        inner.Width = w - 22
-        inner.BackColor = CardBg
-        inner.Location = New Point(11, (h - inner.Height) \ 2)
-        host.Controls.Add(inner)
-
-        AddHandler inner.Enter, Sub()
-                                    isFocused = True
-                                    host.Invalidate()
-                                End Sub
-        AddHandler inner.Leave, Sub()
-                                    isFocused = False
-                                    host.Invalidate()
-                                End Sub
-        Return host
-    End Function
 
     ' Small uppercase field caption.
     Private Shared Function MakeFieldLabel(text As String) As Label

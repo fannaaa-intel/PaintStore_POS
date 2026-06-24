@@ -247,27 +247,45 @@ Public Class ProcurementSuppliersPanelBuilder
 
         ' ── Header ────────────────────────────────────────────────────────────
         Dim header As New Panel With {
-        .Height = 88, .BackColor = MintBg,
-        .Padding = New Padding(24, 18, 24, 0), .Dock = DockStyle.Top
+        .Height = 80, .BackColor = MintBg,
+        .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
     }
+        Dim iconPathF As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        Dim picBackF As New PictureBox With {
+            .Size = New Size(22, 22), .Location = New Point(24, 36),
+            .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
+        }
+        If IO.File.Exists(iconPathF) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPathF)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height), 0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                picBackF.Image = bmp
+                raw.Dispose()
+            Catch
+            End Try
+        End If
+        AddHandler picBackF.Click, Sub() If editingId > 0 Then LoadDetail(editingId) Else RenderList()
+        AddHandler picBackF.MouseEnter, Sub() picBackF.BackColor = Color.FromArgb(30, 0, 130, 109)
+        AddHandler picBackF.MouseLeave, Sub() picBackF.BackColor = Color.Transparent
         Dim lblTitle As New Label With {
-        .Text = If(supplierId > 0, "Edit Supplier", "Add Supplier"),
-        .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 12)
-    }
-        Dim backPill As New Label With {
-        .Text = ChrW(8592) & "   Back to list",
-        .Font = New Font("Segoe UI Semibold", 10),
-        .ForeColor = MintDeep, .BackColor = TileBg,
-        .AutoSize = False, .Size = New Size(148, 32),
-        .TextAlign = ContentAlignment.MiddleCenter,
-        .Cursor = Cursors.Hand, .Location = New Point(26, 52)
-    }
-        RoundLabel(backPill, 8)
-        AddHandler backPill.MouseEnter, Sub() backPill.BackColor = Color.FromArgb(210, 240, 235)
-        AddHandler backPill.MouseLeave, Sub() backPill.BackColor = TileBg
-        AddHandler backPill.Click, Sub() If editingId > 0 Then LoadDetail(editingId) Else RenderList()
-        header.Controls.AddRange({lblTitle, backPill})
+            .Text = If(supplierId > 0, "Edit Supplier", "Add Supplier"),
+            .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(picBackF.Right + 10, 24), .BackColor = Color.Transparent
+        }
+        header.Controls.AddRange({picBackF, lblTitle})
 
         ' ── Body fills remaining space ─────────────────────────────────────
         Dim body As New Panel With {
@@ -754,45 +772,156 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         AddHandler infoCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
         ' Supplier name + active PO pill (same row)
+        Dim initial As String = If(String.IsNullOrWhiteSpace(sup.Name), "?",
+                                   sup.Name.Trim().Substring(0, 1).ToUpperInvariant())
+        Dim avatarSize As Integer = 56
+        Dim avatar As New BufferedPanel With {
+            .Size = New Size(avatarSize, avatarSize),
+            .Location = New Point(22, 20),
+            .BackColor = Color.Transparent
+        }
+        AddHandler avatar.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim av As New Rectangle(0, 0, avatarSize - 1, avatarSize - 1)
+                Using path As GraphicsPath = RoundRect(av, 16)
+                    Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 90.0F)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                Using f As New Font("Segoe UI", 22, FontStyle.Bold),
+                      br As New SolidBrush(Color.White)
+                    Dim sz = e.Graphics.MeasureString(initial, f)
+                    e.Graphics.DrawString(initial, f, br,
+                        (avatarSize - sz.Width) / 2.0F,
+                        (avatarSize - sz.Height) / 2.0F)
+                End Using
+            End Sub
+        infoCard.Controls.Add(avatar)
+
+        ' ── Name + pill ───────────────────────────────────────────────────────
         Dim lblSupName As New Label With {
-        .Text = sup.Name,
-      .Font = New Font("Segoe UI", 20, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True,
-        .Location = New Point(22, 18), .BackColor = Color.Transparent
-    }
+            .Text = sup.Name,
+            .Font = New Font("Segoe UI", 18, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(avatarSize + 34, 22), .BackColor = Color.Transparent
+        }
         infoCard.Controls.Add(lblSupName)
 
         Dim pill As New Label With {
-        .Text = sup.ActivePoCount & If(sup.ActivePoCount = 1, " active PO", " active POs"),
-        .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-        .ForeColor = If(sup.ActivePoCount > 0, MintDeep, FaintText),
-        .BackColor = If(sup.ActivePoCount > 0, TileBg, Color.FromArgb(238, 240, 239)),
-        .AutoSize = True, .Padding = New Padding(10, 4, 10, 4),
-        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-    }
+            .Text = sup.ActivePoCount & If(sup.ActivePoCount = 1, " active PO", " active POs"),
+            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+            .ForeColor = If(sup.ActivePoCount > 0, MintDeep, FaintText),
+            .BackColor = If(sup.ActivePoCount > 0, TileBg, Color.FromArgb(238, 240, 239)),
+            .AutoSize = True, .Padding = New Padding(10, 4, 10, 4),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
         RoundLabel(pill, 11)
         infoCard.Controls.Add(pill)
         AddHandler infoCard.Resize,
-        Sub()
-            pill.Left = infoCard.Width - pill.Width - 22
-            pill.Top = 22
-        End Sub
+            Sub()
+                pill.Left = infoCard.Width - pill.Width - 22
+                pill.Top = 26
+            End Sub
 
-        ' Detail rows
-        Dim detailRowY As Integer = 56
-        Dim detailRows As New List(Of (lbl As String, val As String)) From {
-        ("Contact Person", If(String.IsNullOrWhiteSpace(sup.Contact), ChrW(8212), sup.Contact)),
-        ("Phone", If(String.IsNullOrWhiteSpace(sup.Phone), ChrW(8212), sup.Phone)),
-        ("Email", If(String.IsNullOrWhiteSpace(sup.Email), ChrW(8212), sup.Email)),
-        ("Address", If(String.IsNullOrWhiteSpace(sup.Address), ChrW(8212), sup.Address))
-    }
-        For Each dr In detailRows
-            AddDetailRow(infoCard, dr.lbl, dr.val, detailRowY)
-            detailRowY += 34
+        ' ── Divider under name row ────────────────────────────────────────────
+        Dim nameDivider As New Panel With {
+            .Height = 1, .BackColor = RowDivider,
+            .Location = New Point(22, avatarSize + 32),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        infoCard.Controls.Add(nameDivider)
+        AddHandler infoCard.Resize, Sub() nameDivider.Width = infoCard.Width - 44
+
+        ' ── Icon + field rows ─────────────────────────────────────────────────
+        Dim fieldStartY As Integer = avatarSize + 46
+        Dim fieldGap As Integer = 44
+
+        ' ── Tint helper: load PNG and recolour to MintPrimary ─────────────────
+        Dim TintIcon As Func(Of String, Image) =
+            Function(filename As String) As Image
+                Dim p As String = IO.Path.Combine(Application.StartupPath, filename)
+                If Not IO.File.Exists(p) Then Return Nothing
+                Try
+                    Dim raw As Image = Image.FromFile(p)
+                    Dim bmp As New Bitmap(raw.Width, raw.Height)
+                    Using g As Graphics = Graphics.FromImage(bmp)
+                        Dim cm As New Imaging.ColorMatrix(New Single()() {
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 1, 0},
+                            New Single() {CSng(0 / 255.0F), CSng(168 / 255.0F), CSng(142 / 255.0F), 0, 1}
+                        })
+                        Dim ia As New Imaging.ImageAttributes()
+                        ia.SetColorMatrix(cm)
+                        g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                                    0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                    End Using
+                    raw.Dispose()
+                    Return bmp
+                Catch
+                    Return Nothing
+                End Try
+            End Function
+
+        Dim fieldDefs As New List(Of (img As Image, lbl As String, val As String)) From {
+            (TintIcon("user.png"), "Contact Person", If(String.IsNullOrWhiteSpace(sup.Contact), ChrW(8212), sup.Contact)),
+            (TintIcon("phone.png"), "Phone", If(String.IsNullOrWhiteSpace(sup.Phone), ChrW(8212), sup.Phone)),
+            (TintIcon("mail.png"), "Email", If(String.IsNullOrWhiteSpace(sup.Email), ChrW(8212), sup.Email)),
+            (TintIcon("location.png"), "Address", If(String.IsNullOrWhiteSpace(sup.Address), ChrW(8212), sup.Address))
+        }
+
+        Dim yf As Integer = fieldStartY
+        For Each fd In fieldDefs
+            ' Icon bubble — PictureBox inside a rounded mint tile
+            Dim iconTile As New BufferedPanel With {
+                .Size = New Size(34, 34),
+                .Location = New Point(22, yf),
+                .BackColor = TileBg
+            }
+            AddHandler iconTile.Paint,
+                Sub(s, e)
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                    Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, 33, 33), 10)
+                        Using br As New SolidBrush(TileBg)
+                            e.Graphics.FillPath(br, path)
+                        End Using
+                    End Using
+                End Sub
+            Dim iconPic As New PictureBox With {
+                .Size = New Size(18, 18),
+                .Location = New Point(8, 8),
+                .BackColor = Color.Transparent,
+                .SizeMode = PictureBoxSizeMode.Zoom
+            }
+            If fd.img IsNot Nothing Then iconPic.Image = fd.img
+            iconTile.Controls.Add(iconPic)
+            Dim iconPath2 As New GraphicsPath()
+            iconPath2.AddArc(0, 0, 10, 10, 180, 90)
+            iconPath2.AddArc(23, 0, 10, 10, 270, 90)
+            iconPath2.AddArc(23, 23, 10, 10, 0, 90)
+            iconPath2.AddArc(0, 23, 10, 10, 90, 90)
+            iconPath2.CloseFigure()
+            iconTile.Region = New Region(iconPath2)
+
+            Dim lblFieldCap As New Label With {
+                .Text = fd.lbl,
+                .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = FaintText, .AutoSize = True,
+                .Location = New Point(66, yf + 2), .BackColor = Color.Transparent
+            }
+            Dim lblFieldVal As New Label With {
+                .Text = fd.val,
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .ForeColor = MintDark, .AutoSize = True,
+                .Location = New Point(66, yf + 18), .BackColor = Color.Transparent
+            }
+            infoCard.Controls.AddRange({iconTile, lblFieldCap, lblFieldVal})
+            yf += fieldGap
         Next
 
-        ' ── Divider line ──────────────────────────────────────────────────────
-        Dim actionBarY As Integer = detailRowY + 12
+        Dim actionBarY As Integer = yf + 12
         Dim actionBar As New Panel With {
         .BackColor = Color.Transparent,
         .Location = New Point(0, actionBarY),
@@ -823,38 +952,74 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         AddHandler btnEdit.Click, Sub() LoadForm(capId)
 
         ' ── Delete button ─────────────────────────────────────────────────────
+        ' Load delete.png and tint it red
+        Dim deleteIconImg As Image = Nothing
+        Dim deleteIconPath As String = IO.Path.Combine(Application.StartupPath, "delete.png")
+        If IO.File.Exists(deleteIconPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(deleteIconPath)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(210 / 255.0F), CSng(60 / 255.0F), CSng(60 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height), 0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                deleteIconImg = bmp
+                raw.Dispose()
+            Catch
+            End Try
+        End If
+
         Dim btnDelete As New Button With {
-        .Text = "🗑  Delete",
-        .Size = New Size(110, 36),
-        .FlatStyle = FlatStyle.Flat,
-        .BackColor = Color.White,
-        .ForeColor = NegativeClr,
-        .Font = New Font("Segoe UI Semibold", 10),
-        .Cursor = Cursors.Hand
-    }
-        btnDelete.FlatAppearance.BorderSize = 1
-        btnDelete.FlatAppearance.BorderColor = Color.FromArgb(220, 180, 180)
+            .Text = "Delete",
+            .Size = New Size(110, 36),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.White,
+            .ForeColor = NegativeClr,
+            .Font = New Font("Segoe UI Semibold", 10),
+            .Cursor = Cursors.Hand
+        }
+        btnDelete.FlatAppearance.BorderSize = 0
         AddHandler btnDelete.Paint,
-        Sub(s, e)
-            Dim b = CType(s, Button)
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-            Using path As GraphicsPath = RoundRect(New Rectangle(1, 1, b.Width - 2, b.Height - 2), 8)
-                Using fill As New SolidBrush(b.BackColor)
-                    e.Graphics.FillPath(fill, path)
+            Sub(s, e)
+                Dim b = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using path As GraphicsPath = RoundRect(New Rectangle(1, 1, b.Width - 2, b.Height - 2), 8)
+                    Using fill As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(fill, path)
+                    End Using
+                    Using pen As New Pen(Color.FromArgb(220, 180, 180), 1.2F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
                 End Using
-                Using pen As New Pen(Color.FromArgb(220, 180, 180), 1.2F)
-                    e.Graphics.DrawPath(pen, path)
+                ' Draw icon + text centered together
+                Dim iconSize As Integer = 16
+                Dim gap As Integer = 6
+                Dim sf As New StringFormat With {
+                    .Alignment = StringAlignment.Near,
+                    .LineAlignment = StringAlignment.Center
+                }
+                Using brush As New SolidBrush(b.ForeColor)
+                    Dim textSz As SizeF = e.Graphics.MeasureString(b.Text, b.Font)
+                    Dim totalW As Single = If(deleteIconImg IsNot Nothing, iconSize + gap + textSz.Width, textSz.Width)
+                    Dim startX As Single = (b.Width - totalW) / 2.0F
+                    Dim midY As Single = b.Height / 2.0F
+                    If deleteIconImg IsNot Nothing Then
+                        e.Graphics.DrawImage(deleteIconImg,
+                            New RectangleF(startX, midY - iconSize / 2.0F, iconSize, iconSize))
+                        startX += iconSize + gap
+                    End If
+                    e.Graphics.DrawString(b.Text, b.Font, brush,
+                        New RectangleF(startX, 0, textSz.Width + 2, b.Height), sf)
                 End Using
-            End Using
-            Dim sf As New StringFormat With {
-                .Alignment = StringAlignment.Center,
-                .LineAlignment = StringAlignment.Center
-            }
-            Using brush As New SolidBrush(b.ForeColor)
-                e.Graphics.DrawString(b.Text, b.Font, brush,
-                    New RectangleF(0, 0, b.Width, b.Height), sf)
-            End Using
-        End Sub
+            End Sub
         AddHandler btnDelete.MouseEnter,
         Sub()
             btnDelete.BackColor = Color.FromArgb(251, 234, 234)
@@ -908,7 +1073,7 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         AddHandler actionBar.Resize, Sub() PositionActionBtns()
         PositionActionBtns()
 
-        infoCard.Height = actionBarY + actionBar.Height + 24
+        infoCard.Height = actionBarY + actionBar.Height + 28
         infoCard.Controls.Add(actionBar)
 
         body.Controls.Add(histCard)
@@ -919,28 +1084,45 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
 
         ' ── Header: back pill + title (NO Edit Supplier button here) ─────────
         Dim header As New Panel With {
-        .Height = 88, .BackColor = MintBg,
-        .Padding = New Padding(24, 18, 24, 0), .Dock = DockStyle.Top
+        .Height = 80, .BackColor = MintBg,
+        .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
     }
+        Dim iconPathD As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        Dim picBackD As New PictureBox With {
+            .Size = New Size(22, 22), .Location = New Point(24, 36),
+            .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
+        }
+        If IO.File.Exists(iconPathD) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPathD)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height), 0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                picBackD.Image = bmp
+                raw.Dispose()
+            Catch
+            End Try
+        End If
+        AddHandler picBackD.Click, Sub() RenderList()
+        AddHandler picBackD.MouseEnter, Sub() picBackD.BackColor = Color.FromArgb(30, 0, 130, 109)
+        AddHandler picBackD.MouseLeave, Sub() picBackD.BackColor = Color.Transparent
         Dim lblTitle As New Label With {
-        .Text = "Supplier",
-        .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True,
-        .Location = New Point(24, 12)
-    }
-        Dim backPill As New Label With {
-        .Text = ChrW(8592) & "   Back to list",
-        .Font = New Font("Segoe UI Semibold", 10),
-        .ForeColor = MintDeep, .BackColor = TileBg,
-        .AutoSize = False, .Size = New Size(148, 32),
-        .TextAlign = ContentAlignment.MiddleCenter,
-        .Cursor = Cursors.Hand, .Location = New Point(26, 52)
-    }
-        RoundLabel(backPill, 8)
-        AddHandler backPill.MouseEnter, Sub() backPill.BackColor = Color.FromArgb(210, 240, 235)
-        AddHandler backPill.MouseLeave, Sub() backPill.BackColor = TileBg
-        AddHandler backPill.Click, Sub() RenderList()
-        header.Controls.AddRange({lblTitle, backPill})
+            .Text = "Supplier",
+            .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(picBackD.Right + 10, 24), .BackColor = Color.Transparent
+        }
+        header.Controls.AddRange({picBackD, lblTitle})
 
         container.Controls.Add(body)
         container.Controls.Add(header)
