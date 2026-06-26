@@ -10,10 +10,15 @@ Imports MySql.Data.MySqlClient
 '
 '  PURPOSE
 '  -------
-'  The ONE place a human manually changes a product's quantity, and every change
-'  is logged. Mirrors the write pattern POS already uses: a row in
-'  stock_movements (the audit trail) PLUS an UPDATE to products.stock_qty, both
-'  inside a single transaction so they can never drift apart.
+'  The ONE place a human manually reconciles a product's quantity to physical
+'  reality, and every change is logged. Mirrors the write pattern POS already
+'  uses: a row in stock_movements (the audit trail) PLUS an UPDATE to
+'  products.stock_qty, both inside a single transaction so they can never
+'  drift apart.
+'
+'  NOTE: New purchased goods must ONLY enter stock via Procurement → Receive PO.
+'  This screen can never create a 'Purchase' movement — it is for reconciliation
+'  only, not receiving.
 '
 '  This is the destination for the "Adjust" link on the Stock Levels screen: that
 '  link calls INVENTORY_STAFF.OpenStockAdjustmentFor(productId), which loads this
@@ -24,18 +29,18 @@ Imports MySql.Data.MySqlClient
 '     1. Target product card — pre-filled when arriving from Stock Levels
 '        (thumbnail, name, SKU, current qty shown large), or a search box to
 '        find a product when opened fresh from the nav.
-'     2. Adjustment form — reason picker, a quantity input that toggles between
-'        "set new total" and "+/- change", an optional note, and a live
+'     2. Adjustment form — reason picker (Correction or Damage/Loss), a signed
+'        quantity input (+n to add, -n to remove), a required note, and a live
 '        Current -> New preview, then Save / Cancel.
 '     3. Recent history — the last few stock_movements for the product, read-only.
 '
 '  REASON -> MOVEMENT MODEL
 '  ------------------------
-'     Receive    -> movement_type 'Purchase'   , qty must be positive (stock in)
-'     Correction -> movement_type 'Adjustment'  , signed (recount fix, + or -)
-'     Damage     -> movement_type 'Adjustment'  , qty stored negative (loss)
-'  reference_type carries the human reason ("receive" / "correction" / "damage")
-'  so history reads clearly even though several map to the 'Adjustment' enum.
+'     Correction -> movement_type 'Adjustment', signed (recount fix: + or -)
+'     Damage     -> movement_type 'Adjustment', qty stored negative (loss)
+'  reference_type carries the human reason ("correction" / "damage")
+'  so history reads clearly.  Historical "receive" rows written by Procurement
+'  are still displayed correctly in Recent Movements.
 '
 '  Honors is_active = 1 so archived products never appear.
 ' =============================================================================
@@ -62,8 +67,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
     Private Const ReasonCorrection As String = "correction"
     Private Const ReasonDamage As String = "damage"
 
-    ' Quantity entry mode.
-    Private Const ModeSetTotal As String = "settotal"
+    ' Quantity entry mode (only Change remains; Set Total was removed — stock can only
+    ' be reconciled to physical counts, never set to an arbitrary number).
     Private Const ModeChange As String = "change"
 
     ' ── PRODUCT MODEL ─────────────────────────────────────────────────────────────
@@ -97,7 +102,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
     ' ── STATE ─────────────────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
     Private Shared selected As AdjItem
-    Private Shared activeReason As String = ReasonReceive
+    Private Shared activeReason As String = ReasonCorrection
     Private Shared entryMode As String = ModeChange
 
     ' ── CONTROL REFERENCES ──────────────────────────────────────────────────────────
@@ -110,6 +115,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
     Private Shared lblPreview As Label
     Private Shared lblPreviewSub As Label
     Private Shared lblModeHint As Label
+    Private Shared lblReasonInfo As Label    ' contextual sentence below the reason picker
     Private Shared btnSave As Panel
     Private Shared reasonCards As New List(Of (panel As Panel, reason As String))
     Private Shared modeTabs As New List(Of (panel As Panel, mode As String))
@@ -121,7 +127,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
     ' =========================================================================
     Public Shared Sub LoadStockAdjustment(container As Panel, Optional productId As Integer = 0)
         containerRef = container
-        activeReason = ReasonReceive
+        activeReason = ReasonCorrection
         entryMode = ModeChange
         reasonCards.Clear()
         modeTabs.Clear()
@@ -199,7 +205,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
         Dim lblSub As New Label With {
-            .Text = "Record stock received, corrections, and losses " & ChrW(8226) & " every change is logged",
+            .Text = "Reconcile stock counts and record losses " & ChrW(8226) & " every change is logged",
             .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 62)
         }
         region.Controls.AddRange({lblTitle, lblSub})
@@ -386,6 +392,14 @@ Public Class InventoryStockAdjustmentPanelBuilder
         Dim refType As String = activeReason
         Dim note As String = NoteText()
 
+        ' Notes are required on every adjustment — no silent unexplained stock changes.
+        If String.IsNullOrEmpty(note) Then
+            AppModal.Show("A note is required for every adjustment." & Environment.NewLine &
+                          "Please describe the reason (e.g. recount correction, broken in transit, expired stock…).",
+                          "Note Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
         Dim newQty As Integer = selected.StockQty + delta
         Dim confirmText As String =
             "Apply this adjustment to """ & selected.Name & """?" & Environment.NewLine & Environment.NewLine &
@@ -409,23 +423,18 @@ Public Class InventoryStockAdjustmentPanelBuilder
         End If
     End Sub
 
-    ' Resolve the signed qty_change from the current mode + reason + input.
+    ' Resolve the signed qty_change from the current reason + input.
+    '   Correction: raw value is signed — "+3" adds stock, "-2" removes it.
+    '   Damage/Loss: always negative — removes stock regardless of sign entered.
     Private Shared Function ResolveDelta() As Integer
         If selected Is Nothing Then Return 0
         Dim raw As Integer = ParsedQtyValue()
         If raw = 0 Then Return 0
 
-        Select Case entryMode
-            Case ModeSetTotal
-                ' Input is the new total; delta is the difference from current.
-                Dim target As Integer = Math.Abs(raw)
-                Return target - selected.StockQty
-            Case Else ' ModeChange
-                ' Input is a magnitude; reason decides the direction.
-                Dim mag As Integer = Math.Abs(raw)
-                If activeReason = ReasonDamage Then Return -mag
-                Return mag
-        End Select
+        ' Damage / Loss: always removes stock (force negative magnitude).
+        If activeReason = ReasonDamage Then Return -Math.Abs(raw)
+        ' Correction: accept the signed value as-is so a recount can go up or down.
+        Return raw
     End Function
 
     Private Shared Function ParsedQtyValue() As Integer
@@ -439,13 +448,13 @@ Public Class InventoryStockAdjustmentPanelBuilder
     End Function
 
     Private Shared Function MovementTypeForReason(reason As String) As String
-        If reason = ReasonReceive Then Return "Purchase"
+        ' Inventory adjustments are always Adjustments — new purchased stock enters
+        ' only through the Procurement → Receive PO flow, never from here.
         Return "Adjustment"
     End Function
 
     Private Shared Function ReasonLabel(reason As String) As String
         Select Case reason
-            Case ReasonReceive : Return "Receive stock"
             Case ReasonCorrection : Return "Correction"
             Case ReasonDamage : Return "Damage / Loss"
             Case Else : Return "Adjustment"
@@ -670,30 +679,30 @@ Public Class InventoryStockAdjustmentPanelBuilder
         }
         AddHandler card.Resize, Sub() reasonRow.Width = card.Width - 36
         reasonCards.Clear()
-        reasonRow.Controls.Add(MakeReasonCard("Receive stock", "Stock coming in", ReasonReceive, PositiveClr))
-        reasonRow.Controls.Add(MakeReasonCard("Correction", "Fix a miscount", ReasonCorrection, MintPrimary))
+        reasonRow.Controls.Add(MakeReasonCard("Correction", "Recount: + or −", ReasonCorrection, MintPrimary))
         reasonRow.Controls.Add(MakeReasonCard("Damage / Loss", "Stock written off", ReasonDamage, NegativeClr))
         card.Controls.Add(reasonRow)
 
-        ' ---- Quantity mode toggle ----
+        ' ---- Contextual reason explanation (updates when reason changes) ----
+        lblReasonInfo = New Label With {
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(20, 132), .BackColor = Color.Transparent
+        }
+        card.Controls.Add(lblReasonInfo)
+
+        ' ---- Quantity section ----
         Dim lblQtyCap As New Label With {
             .Text = "QUANTITY", .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True, .Location = New Point(20, 142), .BackColor = Color.Transparent
+            .ForeColor = FaintText, .AutoSize = True, .Location = New Point(20, 162), .BackColor = Color.Transparent
         }
         card.Controls.Add(lblQtyCap)
 
-        Dim modeRow As New Panel With {.Location = New Point(20, 164), .Size = New Size(284, 38), .BackColor = Color.Transparent}
+        ' Mode toggle hidden — only "Change (+/-)" remains, so no toggle is needed.
         modeTabs.Clear()
-        Dim tabChange As Panel = MakeModeTab("Change (+/-)", ModeChange)
-        tabChange.Location = New Point(0, 0)
-        Dim tabTotal As Panel = MakeModeTab("Set total", ModeSetTotal)
-        tabTotal.Location = New Point(138, 0)
-        modeRow.Controls.Add(tabChange)
-        modeRow.Controls.Add(tabTotal)
-        card.Controls.Add(modeRow)
+        entryMode = ModeChange
 
         ' ---- Quantity input ----
-        Dim qtyWrap As New BufferedPanel With {.Location = New Point(20, 212), .Size = New Size(196, 48), .BackColor = CardBg}
+        Dim qtyWrap As New BufferedPanel With {.Location = New Point(20, 184), .Size = New Size(196, 48), .BackColor = CardBg}
         AddHandler qtyWrap.Paint, Sub(s, e) PaintPill(CType(s, Panel), e)
         qtyBox = New TextBox With {
             .BorderStyle = BorderStyle.None, .Font = New Font("Segoe UI", 16, FontStyle.Bold),
@@ -705,20 +714,20 @@ Public Class InventoryStockAdjustmentPanelBuilder
         card.Controls.Add(qtyWrap)
 
         lblModeHint = New Label With {
-            .Text = "", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(228, 228), .BackColor = Color.Transparent
+            .Text = "", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(228, 200), .BackColor = Color.Transparent
         }
         card.Controls.Add(lblModeHint)
 
         ' ---- Note ----
         Dim lblNoteCap As New Label With {
-            .Text = "NOTE (OPTIONAL)", .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True, .Location = New Point(20, 272), .BackColor = Color.Transparent
+            .Text = "NOTE (REQUIRED)", .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+            .ForeColor = FaintText, .AutoSize = True, .Location = New Point(20, 244), .BackColor = Color.Transparent
         }
         card.Controls.Add(lblNoteCap)
 
         Dim noteWrap As New BufferedPanel With {
-            .Location = New Point(20, 294), .Size = New Size(400, 44), .BackColor = CardBg,
+            .Location = New Point(20, 266), .Size = New Size(400, 44), .BackColor = CardBg,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
         AddHandler noteWrap.Paint, Sub(s, e) PaintPill(CType(s, Panel), e)
@@ -727,7 +736,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
             .ForeColor = MintDark, .BackColor = CardBg, .Location = New Point(16, 13), .Width = 368,
             .MaxLength = 150, .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
-        SetCue(noteBox, "e.g. received PO #14, broken in transit…")
+        SetCue(noteBox, "e.g. recount correction, broken in transit, expired stock…")
         noteWrap.Controls.Add(noteBox)
         AddHandler card.Resize,
             Sub()
@@ -738,7 +747,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' ---- Live preview ----
         Dim previewWrap As New BufferedPanel With {
-            .Location = New Point(20, 354), .Size = New Size(400, 62), .BackColor = TileBg,
+            .Location = New Point(20, 326), .Size = New Size(400, 62), .BackColor = TileBg,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
         AddHandler previewWrap.Paint,
@@ -765,13 +774,13 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' ---- Actions ----
         btnSave = MakePrimaryButton("Save Adjustment")
-        btnSave.Location = New Point(20, 434)
+        btnSave.Location = New Point(20, 406)
         btnSave.Anchor = AnchorStyles.Left Or AnchorStyles.Top
         AddHandler btnSave.Click, Sub() OnSaveClicked()
         card.Controls.Add(btnSave)
 
         Dim btnCancel As Panel = MakeSecondaryButton("Clear")
-        btnCancel.Location = New Point(196, 434)
+        btnCancel.Location = New Point(196, 406)
         AddHandler btnCancel.Click,
             Sub()
                 If qtyBox IsNot Nothing Then qtyBox.Text = ""
@@ -883,12 +892,18 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
     Private Shared Sub UpdateModeHint()
         If lblModeHint Is Nothing Then Return
-        If entryMode = ModeSetTotal Then
-            lblModeHint.Text = "Enter the new total on hand"
-        ElseIf activeReason = ReasonDamage Then
+        If activeReason = ReasonDamage Then
             lblModeHint.Text = "Enter how many to remove"
         Else
-            lblModeHint.Text = "Enter how many to add"
+            lblModeHint.Text = "Signed: +3 adds, -2 removes"
+        End If
+
+        If lblReasonInfo IsNot Nothing Then
+            If activeReason = ReasonDamage Then
+                lblReasonInfo.Text = "Always removes stock — enter the quantity to write off."
+            Else
+                lblReasonInfo.Text = "Reconcile to your physical count — positive adds, negative removes."
+            End If
         End If
     End Sub
 

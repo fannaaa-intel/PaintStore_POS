@@ -410,7 +410,7 @@ Public Class InventoryLowStockPanelBuilder
                 Dim hQty As Label = ColCap("QTY / REORDER")
                 Dim hStatus As Label = ColCap("STATUS")
                 Dim hValue As Label = ColCap("LINE VALUE")
-                Dim hAction As Label = ColCap("ACTION")
+                Dim hAction As Label = ColCap("REQUEST")
 
                 hCat.Location = New Point(c.cat, 10)
                 hQty.Location = New Point(c.qty, 10)
@@ -579,25 +579,42 @@ Public Class InventoryLowStockPanelBuilder
         row.Controls.AddRange({lblVal, lblOrder})
 
         ' ACTION (stacked)
-        Dim btnReceive As Label = MakeLink("Receive", MintPrimary)
-        row.Controls.Add(btnReceive)
-        Dim capId As Integer = it.Id
-        AddHandler btnReceive.Click, Sub() OpenReceive(capId)
-
-        Dim btnRequest As Label
+        ' ACTION — single pill button
+        Dim btnRequest As New Label With {
+            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+            .AutoSize = False,
+                  .Size = New Size(80, 26),
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Cursor = Cursors.Hand
+        }
         If HasPendingRequest(it.Id) Then
-            btnRequest = MakeLink("Requested " & ChrW(10003), FaintText)
+            btnRequest.Text = "Requested " & ChrW(10003)
+            btnRequest.ForeColor = FaintText
+            btnRequest.BackColor = Color.FromArgb(238, 240, 239)
             btnRequest.Cursor = Cursors.Default
         Else
-            btnRequest = MakeLink("Request", CriticalClr)
+            btnRequest.Text = "Request"
+            btnRequest.ForeColor = CriticalClr
+            btnRequest.BackColor = Color.FromArgb(252, 235, 235)
             Dim capItem As AlertItem = it
             Dim capBtn As Label = btnRequest
             AddHandler capBtn.Click,
-            Sub()
-                If CStr(If(capBtn.Tag, "")) = "done" Then Return
-                RaiseRequest(capItem, capBtn)
-            End Sub
+                Sub()
+                    If CStr(If(capBtn.Tag, "")) = "done" Then Return
+                    RaiseRequest(capItem, capBtn)
+                End Sub
+            AddHandler capBtn.MouseEnter,
+                Sub()
+                    If CStr(If(capBtn.Tag, "")) = "done" Then Return
+                    capBtn.BackColor = Color.FromArgb(245, 210, 210)
+                End Sub
+            AddHandler capBtn.MouseLeave,
+                Sub()
+                    If CStr(If(capBtn.Tag, "")) = "done" Then Return
+                    capBtn.BackColor = Color.FromArgb(252, 235, 235)
+                End Sub
         End If
+        RoundLabel(btnRequest, 10)
         row.Controls.Add(btnRequest)
 
         ' Initial placement
@@ -621,10 +638,8 @@ Public Class InventoryLowStockPanelBuilder
                 lblOrder.Location = New Point(c.value, valTop + lblVal.Height + 2)
 
                 ' Center the two action links as a unit
-                Dim actBlockH As Integer = btnRequest.Height + 4 + btnReceive.Height
-                Dim actTop As Integer = (row.Height - actBlockH) \ 2
-                btnRequest.Location = New Point(c.action, actTop)
-                btnReceive.Location = New Point(c.action, actTop + btnRequest.Height + 4)
+                ' Single pill — vertically centered
+                btnRequest.Location = New Point(c.action, (row.Height - btnRequest.Height) \ 2)
             End Sub
 
         SnapCols()
@@ -707,6 +722,7 @@ Public Class InventoryLowStockPanelBuilder
             ' Update the button in place — disable it so it can't be clicked again
             btnRequest.Text = "Requested " & ChrW(10003)
             btnRequest.ForeColor = FaintText
+            btnRequest.BackColor = Color.FromArgb(238, 240, 239)
             btnRequest.Cursor = Cursors.Default
             btnRequest.Tag = "done"
 

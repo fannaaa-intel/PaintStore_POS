@@ -31,7 +31,7 @@ Public Class InventoryHomePanelBuilder
 
     ' ── ICONS ──────────────────────────────────────────────────────────────────
     Private Shared ReadOnly IconInventory As String = "inventory.png"
-    Private Shared ReadOnly IconDiagram As String = "diagram.png"
+    Private Shared ReadOnly IconDiagram As String = "bar-chart.png"
     Private Shared ReadOnly IconTransfer As String = "transfer.png"
     Private Shared ReadOnly IconNotif As String = "notification.png"
     Private Shared ReadOnly IconActivity As String = "recent.png"
@@ -593,7 +593,7 @@ Public Class InventoryHomePanelBuilder
         Dim qaTiles() As (title As String, sub1 As String, iconPath As String, fallback As String, iconBg As Color, target As String) = {
     ("Item List", "Browse all products", "inventory.png", "▦", Color.Transparent, "itemList"),
     ("Stock Adjustment", "Adjust quantities", "transfer.png", "⇄", Color.Transparent, "stockAdjustment"),
-    ("Stock Levels", "View stock health", "diagram.png", "▤", Color.Transparent, "stockLevels"),
+    ("Stock Levels", "View stock health", "bar-chart    .png", "▤", Color.Transparent, "stockLevels"),
     ("Low Stock Alerts", "Items to reorder", "notification.png", "!", Color.Transparent, "lowStock")
 }
 
@@ -1128,4 +1128,7 @@ Public Class InventoryHomePanelBuilder
         End Function
     End Class
 
+    Private Sub InventoryHomePanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+    End Sub
 End Class

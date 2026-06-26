@@ -144,6 +144,7 @@ Public Class INVENTORY_STAFF
         itemList.Text = "Item List"
         stockLevels.Text = "Stock Levels"
         stockAdjustment.Text = "Stock Adjustment"
+        putAway.Text = "Incoming Stock"
         lowStock.Text = "Low Stock Alerts"
         logout.Text = "Logout"
 
@@ -156,7 +157,7 @@ Public Class INVENTORY_STAFF
         }
         Nav.Controls.Add(lblMenu)
 
-        Dim navButtons() As Button = {home, itemList, stockLevels, stockAdjustment, lowStock}
+        Dim navButtons() As Button = {home, itemList, stockLevels, stockAdjustment, putAway, lowStock}
         Dim topPos As Integer = 128
         For Each btn In navButtons
             StyleButton(btn)
@@ -272,9 +273,10 @@ Public Class INVENTORY_STAFF
         Dim iconPath As String = ""
         Select Case btn.Name.ToLower()
             Case "home" : iconPath = "home.png"
-            Case "itemlist" : iconPath = "inventory.png"
-            Case "stocklevels" : iconPath = "diagram.png"
+            Case "itemlist" : iconPath = "clipboard.png"
+            Case "stocklevels" : iconPath = "bar-chart.png"
             Case "stockadjustment" : iconPath = "transfer.png"
+            Case "putaway" : iconPath = "add.png"
             Case "lowstock" : iconPath = "notification.png"
             Case "logout" : iconPath = "logout.png"
         End Select
@@ -439,6 +441,27 @@ Public Class INVENTORY_STAFF
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
         InventoryStockAdjustmentPanelBuilder.LoadStockAdjustment(MainContainer, productId)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub putAway_Click(sender As Object, e As EventArgs) Handles putAway.Click
+        SetActive(putAway)
+        InventoryHomePanelBuilder.StopTimer()
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        InventoryPutAwayPanelBuilder.LoadPutAway(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    ' Opens Incoming Stock directly — can be called from other screens.
+    Public Sub OpenPutAway()
+        SetActive(putAway)
+        InventoryHomePanelBuilder.StopTimer()
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        InventoryPutAwayPanelBuilder.LoadPutAway(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub

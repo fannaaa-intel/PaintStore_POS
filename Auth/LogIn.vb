@@ -82,7 +82,7 @@ Public Class LogIn
         Dim curY As Integer = 40
 
         ' ===== LOGO + TITLE =====
-        Dim logoFile As String = "C:\Users\DELL\source\repos\PaintStore_POS\paint.png"
+        Dim logoFile As String = "paint.png"
         Dim logoBox As New PictureBox With {
             .Size = New Size(56, 56),
             .SizeMode = PictureBoxSizeMode.Zoom,

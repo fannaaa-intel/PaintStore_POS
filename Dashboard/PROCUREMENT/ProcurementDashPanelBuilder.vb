@@ -473,12 +473,11 @@ Public Class ProcurementDashPanelBuilder
     Sub()
         Dim w As Integer = colHeader.Width
         chPo.Left = 18
-        chSupplier.Left = 160
-        chItems.Left = 390
-        chCost.Left = 490
-        chStatus.Left = w - chStatus.Width - 18
+        chSupplier.Left = 200
+        chItems.Left = w - 290
+        chCost.Left = w - 190
+        chStatus.Left = w - 95
     End Sub
-
         card.Controls.Add(colHeader)
         colHeader.BringToFront()
 
@@ -562,11 +561,10 @@ Public Class ProcurementDashPanelBuilder
     Sub()
         Dim w As Integer = row.Width
         lblPo.Left = 18 : lblPo.Top = (height - lblPo.Height) \ 2
-        lblSupplier.Left = 160 : lblSupplier.Top = (height - lblSupplier.Height) \ 2
-        lblItems.Left = 390 : lblItems.Top = (height - lblItems.Height) \ 2
-        lblCost.Left = 490 : lblCost.Top = (height - lblCost.Height) \ 2
-        badge.Left = w - badge.Width - 18
-        badge.Top = (height - badge.Height) \ 2
+        lblSupplier.Left = 200 : lblSupplier.Top = (height - lblSupplier.Height) \ 2
+        lblItems.Left = w - 290 : lblItems.Top = (height - lblItems.Height) \ 2
+        lblCost.Left = w - 200 : lblCost.Top = (height - lblCost.Height) \ 2
+        badge.Left = w - 95 : badge.Top = (height - badge.Height) \ 2
     End Sub
         PropagateHover(row)
         Return row

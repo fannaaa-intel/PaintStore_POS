@@ -96,6 +96,9 @@ Public Class TransactionPanelBuilder
     Private Shared _discountAmount As Decimal = 0
     Private Shared _discountType As String = "None"
 
+
+    ' Quota badge
+    Private Shared _lblQuotaBadge As Label
     ' Summary labels
     Private Shared _lblItems As Label
     Private Shared _lblSubtotal As Label
@@ -290,18 +293,71 @@ Public Class TransactionPanelBuilder
                 If Not lblDateTime.IsDisposed Then
                     lblDateTime.Text = DateTime.Now.ToString("MMM dd, yyyy  |  hh:mm tt")
                     lblDateTime.Location = New Point(bar.Width - lblDateTime.Width - 18, (bar.Height - lblDateTime.Height) \ 2)
+                Else
+                    tmr.Stop() : tmr.Dispose()
                 End If
             End Sub
         tmr.Start()
-        bar.Controls.AddRange({lblCashier, lblRegister, lblDateTime})
+        ' Quota badge — only shown when quota is set
+        _lblQuotaBadge = New Label With {
+            .AutoSize = True, .BackColor = Color.Transparent,
+            .Font = New Font("Segoe UI Semibold", 9),
+            .ForeColor = Color.White, .Visible = False}
+        bar.Controls.AddRange({lblCashier, lblRegister, lblDateTime, _lblQuotaBadge})
+
+        Dim PositionBadge As Action =
+            Sub()
+                _lblQuotaBadge.Location = New Point(
+                    bar.Width - lblDateTime.Width - _lblQuotaBadge.Width - 28,
+                    (bar.Height - _lblQuotaBadge.Height) \ 2)
+            End Sub
+
         AddHandler bar.Resize,
             Sub()
                 lblCashier.Location = New Point(16, 12)
                 lblRegister.Location = New Point(16, 32)
                 lblDateTime.Location = New Point(bar.Width - lblDateTime.Width - 18, (bar.Height - lblDateTime.Height) \ 2)
+                PositionBadge()
             End Sub
+        UpdateQuotaBadge()
         Return bar
     End Function
+
+    ' ── Quota badge updater ───────────────────────────────────────────────────
+    Friend Shared Sub UpdateQuotaBadge()
+        If _lblQuotaBadge Is Nothing OrElse _lblQuotaBadge.IsDisposed Then Return
+        If Session.UserQuota <= 0 Then
+            _lblQuotaBadge.Visible = False
+            Return
+        End If
+
+        ' Get current shift total from DB
+        Dim shiftTotal As Decimal = 0
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(total),0) FROM sales " &
+                    "WHERE shift_id=@sid AND status='Completed'", conn)
+                    cmd.Parameters.AddWithValue("@sid", Session.ShiftId)
+                    shiftTotal = CDec(cmd.ExecuteScalar())
+                End Using
+            End Using
+        Catch ex As Exception
+            System.Diagnostics.Debug.WriteLine("UpdateQuotaBadge error: " & ex.Message)
+            Return
+        End Try
+
+        Dim isOvertime As Boolean = shiftTotal >= Session.UserQuota
+        _lblQuotaBadge.Text = If(isOvertime, " OVERTIME ", " QUOTA MET ")
+        _lblQuotaBadge.BackColor = If(isOvertime,
+            Color.FromArgb(220, 80, 50),
+            Color.FromArgb(0, 168, 100))
+        _lblQuotaBadge.Visible = shiftTotal >= Session.UserQuota
+        _lblQuotaBadge.Invalidate()
+    End Sub
+
+
 
     Private Shared Function BuildContentArea() As Control
         Dim split As New TableLayoutPanel With {
@@ -1388,11 +1444,12 @@ Public Class TransactionPanelBuilder
                         Next
 
                         Using cmd As New MySqlCommand(
-                            "INSERT INTO sales (sale_no, user_id, method_id, sale_datetime, status, discount_type, " &
+                            "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
                             "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due, reference_no) " &
-                            "VALUES (@sno, @uid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, 0, @total, @tendered, @change, @ref)", conn, txn)
+                            "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, 0, @total, @tendered, @change, @ref)", conn, txn)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                            cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
                             cmd.Parameters.AddWithValue("@mid", _payMethodId)
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
@@ -1438,6 +1495,7 @@ Public Class TransactionPanelBuilder
                         Next
 
                         txn.Commit()
+                        UpdateQuotaBadge()
 
                     Catch ex As Exception
                         txn.Rollback()
@@ -1572,11 +1630,12 @@ Public Class TransactionPanelBuilder
                 Using txn As MySqlTransaction = conn.BeginTransaction()
                     Try
                         Using cmd As New MySqlCommand(
-                            "INSERT INTO sales (sale_no, user_id, method_id, sale_datetime, status, discount_type, " &
+                            "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
                             "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due) " &
-                            "VALUES (@sno, @uid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, 0, @total, NULL, NULL)", conn, txn)
+                            "VALUES (@sno, @uid, @sid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, 0, @total, NULL, NULL)", conn, txn)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                            cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)

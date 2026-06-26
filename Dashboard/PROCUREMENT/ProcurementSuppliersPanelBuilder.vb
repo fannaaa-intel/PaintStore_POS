@@ -15,14 +15,10 @@ Imports MySql.Data.MySqlClient
 '    3. Detail  — one supplier: contact card, product chips
 '                 (products WHERE supplier_id = this), last-10 PO history,
 '                 and an Edit button.
-'
-'  Shared-only, no instance state. Verbatim helpers from
-'  InventoryLowStockPanelBuilder (RoundRect / RoundControl / RoundLabel /
-'  MakeLink / SafeInt / HexToColor).
 ' =============================================================================
 Public Class ProcurementSuppliersPanelBuilder
 
-    ' ── PALETTE (exact spec values) ──────────────────────────────────────────────
+    ' ── PALETTE ──────────────────────────────────────────────────────────────────
     Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
     Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
     Private Shared ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
@@ -61,8 +57,7 @@ Public Class ProcurementSuppliersPanelBuilder
     ' ── STATE ────────────────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
 
-    ' Form field references
-    Private Shared editingId As Integer = 0   ' 0 = add new
+    Private Shared editingId As Integer = 0
     Private Shared txtName As TextBox
     Private Shared txtContact As TextBox
     Private Shared txtPhone As TextBox
@@ -121,7 +116,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 card.Width = rowsHost.ClientSize.Width - 4
                 card.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 rowsHost.Controls.Add(card)
-                y += card.Height + 12
+                y += card.Height + 14
             Next
             AddHandler rowsHost.Resize,
                 Sub()
@@ -133,99 +128,273 @@ Public Class ProcurementSuppliersPanelBuilder
         End If
     End Sub
 
+    ' ── LIST HEADER (REDESIGNED) ──────────────────────────────────────────────────
     Private Shared Function BuildListTop(count As Integer) As Panel
-        Dim region As New Panel With {.Height = 96, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {
+            .Height = 96, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)
+        }
 
         Dim lblTitle As New Label With {
-            .Text = "Suppliers", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
+            .Text = "Suppliers",
+            .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(24, 16), .BackColor = Color.Transparent
         }
+
         Dim lblSub As New Label With {
-            .Text = count & If(count = 1, " supplier", " suppliers"),
-            .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 58)
+            .Text = If(count = 0, "No suppliers yet",
+                       If(count = 1, "1 supplier registered", count & " suppliers registered")),
+            .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(30, 58), .BackColor = Color.Transparent
         }
-        region.Controls.AddRange({lblTitle, lblSub})
 
         Dim btnAdd As New Button With {
-            .Text = "  + Add Supplier", .Size = New Size(150, 40),
-            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
-            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
+            .Text = "  + Add Supplier",
+            .Size = New Size(152, 40),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10),
+            .Cursor = Cursors.Hand,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         btnAdd.FlatAppearance.BorderSize = 0
         RoundControl(btnAdd, 10)
         AddHandler btnAdd.Click, Sub() LoadForm(0)
-        region.Controls.Add(btnAdd)
-        AddHandler region.Resize, Sub()
-                                      btnAdd.Top = 22
-                                      btnAdd.Left = region.Width - 24 - btnAdd.Width
-                                  End Sub
+        AddHandler btnAdd.MouseEnter,
+            Sub()
+                btnAdd.BackColor = MintDeep
+                btnAdd.Invalidate()
+            End Sub
+        AddHandler btnAdd.MouseLeave,
+            Sub()
+                btnAdd.BackColor = MintPrimary
+                btnAdd.Invalidate()
+            End Sub
+
+        region.Controls.AddRange({lblTitle, lblSub, btnAdd})
+
+        AddHandler region.Resize,
+            Sub()
+                btnAdd.Top = 22
+                btnAdd.Left = region.Width - 24 - btnAdd.Width
+            End Sub
         btnAdd.Top = 22
         btnAdd.Left = 700
 
         Return region
     End Function
 
+    ' ── SUPPLIER CARD (REDESIGNED) ────────────────────────────────────────────────
+    '   • PanelRenderer for card shadow/border
+    '   • Gradient-initial avatar on the left
+    '   • Mint accent bar along the left edge (clipped)
+    '   • Name / contact line / address line (darker, clearly readable)
+    '   • PO pill top-right, chevron icon circle pill bottom-right
+    '   • Subtle hover tint
     Private Shared Function BuildSupplierCard(sup As SupplierRow) As Panel
-        Dim card As New BufferedPanel With {.Height = 100, .BackColor = CardBg, .Cursor = Cursors.Hand}
-        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-        AddHandler card.Resize,
-            Sub()
-                Dim path As New GraphicsPath()
-                Dim r As Integer = 12
-                Dim rect As New Rectangle(0, 0, card.Width, card.Height)
-                path.AddArc(rect.X, rect.Y, r, r, 180, 90)
-                path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
-                path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
-                path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
-                path.CloseFigure()
-                card.Region = New Region(path)
+        Dim cardH As Integer = 148
+        Dim card As New BufferedPanel With {
+            .Height = cardH, .BackColor = CardBg, .Cursor = Cursors.Hand
+        }
+
+        ' ── Paint: PanelRenderer + clipped left accent bar ───────────────────────
+        AddHandler card.Paint,
+            Sub(s, e)
+                PaintCard(CType(s, Panel), e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                ' Clip to card rounded rect so accent doesn't bleed into corners
+                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
+                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
+                    e.Graphics.SetClip(clipPath)
+                    Dim aY As Integer = 14
+                    Dim aH As Integer = cardH - 28
+                    Using br As New LinearGradientBrush(
+                        New Point(1, aY), New Point(1, aY + aH),
+                        MintPrimary, MintDeep)
+                        e.Graphics.FillRectangle(br, New Rectangle(1, aY, 5, aH))
+                    End Using
+                    e.Graphics.ResetClip()
+                End Using
             End Sub
 
+        ' ── Avatar bubble ────────────────────────────────────────────────────────
+        Dim initial As String = If(String.IsNullOrWhiteSpace(sup.Name), "?",
+                                   sup.Name.Trim().Substring(0, 1).ToUpperInvariant())
+        Dim avSize As Integer = 52
+        Dim avatar As New BufferedPanel With {
+            .Size = New Size(avSize, avSize),
+            .Location = New Point(22, (cardH - avSize) \ 2),
+            .BackColor = Color.Transparent
+        }
+        AddHandler avatar.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim av As New Rectangle(0, 0, avSize - 1, avSize - 1)
+                Using path As GraphicsPath = RoundRect(av, 14)
+                    Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 135.0F)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                Using f As New Font("Segoe UI", 20, FontStyle.Bold),
+                      br As New SolidBrush(Color.White)
+                    Dim sz As SizeF = e.Graphics.MeasureString(initial, f)
+                    e.Graphics.DrawString(initial, f, br,
+                        (avSize - sz.Width) / 2.0F - 0.5F,
+                        (avSize - sz.Height) / 2.0F)
+                End Using
+            End Sub
+        card.Controls.Add(avatar)
+
+        ' ── Text content ─────────────────────────────────────────────────────────
+        Dim textX As Integer = avSize + 36
+
+        ' Line 1 — Supplier name
         Dim lblName As New Label With {
-    .Text = sup.Name, .Font = New Font("Segoe UI", 14, FontStyle.Bold),
-    .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 16), .BackColor = Color.Transparent
-}
+            .Text = sup.Name,
+            .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(textX, 20), .BackColor = Color.Transparent
+        }
+
+        ' Line 2 — Contact | Phone | Email  (darker, readable)
         Dim contactBits As New List(Of String)
         If Not String.IsNullOrWhiteSpace(sup.Contact) Then contactBits.Add(sup.Contact)
         If Not String.IsNullOrWhiteSpace(sup.Phone) Then contactBits.Add(sup.Phone)
         If Not String.IsNullOrWhiteSpace(sup.Email) Then contactBits.Add(sup.Email)
-        Dim lblContact As New Label With {
-    .Text = If(contactBits.Count = 0, "No contact details", String.Join("   " & ChrW(8226) & "   ", contactBits)),
-    .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True,
-    .Location = New Point(20, 50), .BackColor = Color.Transparent
-}
-        card.Controls.AddRange({lblName, lblContact})
 
-        ' Active PO pill
-        Dim pill As New Label With {
-            .Text = sup.ActivePoCount & If(sup.ActivePoCount = 1, " active PO", " active POs"),
-          .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = If(sup.ActivePoCount > 0, MintDeep, FaintText),
-            .BackColor = If(sup.ActivePoCount > 0, TileBg, Color.FromArgb(238, 240, 239)),
-            .AutoSize = True, .Padding = New Padding(9, 4, 9, 4),
+        Dim lblContact As New Label With {
+            .Text = If(contactBits.Count = 0, "No contact details",
+                       String.Join("   " & ChrW(8226) & "   ", contactBits)),
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = Color.FromArgb(52, 68, 64),
+            .AutoSize = True,
+            .Location = New Point(textX, 50), .BackColor = Color.Transparent
+        }
+
+        ' Line 3 — Address  (darker, readable)
+        Dim hasAddress As Boolean = Not String.IsNullOrWhiteSpace(sup.Address)
+        Dim lblAddr As New Label With {
+            .Text = If(hasAddress, ChrW(8226) & "  " & sup.Address, ""),
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = Color.FromArgb(72, 92, 87),
+            .AutoSize = True,
+            .Location = New Point(textX, 78), .BackColor = Color.Transparent,
+            .Visible = hasAddress
+        }
+
+        card.Controls.AddRange({lblName, lblContact, lblAddr})
+
+        ' ── Active PO pill (top-right) ───────────────────────────────────────────
+        Dim poPill As New Label With {
+            .Text = If(sup.ActivePoCount > 0,
+                       sup.ActivePoCount & If(sup.ActivePoCount = 1, " active PO", " active POs"),
+                       "No active POs"),
+            .Font = New Font("Segoe UI Semibold", 10.0F, FontStyle.Bold),
+            .ForeColor = If(sup.ActivePoCount > 0, Color.White, Color.FromArgb(75, 92, 87)),
+            .BackColor = If(sup.ActivePoCount > 0, MintDeep, Color.FromArgb(208, 218, 214)),
+            .AutoSize = True, .Padding = New Padding(13, 6, 13, 6),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(pill, 11)
-        card.Controls.Add(pill)
+        RoundLabel(poPill, 12)
+        card.Controls.Add(poPill)
 
-        Dim lnkView As Label = MakeLink("View", MintPrimary)
-        lnkView.Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        card.Controls.Add(lnkView)
+        ' ── "View >" pill — thick drawn chevron (bottom-right) ───────────────────
+        Dim vpH As Integer = 44
+        Dim vpW As Integer = 110
+        Dim viewPill As New BufferedPanel With {
+            .Size = New Size(vpW, vpH),
+            .BackColor = TileBg,
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
 
+        ' Pill-shaped region (fully rounded ends)
+        Dim vpRgn As New GraphicsPath()
+        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
+        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
+        vpRgn.CloseFigure()
+        viewPill.Region = New Region(vpRgn)
+
+        AddHandler viewPill.Paint,
+            Sub(s, e)
+                Dim b As BufferedPanel = CType(s, BufferedPanel)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                ' Pill fill
+                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
+                    Using br As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                ' "View" text
+                Using f As New Font("Segoe UI Semibold", 13.0F, FontStyle.Bold),
+                      br As New SolidBrush(MintDeep)
+                    Dim sf As New StringFormat With {
+                        .Alignment = StringAlignment.Near,
+                        .LineAlignment = StringAlignment.Center
+                    }
+                    e.Graphics.DrawString("View", f, br,
+                        New RectangleF(16, 0, 56, b.Height), sf)
+                End Using
+                ' Thick ">" chevron — rounded pen so it matches icon style
+                Dim chX As Single = b.Width - 24
+                Dim midY As Single = b.Height / 2.0F
+                Dim arm As Single = 6
+                Using pen As New Pen(MintDeep, 3.0F)
+                    pen.LineJoin = LineJoin.Round
+                    pen.StartCap = LineCap.Round
+                    pen.EndCap = LineCap.Round
+                    e.Graphics.DrawLines(pen, New PointF() {
+                        New PointF(chX, midY - arm),
+                        New PointF(chX + arm * 0.7F, midY),
+                        New PointF(chX, midY + arm)
+                    })
+                End Using
+            End Sub
+
+        AddHandler viewPill.MouseEnter,
+            Sub()
+                viewPill.BackColor = Color.FromArgb(180, 230, 218)
+                viewPill.Invalidate()
+            End Sub
+        AddHandler viewPill.MouseLeave,
+            Sub()
+                viewPill.BackColor = TileBg
+                viewPill.Invalidate()
+            End Sub
+
+        card.Controls.Add(viewPill)
+
+        ' ── Click handlers ───────────────────────────────────────────────────────
         Dim capId As Integer = sup.Id
-        AddHandler lnkView.Click, Sub() LoadDetail(capId)
+        AddHandler viewPill.Click, Sub() LoadDetail(capId)
         AddHandler card.Click, Sub() LoadDetail(capId)
         AddHandler lblName.Click, Sub() LoadDetail(capId)
         AddHandler lblContact.Click, Sub() LoadDetail(capId)
 
+        ' ── Hover: subtle mint tint on background ────────────────────────────────
+        AddHandler card.MouseEnter,
+            Sub()
+                card.BackColor = Color.FromArgb(248, 252, 250)
+                card.Invalidate()
+            End Sub
+        AddHandler card.MouseLeave,
+            Sub()
+                card.BackColor = CardBg
+                card.Invalidate()
+            End Sub
+
+        ' ── Layout: right-align poPill and viewPill on resize ─────────────────────
         AddHandler card.Resize,
-    Sub()
-        lnkView.Left = card.Width - lnkView.Width - 22
-        lnkView.Top = 20
-        pill.Left = card.Width - pill.Width - 22
-        pill.Top = 56.0F
-    End Sub
+            Sub()
+                Dim rEdge As Integer = card.Width - 20
+                poPill.Left = rEdge - poPill.Width
+                poPill.Top = 24
+                viewPill.Left = rEdge - viewPill.Width
+                viewPill.Top = cardH - viewPill.Height - 24
+                avatar.Top = (card.Height - avSize) \ 2
+            End Sub
 
         Return card
     End Function
@@ -247,9 +416,9 @@ Public Class ProcurementSuppliersPanelBuilder
 
         ' ── Header ────────────────────────────────────────────────────────────
         Dim header As New Panel With {
-        .Height = 80, .BackColor = MintBg,
-        .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
-    }
+            .Height = 80, .BackColor = MintBg,
+            .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
+        }
         Dim iconPathF As String = IO.Path.Combine(Application.StartupPath, "previous.png")
         Dim picBackF As New PictureBox With {
             .Size = New Size(22, 22), .Location = New Point(24, 36),
@@ -287,55 +456,40 @@ Public Class ProcurementSuppliersPanelBuilder
         }
         header.Controls.AddRange({picBackF, lblTitle})
 
-        ' ── Body fills remaining space ─────────────────────────────────────
+        ' ── Body fills remaining space ─────────────────────────────────────────
         Dim body As New Panel With {
-        .Dock = DockStyle.Fill,
-        .BackColor = MintBg,
-        .AutoScroll = False
-    }
+            .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = False
+        }
 
-        ' ── Card ──────────────────────────────────────────────────────────
         Dim cardWidth As Integer = 560
-        Dim card As New BufferedPanel With {
-        .Width = cardWidth,
-        .BackColor = CardBg
-    }
+        Dim card As New BufferedPanel With {.Width = cardWidth, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
-        ' ── Fields ────────────────────────────────────────────────────────
         Dim yy As Integer = 28
-       txtName = AddFormField(card, "Supplier Name *", yy, If(existing IsNot Nothing, existing.Name, ""), False, "e.g. ABC Paint Supplies") : yy += 80
-txtContact = AddFormField(card, "Contact Person", yy, If(existing IsNot Nothing, existing.Contact, ""), False, "e.g. Juan dela Cruz") : yy += 80
-txtPhone = AddFormField(card, "Phone", yy, If(existing IsNot Nothing, existing.Phone, ""), False, "e.g. 09171234567") : yy += 80
-txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.Email, ""), False, "e.g. supplier@gmail.com") : yy += 80
+        txtName = AddFormField(card, "Supplier Name *", yy, If(existing IsNot Nothing, existing.Name, ""), False, "e.g. ABC Paint Supplies") : yy += 80
+        txtContact = AddFormField(card, "Contact Person", yy, If(existing IsNot Nothing, existing.Contact, ""), False, "e.g. Juan dela Cruz") : yy += 80
+        txtPhone = AddFormField(card, "Phone", yy, If(existing IsNot Nothing, existing.Phone, ""), False, "e.g. 09171234567") : yy += 80
+        txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.Email, ""), False, "e.g. supplier@gmail.com") : yy += 80
         txtAddress = AddFormField(card, "Address", yy, If(existing IsNot Nothing, existing.Address, ""), True, "e.g. 123 Rizal St., Aparri, Cagayan") : yy += 80
 
-        ' ── Button bar INSIDE card ─────────────────────────────────────────
         Dim btnBarH As Integer = 64
         Dim btnBarY As Integer = yy + 8
 
         Dim btnBar As New Panel With {
-    .BackColor = Color.Transparent,
-    .Location = New Point(0, btnBarY),
-    .Height = btnBarH,
-    .Width = cardWidth
-}
+            .BackColor = Color.Transparent, .Location = New Point(0, btnBarY),
+            .Height = btnBarH, .Width = cardWidth
+        }
         AddHandler btnBar.Paint,
-    Sub(s, e)
-        Using pen As New Pen(CardBorder, 1)
-            e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
-        End Using
-    End Sub
+            Sub(s, e)
+                Using pen As New Pen(CardBorder, 1)
+                    e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
+                End Using
+            End Sub
 
-        ' ── Cancel button ──────────────────────────────────────────────────
         Dim btnCancel As New Button With {
-            .Text = "Cancel",
-            .Size = New Size(110, 38),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.White,
-            .ForeColor = SubText,
-            .Font = New Font("Segoe UI Semibold", 10),
-            .Cursor = Cursors.Hand
+            .Text = "Cancel", .Size = New Size(110, 38),
+            .FlatStyle = FlatStyle.Flat, .BackColor = Color.White,
+            .ForeColor = SubText, .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand
         }
         btnCancel.FlatAppearance.BorderSize = 1
         btnCancel.FlatAppearance.BorderColor = CardBorder
@@ -352,8 +506,7 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                     End Using
                 End Using
                 Dim sf As New StringFormat With {
-                    .Alignment = StringAlignment.Center,
-                    .LineAlignment = StringAlignment.Center
+                    .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
                 }
                 Using brush As New SolidBrush(b.ForeColor)
                     e.Graphics.DrawString(b.Text, b.Font, brush,
@@ -370,34 +523,26 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 btnCancel.BackColor = Color.White
                 btnCancel.Invalidate()
             End Sub
-        AddHandler btnCancel.Click,
-            Sub() If editingId > 0 Then LoadDetail(editingId) Else RenderList()
+        AddHandler btnCancel.Click, Sub() If editingId > 0 Then LoadDetail(editingId) Else RenderList()
 
-        ' ── Save button ────────────────────────────────────────────────────
         btnSaveRef = New Button With {
             .Text = If(supplierId > 0, "Save Changes", "Add Supplier"),
-            .Size = New Size(148, 38),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = MintPrimary,
-            .ForeColor = Color.White,
-            .Font = New Font("Segoe UI Semibold", 10),
-            .Cursor = Cursors.Hand,
-            .Tag = ""
+            .Size = New Size(148, 38), .FlatStyle = FlatStyle.Flat,
+            .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand, .Tag = ""
         }
         btnSaveRef.FlatAppearance.BorderSize = 0
         AddHandler btnSaveRef.Paint,
             Sub(s, e)
                 Dim b = CType(s, Button)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                ' Fill full rectangle — no -1 offset that caused clipping
                 Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width, b.Height), 8)
                     Using fill As New SolidBrush(b.BackColor)
                         e.Graphics.FillPath(fill, path)
                     End Using
                 End Using
                 Dim sf As New StringFormat With {
-                    .Alignment = StringAlignment.Center,
-                    .LineAlignment = StringAlignment.Center
+                    .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
                 }
                 Using brush As New SolidBrush(b.ForeColor)
                     e.Graphics.DrawString(b.Text, b.Font, brush,
@@ -418,14 +563,12 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
 
         btnBar.Controls.AddRange({btnCancel, btnSaveRef})
 
-        ' Position buttons immediately (don't wait for first Resize event)
         Dim tInit As Integer = (btnBarH - btnSaveRef.Height) \ 2
         btnSaveRef.Top = tInit
         btnSaveRef.Left = btnBar.Width - 20 - btnSaveRef.Width
         btnCancel.Top = tInit
         btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 10
 
-        ' Keep right-aligned on resize
         AddHandler btnBar.Resize,
             Sub()
                 Dim t As Integer = (btnBar.Height - btnSaveRef.Height) \ 2
@@ -435,25 +578,18 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 10
             End Sub
 
-        ' Card height: fields + gap + btnBar + extra for rounded bottom corners
-        card.Height = btnBarY + btnBarH + 20   ' +20 instead of +12
+        card.Height = btnBarY + btnBarH + 20
         card.Controls.Add(btnBar)
 
-
-
-        ' ── Centre card horizontally and vertically inside body ───────────
-        '    TUNING TIP:
-        '      Move UP  → decrease the offset, e.g. change `\ 2` to `\ 2 - 30`
-        '      Move DOWN → increase the offset, e.g. change `\ 2` to `\ 2 + 30`
-        Dim verticalOffset As Integer = -100   ' negative = up, positive = down
+        Dim verticalOffset As Integer = -100
 
         Dim PositionCard As Action =
-        Sub()
-            Dim bw As Integer = body.ClientSize.Width
-            Dim bh As Integer = body.ClientSize.Height
-            card.Left = Math.Max(24, (bw - cardWidth) \ 2)
-            card.Top = Math.Max(16, (bh - card.Height) \ 2 + verticalOffset)
-        End Sub
+            Sub()
+                Dim bw As Integer = body.ClientSize.Width
+                Dim bh As Integer = body.ClientSize.Height
+                card.Left = Math.Max(24, (bw - cardWidth) \ 2)
+                card.Top = Math.Max(16, (bh - card.Height) \ 2 + verticalOffset)
+            End Sub
 
         AddHandler body.Resize, Sub() PositionCard()
         body.Controls.Add(card)
@@ -465,102 +601,81 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         body.BeginInvoke(New Action(Sub() PositionCard()))
     End Sub
 
-    ' Builds a labelled text box inside the card; returns the TextBox.
     Private Shared Function AddFormField(parent As Panel, label As String, y As Integer,
-                                     value As String,
-                                     Optional multiline As Boolean = False,
-                                     Optional placeholder As String = "") As TextBox
+                                         value As String,
+                                         Optional multiline As Boolean = False,
+                                         Optional placeholder As String = "") As TextBox
         Dim lbl As New Label With {
-        .Text = label,
-        .Font = New Font("Segoe UI Semibold", 10),
-        .ForeColor = SubText, .AutoSize = True,
-        .Location = New Point(24, y), .BackColor = Color.Transparent
-    }
+            .Text = label, .Font = New Font("Segoe UI Semibold", 10),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(24, y), .BackColor = Color.Transparent
+        }
 
         Dim tileH As Integer = If(multiline, 52, 46)
         Dim tile As New Panel With {
-        .Location = New Point(24, y + 24), .Height = tileH,
-        .BackColor = CardBg,
-        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-    }
+            .Location = New Point(24, y + 24), .Height = tileH,
+            .BackColor = CardBg,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
 
         Dim txt As New TextBox With {
-        .BorderStyle = BorderStyle.None, .BackColor = CardBg,
-        .ForeColor = MintDark,
-        .Font = New Font("Segoe UI", 11),
-        .Text = If(value, ""),
-        .Location = New Point(12, (tileH - 22) \ 2),
-        .Multiline = multiline,
-        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-    }
+            .BorderStyle = BorderStyle.None, .BackColor = CardBg,
+            .ForeColor = MintDark, .Font = New Font("Segoe UI", 11),
+            .Text = If(value, ""), .Location = New Point(12, (tileH - 22) \ 2),
+            .Multiline = multiline,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
         tile.Controls.Add(txt)
 
-        ' ── Overlay placeholder label for ALL fields (single + multiline) ─────
         If placeholder <> "" Then
             Dim phLabel As New Label With {
-            .Text = placeholder,
-            .Font = New Font("Segoe UI", 10, FontStyle.Italic),
-            .ForeColor = Color.FromArgb(180, 180, 180),
-            .BackColor = Color.Transparent,
-            .AutoSize = False,
-            .Height = tileH,
-            .Location = New Point(13, 0),
-            .Cursor = Cursors.IBeam,
-            .TextAlign = ContentAlignment.MiddleLeft
-        }
+                .Text = placeholder, .Font = New Font("Segoe UI", 10, FontStyle.Italic),
+                .ForeColor = Color.FromArgb(180, 180, 180), .BackColor = Color.Transparent,
+                .AutoSize = False, .Height = tileH, .Location = New Point(13, 0),
+                .Cursor = Cursors.IBeam, .TextAlign = ContentAlignment.MiddleLeft
+            }
             tile.Controls.Add(phLabel)
             phLabel.BringToFront()
 
-            Dim UpdatePh As Action =
-            Sub()
-                phLabel.Visible = (txt.Text = "" AndAlso Not txt.Focused)
-            End Sub
+            Dim UpdatePh As Action = Sub() phLabel.Visible = (txt.Text = "" AndAlso Not txt.Focused)
 
             AddHandler txt.TextChanged, Sub() UpdatePh()
             AddHandler txt.Enter, Sub() UpdatePh()
             AddHandler txt.Leave, Sub() UpdatePh()
             AddHandler phLabel.Click, Sub() txt.Focus()
-
             UpdatePh()
 
-            AddHandler tile.Resize,
-            Sub()
-                phLabel.Width = tile.Width - 24
-            End Sub
+            AddHandler tile.Resize, Sub() phLabel.Width = tile.Width - 24
         End If
 
-        ' ── Border painting ───────────────────────────────────────────────────
         AddHandler tile.Paint,
-        Sub(s, e)
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-            Dim rect = tile.ClientRectangle
-            rect.Inflate(-1, -1)
-            Using path As GraphicsPath = RoundRect(rect, 10)
-                Using fill As New SolidBrush(CardBg)
-                    e.Graphics.FillPath(fill, path)
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = tile.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using fill As New SolidBrush(CardBg)
+                        e.Graphics.FillPath(fill, path)
+                    End Using
+                    Using pen As New Pen(If(txt.Focused,
+                                            Color.FromArgb(0, 168, 142),
+                                            Color.FromArgb(214, 224, 220)),
+                                         If(txt.Focused, 1.8F, 1.2F))
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
                 End Using
-                Using pen As New Pen(If(txt.Focused,
-                                        Color.FromArgb(0, 168, 142),
-                                        Color.FromArgb(214, 224, 220)),
-                                     If(txt.Focused, 1.8F, 1.2F))
-                    e.Graphics.DrawPath(pen, path)
-                End Using
-            End Using
-        End Sub
+            End Sub
 
         AddHandler txt.Enter, Sub() tile.Invalidate()
         AddHandler txt.Leave, Sub() tile.Invalidate()
         AddHandler txt.TextChanged, Sub() tile.Invalidate()
 
         AddHandler tile.Resize,
-        Sub()
-            txt.Width = tile.Width - 24
-            If multiline Then txt.Height = tile.Height - 16
-        End Sub
-        AddHandler parent.Resize,
-        Sub()
-            tile.Width = parent.Width - 48
-        End Sub
+            Sub()
+                txt.Width = tile.Width - 24
+                If multiline Then txt.Height = tile.Height - 16
+            End Sub
+        AddHandler parent.Resize, Sub() tile.Width = parent.Width - 48
 
         tile.Width = Math.Max(200, parent.Width - 48)
         txt.Width = tile.Width - 24
@@ -572,7 +687,6 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
     Private Shared Sub CommitSupplier()
         If btnSaveRef IsNot Nothing AndAlso CStr(If(btnSaveRef.Tag, "")) = "done" Then Return
 
-        ' ── Validation: all fields required ──────────────────────────────────
         Dim name As String = txtName.Text.Trim()
         Dim contact As String = txtContact.Text.Trim()
         Dim phone As String = txtPhone.Text.Trim()
@@ -581,50 +695,48 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
 
         If name = "" Then
             AppModal.Show("Supplier Name is required.", "Missing Field",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtName.Focus() : Return
         End If
         If contact = "" Then
             AppModal.Show("Contact Person is required.", "Missing Field",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtContact.Focus() : Return
         End If
         If phone = "" Then
             AppModal.Show("Phone is required.", "Missing Field",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtPhone.Focus() : Return
         End If
         If Not System.Text.RegularExpressions.Regex.IsMatch(phone, "^[0-9\+\s\-]+$") Then
             AppModal.Show("Phone must contain digits only (e.g. 09171234567).", "Invalid Phone",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtPhone.Focus() : Return
         End If
         If email = "" Then
             AppModal.Show("Email is required.", "Missing Field",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtEmail.Focus() : Return
         End If
-        If Not System.Text.RegularExpressions.Regex.IsMatch(email,
-            "^[^@\s]+@[^@\s]+\.[^@\s]+$") Then
+        If Not System.Text.RegularExpressions.Regex.IsMatch(email, "^[^@\s]+@[^@\s]+\.[^@\s]+$") Then
             AppModal.Show("Email must be a valid address (e.g. supplier@gmail.com).", "Invalid Email",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtEmail.Focus() : Return
         End If
         If address = "" Then
             AppModal.Show("Address is required.", "Missing Field",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtAddress.Focus() : Return
         End If
 
-        ' ── Persist ──────────────────────────────────────────────────────────
         btnSaveRef.Tag = "done"
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 If editingId > 0 Then
                     Using cmd As New MySqlCommand(
-                    "UPDATE suppliers SET name = @n, contact_person = @c, phone = @p, " &
-                    "email = @e, address = @a WHERE supplier_id = @id", conn)
+                        "UPDATE suppliers SET name = @n, contact_person = @c, phone = @p, " &
+                        "email = @e, address = @a WHERE supplier_id = @id", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
                         cmd.Parameters.AddWithValue("@p", phone)
@@ -635,8 +747,8 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                     End Using
                 Else
                     Using cmd As New MySqlCommand(
-                    "INSERT INTO suppliers (name, contact_person, phone, email, address, is_active) " &
-                    "VALUES (@n, @c, @p, @e, @a, 1)", conn)
+                        "INSERT INTO suppliers (name, contact_person, phone, email, address, is_active) " &
+                        "VALUES (@n, @c, @p, @e, @a, 1)", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
                         cmd.Parameters.AddWithValue("@p", phone)
@@ -649,13 +761,13 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         Catch ex As Exception
             If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
             AppModal.Show("Could not save the supplier:" & Environment.NewLine & ex.Message,
-                      "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
 
         Dim savedId As Integer = editingId
         AppModal.Show(If(editingId > 0, "Supplier updated.", "Supplier added."),
-                  "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                      "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
         If savedId > 0 Then LoadDetail(savedId) Else RenderList()
     End Sub
 
@@ -669,7 +781,7 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         Dim sup As SupplierRow = LoadOneSupplier(supplierId)
         If sup Is Nothing Then
             AppModal.Show("That supplier could not be found.", "Not Found",
-                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
             RenderList()
             Return
         End If
@@ -680,32 +792,79 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         container.Controls.Clear()
         container.BackColor = MintBg
 
-        ' ── Scrollable body ───────────────────────────────────────────────────
         Dim body As New Panel With {
-        .Dock = DockStyle.Fill, .BackColor = MintBg,
-        .Padding = New Padding(24, 4, 24, 20), .AutoScroll = True
-    }
+            .Dock = DockStyle.Fill, .BackColor = MintBg,
+            .Padding = New Padding(24, 4, 24, 20), .AutoScroll = True
+        }
 
         ' ── PO history card ───────────────────────────────────────────────────
-        Dim histHeight As Integer = 60 + Math.Max(1, history.Count) * 54 + 12
+
+        Dim histHeight As Integer = 68 + Math.Max(1, history.Count) * 58 + 12
         Dim histCard As New BufferedPanel With {
-        .Height = histHeight, .BackColor = CardBg, .Dock = DockStyle.Top
-    }
+            .Height = histHeight, .BackColor = CardBg, .Dock = DockStyle.Top
+        }
         AddHandler histCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        ' Header: title + count badge
         Dim lblHist As New Label With {
-        .Text = "Recent Purchase Orders",
-        .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True,
-        .Location = New Point(20, 14), .BackColor = Color.Transparent
-    }
-        histCard.Controls.Add(lblHist)
+            .Text = "Recent Purchase Orders",
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, 14), .BackColor = Color.Transparent
+        }
+        Dim histCountPill As New Label With {
+            .Text = If(history.Count = 0, "No orders", history.Count & If(history.Count = 1, " order", " orders")),
+            .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+            .ForeColor = If(history.Count > 0, MintDeep, FaintText),
+            .BackColor = If(history.Count > 0, TileBg, Color.FromArgb(236, 238, 237)),
+            .AutoSize = True, .Padding = New Padding(10, 4, 10, 4)
+        }
+        RoundLabel(histCountPill, 10)
+        histCard.Controls.AddRange({lblHist, histCountPill})
+
+        ' Status badge of most recent order — pinned TOP-RIGHT of the card
+        Dim histBadge As Label = Nothing
+        If history.Count > 0 Then
+            Dim badgeFore As Color = Color.White
+            Dim badgeBack As Color
+            Select Case history(0).Status
+                Case "Ordered" : badgeBack = MintDeep
+                Case "Draft" : badgeBack = Color.FromArgb(115, 130, 126)
+                Case "Partially Received" : badgeBack = WarningClr
+                Case "Received" : badgeBack = PositiveClr
+                Case "Cancelled" : badgeBack = NegativeClr
+                Case Else : badgeBack = SubText
+            End Select
+            histBadge = New Label With {
+                .Text = StatusInfo(history(0).Status).text,
+                .Font = New Font("Segoe UI Semibold", 11.0F, FontStyle.Bold),
+                .ForeColor = badgeFore,
+                .BackColor = badgeBack,
+                .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
+                .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            }
+            RoundLabel(histBadge, 12)
+            histCard.Controls.Add(histBadge)
+        End If
+
+        AddHandler histCard.Resize,
+            Sub()
+                histCountPill.Left = lblHist.Right + 10
+                histCountPill.Top = lblHist.Top + (lblHist.PreferredHeight - histCountPill.PreferredHeight) \ 2 + 2
+                If histBadge IsNot Nothing Then
+                    histBadge.Left = histCard.Width - histBadge.Width - 16
+                    histBadge.Top = 14
+                End If
+            End Sub
+
+
+
         If history.Count = 0 Then
             histCard.Controls.Add(New Label With {
-            .Text = "No purchase orders for this supplier yet.",
-            .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(20, 52),
-            .BackColor = Color.Transparent
-        })
+                .Text = "No purchase orders for this supplier yet.",
+                .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(20, 52), .BackColor = Color.Transparent
+            })
         Else
             Dim yh As Integer = 52
             For Each h In history
@@ -717,41 +876,56 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 yh += 54
             Next
             AddHandler histCard.Resize,
-            Sub()
-                Dim w As Integer = histCard.ClientSize.Width - 4
-                For Each c As Control In histCard.Controls
-                    If TypeOf c Is Panel Then c.Width = w
-                Next
-            End Sub
+                Sub()
+                    Dim w As Integer = histCard.ClientSize.Width - 4
+                    For Each c As Control In histCard.Controls
+                        If TypeOf c Is Panel Then c.Width = w
+                    Next
+                End Sub
         End If
 
-        Dim spacer2 As New Panel With {
-        .Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent
-    }
+        Dim spacer2 As New Panel With {.Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
 
-        ' ── Products chips card ───────────────────────────────────────────────
+        ' ── Products chips card ──────────────────────────────────────────────────
         Dim chipsCard As New BufferedPanel With {
-        .Height = 120, .BackColor = CardBg, .Dock = DockStyle.Top
-    }
+            .Height = 130, .BackColor = CardBg, .Dock = DockStyle.Top
+        }
         AddHandler chipsCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-        chipsCard.Controls.Add(New Label With {
-        .Text = "Products Supplied",
-        .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = True,
-        .Location = New Point(20, 14), .BackColor = Color.Transparent
-    })
+
+        ' Header: title + count badge
+        Dim lblChipsTitle As New Label With {
+            .Text = "Products Supplied",
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, 14), .BackColor = Color.Transparent
+        }
+        Dim chipsCountPill As New Label With {
+            .Text = If(products.Count = 0, "None assigned", products.Count & If(products.Count = 1, " product", " products")),
+            .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+            .ForeColor = If(products.Count > 0, MintDeep, FaintText),
+            .BackColor = If(products.Count > 0, TileBg, Color.FromArgb(236, 238, 237)),
+            .AutoSize = True, .Padding = New Padding(10, 4, 10, 4)
+        }
+        RoundLabel(chipsCountPill, 10)
+        chipsCard.Controls.AddRange({lblChipsTitle, chipsCountPill})
+        AddHandler chipsCard.Resize,
+    Sub()
+        chipsCountPill.Left = lblChipsTitle.Right + 10
+        chipsCountPill.Top = lblChipsTitle.Top + (lblChipsTitle.PreferredHeight - chipsCountPill.PreferredHeight) \ 2 + 2
+    End Sub
+
         Dim chipFlow As New FlowLayoutPanel With {
-        .Location = New Point(18, 46), .AutoSize = False, .Height = 60,
-        .BackColor = Color.Transparent, .WrapContents = True,
-        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top,
-        .AutoScroll = True
-    }
+            .Location = New Point(18, 50), .AutoSize = False, .Height = 64,
+            .BackColor = Color.Transparent, .WrapContents = True,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top,
+            .AutoScroll = True
+        }
         If products.Count = 0 Then
             chipFlow.Controls.Add(New Label With {
-            .Text = "No products assigned to this supplier.",
-            .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
-            .AutoSize = True, .Margin = New Padding(2, 6, 0, 0)
-        })
+                .Text = "No products assigned to this supplier yet.",
+                .Font = New Font("Segoe UI", 10.5F), .ForeColor = SubText,
+                .AutoSize = True, .Margin = New Padding(2, 8, 0, 0)
+            })
         Else
             For Each p In products
                 chipFlow.Controls.Add(MakeChip(p))
@@ -760,25 +934,18 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         chipsCard.Controls.Add(chipFlow)
         AddHandler chipsCard.Resize, Sub() chipFlow.Width = chipsCard.Width - 36
 
-        Dim spacer1 As New Panel With {
-        .Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent
-    }
+        Dim spacer1 As New Panel With {.Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
 
         ' ── Contact info card ─────────────────────────────────────────────────
-        '    Height: name(40) + 4 rows×28 + pill row + action bar(56) + padding
-        Dim infoCard As New BufferedPanel With {
-        .Height = 260, .BackColor = CardBg, .Dock = DockStyle.Top
-    }
+        Dim infoCard As New BufferedPanel With {.Height = 260, .BackColor = CardBg, .Dock = DockStyle.Top}
         AddHandler infoCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
-        ' Supplier name + active PO pill (same row)
         Dim initial As String = If(String.IsNullOrWhiteSpace(sup.Name), "?",
                                    sup.Name.Trim().Substring(0, 1).ToUpperInvariant())
         Dim avatarSize As Integer = 56
         Dim avatar As New BufferedPanel With {
             .Size = New Size(avatarSize, avatarSize),
-            .Location = New Point(22, 20),
-            .BackColor = Color.Transparent
+            .Location = New Point(22, 20), .BackColor = Color.Transparent
         }
         AddHandler avatar.Paint,
             Sub(s, e)
@@ -799,7 +966,6 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
             End Sub
         infoCard.Controls.Add(avatar)
 
-        ' ── Name + pill ───────────────────────────────────────────────────────
         Dim lblSupName As New Label With {
             .Text = sup.Name,
             .Font = New Font("Segoe UI", 18, FontStyle.Bold),
@@ -824,7 +990,6 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 pill.Top = 26
             End Sub
 
-        ' ── Divider under name row ────────────────────────────────────────────
         Dim nameDivider As New Panel With {
             .Height = 1, .BackColor = RowDivider,
             .Location = New Point(22, avatarSize + 32),
@@ -833,11 +998,9 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         infoCard.Controls.Add(nameDivider)
         AddHandler infoCard.Resize, Sub() nameDivider.Width = infoCard.Width - 44
 
-        ' ── Icon + field rows ─────────────────────────────────────────────────
         Dim fieldStartY As Integer = avatarSize + 46
         Dim fieldGap As Integer = 44
 
-        ' ── Tint helper: load PNG and recolour to MintPrimary ─────────────────
         Dim TintIcon As Func(Of String, Image) =
             Function(filename As String) As Image
                 Dim p As String = IO.Path.Combine(Application.StartupPath, filename)
@@ -874,11 +1037,8 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
 
         Dim yf As Integer = fieldStartY
         For Each fd In fieldDefs
-            ' Icon bubble — PictureBox inside a rounded mint tile
             Dim iconTile As New BufferedPanel With {
-                .Size = New Size(34, 34),
-                .Location = New Point(22, yf),
-                .BackColor = TileBg
+                .Size = New Size(34, 34), .Location = New Point(22, yf), .BackColor = TileBg
             }
             AddHandler iconTile.Paint,
                 Sub(s, e)
@@ -890,10 +1050,8 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                     End Using
                 End Sub
             Dim iconPic As New PictureBox With {
-                .Size = New Size(18, 18),
-                .Location = New Point(8, 8),
-                .BackColor = Color.Transparent,
-                .SizeMode = PictureBoxSizeMode.Zoom
+                .Size = New Size(18, 18), .Location = New Point(8, 8),
+                .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom
             }
             If fd.img IsNot Nothing Then iconPic.Image = fd.img
             iconTile.Controls.Add(iconPic)
@@ -906,14 +1064,12 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
             iconTile.Region = New Region(iconPath2)
 
             Dim lblFieldCap As New Label With {
-                .Text = fd.lbl,
-                .Font = New Font("Segoe UI", 8.5F),
+                .Text = fd.lbl, .Font = New Font("Segoe UI", 8.5F),
                 .ForeColor = FaintText, .AutoSize = True,
                 .Location = New Point(66, yf + 2), .BackColor = Color.Transparent
             }
             Dim lblFieldVal As New Label With {
-                .Text = fd.val,
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .Text = fd.val, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
                 .ForeColor = MintDark, .AutoSize = True,
                 .Location = New Point(66, yf + 18), .BackColor = Color.Transparent
             }
@@ -923,36 +1079,27 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
 
         Dim actionBarY As Integer = yf + 12
         Dim actionBar As New Panel With {
-        .BackColor = Color.Transparent,
-        .Location = New Point(0, actionBarY),
-        .Height = 56,
-        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-    }
+            .BackColor = Color.Transparent, .Location = New Point(0, actionBarY),
+            .Height = 56, .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
         AddHandler actionBar.Paint,
-        Sub(s, e)
-            Using pen As New Pen(CardBorder, 1)
-                e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
-            End Using
-        End Sub
+            Sub(s, e)
+                Using pen As New Pen(CardBorder, 1)
+                    e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
+                End Using
+            End Sub
         AddHandler infoCard.Resize, Sub() actionBar.Width = infoCard.Width
 
-        ' ── Edit button ───────────────────────────────────────────────────────
         Dim btnEdit As New Button With {
-        .Text = "✎  Edit",
-        .Size = New Size(100, 36),
-        .FlatStyle = FlatStyle.Flat,
-        .BackColor = MintPrimary,
-        .ForeColor = Color.White,
-        .Font = New Font("Segoe UI Semibold", 10),
-        .Cursor = Cursors.Hand
-    }
+            .Text = "✎  Edit", .Size = New Size(100, 36), .FlatStyle = FlatStyle.Flat,
+            .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand
+        }
         btnEdit.FlatAppearance.BorderSize = 0
         RoundControl(btnEdit, 8)
         Dim capId As Integer = supplierId
         AddHandler btnEdit.Click, Sub() LoadForm(capId)
 
-        ' ── Delete button ─────────────────────────────────────────────────────
-        ' Load delete.png and tint it red
         Dim deleteIconImg As Image = Nothing
         Dim deleteIconPath As String = IO.Path.Combine(Application.StartupPath, "delete.png")
         If IO.File.Exists(deleteIconPath) Then
@@ -978,13 +1125,9 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         End If
 
         Dim btnDelete As New Button With {
-            .Text = "Delete",
-            .Size = New Size(110, 36),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.White,
-            .ForeColor = NegativeClr,
-            .Font = New Font("Segoe UI Semibold", 10),
-            .Cursor = Cursors.Hand
+            .Text = "Delete", .Size = New Size(110, 36), .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.White, .ForeColor = NegativeClr,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand
         }
         btnDelete.FlatAppearance.BorderSize = 0
         AddHandler btnDelete.Paint,
@@ -999,12 +1142,10 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                         e.Graphics.DrawPath(pen, path)
                     End Using
                 End Using
-                ' Draw icon + text centered together
                 Dim iconSize As Integer = 16
                 Dim gap As Integer = 6
                 Dim sf As New StringFormat With {
-                    .Alignment = StringAlignment.Near,
-                    .LineAlignment = StringAlignment.Center
+                    .Alignment = StringAlignment.Near, .LineAlignment = StringAlignment.Center
                 }
                 Using brush As New SolidBrush(b.ForeColor)
                     Dim textSz As SizeF = e.Graphics.MeasureString(b.Text, b.Font)
@@ -1021,55 +1162,50 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 End Using
             End Sub
         AddHandler btnDelete.MouseEnter,
-        Sub()
-            btnDelete.BackColor = Color.FromArgb(251, 234, 234)
-            btnDelete.Invalidate()
-        End Sub
+            Sub()
+                btnDelete.BackColor = Color.FromArgb(251, 234, 234)
+                btnDelete.Invalidate()
+            End Sub
         AddHandler btnDelete.MouseLeave,
-        Sub()
-            btnDelete.BackColor = Color.White
-            btnDelete.Invalidate()
-        End Sub
+            Sub()
+                btnDelete.BackColor = Color.White
+                btnDelete.Invalidate()
+            End Sub
         AddHandler btnDelete.Click,
-        Sub()
-            Dim confirm = AppModal.Show(
-                "Are you sure you want to delete """ & sup.Name & """?" &
-                Environment.NewLine & "This cannot be undone.",
-                "Delete Supplier",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
-            If confirm = DialogResult.Yes Then
-                Try
-                    Using conn = Db.GetConnection()
-                        conn.Open()
-                        Using cmd As New MySqlCommand(
-                            "DELETE FROM suppliers WHERE supplier_id = @id", conn)
-                            cmd.Parameters.AddWithValue("@id", supplierId)
-                            cmd.ExecuteNonQuery()
+            Sub()
+                Dim confirm = AppModal.Show(
+                    "Are you sure you want to delete """ & sup.Name & """?" &
+                    Environment.NewLine & "This cannot be undone.",
+                    "Delete Supplier", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+                If confirm = DialogResult.Yes Then
+                    Try
+                        Using conn = Db.GetConnection()
+                            conn.Open()
+                            Using cmd As New MySqlCommand("DELETE FROM suppliers WHERE supplier_id = @id", conn)
+                                cmd.Parameters.AddWithValue("@id", supplierId)
+                                cmd.ExecuteNonQuery()
+                            End Using
                         End Using
-                    End Using
-                    AppModal.Show("Supplier deleted.", "Deleted",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information)
-                    RenderList()
-                Catch ex As Exception
-                    AppModal.Show("Could not delete supplier:" &
-                        Environment.NewLine & ex.Message,
-                        "Database Error",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error)
-                End Try
-            End If
-        End Sub
+                        AppModal.Show("Supplier deleted.", "Deleted",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information)
+                        RenderList()
+                    Catch ex As Exception
+                        AppModal.Show("Could not delete supplier:" & Environment.NewLine & ex.Message,
+                            "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    End Try
+                End If
+            End Sub
 
         actionBar.Controls.AddRange({btnEdit, btnDelete})
 
-        ' Position action buttons right-aligned, vertically centred
         Dim PositionActionBtns As Action =
-        Sub()
-            Dim t As Integer = (actionBar.Height - btnEdit.Height) \ 2
-            btnEdit.Top = t
-            btnEdit.Left = actionBar.Width - 20 - btnEdit.Width
-            btnDelete.Top = t
-            btnDelete.Left = btnEdit.Left - btnDelete.Width - 10
-        End Sub
+            Sub()
+                Dim t As Integer = (actionBar.Height - btnEdit.Height) \ 2
+                btnEdit.Top = t
+                btnEdit.Left = actionBar.Width - 20 - btnEdit.Width
+                btnDelete.Top = t
+                btnDelete.Left = btnEdit.Left - btnDelete.Width - 10
+            End Sub
         AddHandler actionBar.Resize, Sub() PositionActionBtns()
         PositionActionBtns()
 
@@ -1082,11 +1218,11 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         body.Controls.Add(spacer1)
         body.Controls.Add(infoCard)
 
-        ' ── Header: back pill + title (NO Edit Supplier button here) ─────────
+        ' ── Detail header ─────────────────────────────────────────────────────
         Dim header As New Panel With {
-        .Height = 80, .BackColor = MintBg,
-        .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
-    }
+            .Height = 80, .BackColor = MintBg,
+            .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
+        }
         Dim iconPathD As String = IO.Path.Combine(Application.StartupPath, "previous.png")
         Dim picBackD As New PictureBox With {
             .Size = New Size(22, 22), .Location = New Point(24, 36),
@@ -1116,13 +1252,13 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
         AddHandler picBackD.Click, Sub() RenderList()
         AddHandler picBackD.MouseEnter, Sub() picBackD.BackColor = Color.FromArgb(30, 0, 130, 109)
         AddHandler picBackD.MouseLeave, Sub() picBackD.BackColor = Color.Transparent
-        Dim lblTitle As New Label With {
+        Dim lblTitleD As New Label With {
             .Text = "Supplier",
             .Font = New Font("Segoe UI", 22, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
             .Location = New Point(picBackD.Right + 10, 24), .BackColor = Color.Transparent
         }
-        header.Controls.AddRange({picBackD, lblTitle})
+        header.Controls.AddRange({picBackD, lblTitleD})
 
         container.Controls.Add(body)
         container.Controls.Add(header)
@@ -1132,62 +1268,68 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
     Private Shared Sub AddDetailRow(parent As Panel, label As String, value As String, y As Integer,
                                     Optional anchorBottom As Integer = 0)
         Dim lbl As New Label With {
-    .Text = label, .Font = New Font("Segoe UI Semibold", 10),
-    .ForeColor = FaintText, .AutoSize = False, .Size = New Size(140, 24),
-    .Location = New Point(22, y), .BackColor = Color.Transparent
-}
+            .Text = label, .Font = New Font("Segoe UI Semibold", 10),
+            .ForeColor = FaintText, .AutoSize = False, .Size = New Size(140, 24),
+            .Location = New Point(22, y), .BackColor = Color.Transparent
+        }
         Dim val As New Label With {
-    .Text = value, .Font = New Font("Segoe UI", 11),
-    .ForeColor = MintDark, .AutoSize = True, .Location = New Point(170, y), .BackColor = Color.Transparent
-}
+            .Text = value, .Font = New Font("Segoe UI", 11),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(170, y), .BackColor = Color.Transparent
+        }
         parent.Controls.AddRange({lbl, val})
     End Sub
 
     Private Shared Function BuildHistoryRow(h As POHistRow, height As Integer) As Panel
-        Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
+        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+
+        Dim accentClr As Color
+        Select Case h.Status
+            Case "Ordered" : accentClr = MintDeep
+            Case "Draft" : accentClr = FaintText
+            Case "Partially Received" : accentClr = WarningClr
+            Case "Received" : accentClr = PositiveClr
+            Case "Cancelled" : accentClr = NegativeClr
+            Case Else : accentClr = SubText
+        End Select
+
         AddHandler row.Paint,
             Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 20, row.Height - 1, row.Width - 20, row.Height - 1)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                ' Row tile
+                Dim rect As New Rectangle(0, 3, row.Width - 1, row.Height - 6)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using br As New SolidBrush(Color.FromArgb(246, 251, 249))
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                    Using pen As New Pen(RowDivider, 1.0F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                ' Left accent bar — full tile height
+                Using br As New SolidBrush(accentClr)
+                    Using path As GraphicsPath = RoundRect(New Rectangle(0, 3, 5, row.Height - 6), 3)
+                        e.Graphics.FillPath(br, path)
+                    End Using
                 End Using
             End Sub
 
         Dim lblPo As New Label With {
-    .Text = h.PoNo, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 6), .BackColor = Color.Transparent
+            .Text = h.PoNo,
+            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, 8), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
-    .Text = h.OrderDate.ToString("MMM d, yyyy") & "   " & ChrW(8226) & "   " &
-            h.ItemCount & If(h.ItemCount = 1, " item", " items"),
-    .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(20, 26), .BackColor = Color.Transparent
+            .Text = h.OrderDate.ToString("MMM d, yyyy") & "   " & ChrW(8226) & "   " &
+                    h.ItemCount & If(h.ItemCount = 1, " item", " items"),
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(20, 28), .BackColor = Color.Transparent
         }
         row.Controls.AddRange({lblPo, lblMeta})
 
-        Dim st = StatusInfo(h.Status)
-        Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
-            .Padding = New Padding(8, 3, 8, 3), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 10)
-        Dim lblTotal As New Label With {
-            .Text = Peso & h.TotalCost.ToString("N2"), .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDeep, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        row.Controls.AddRange({badge, lblTotal})
-
-        AddHandler row.Resize,
-            Sub()
-                lblTotal.Left = row.Width - lblTotal.Width - 24
-                lblTotal.Top = (height - lblTotal.Height) \ 2
-                badge.Left = lblTotal.Left - badge.Width - 16
-                badge.Top = (height - badge.Height) \ 2
-            End Sub
-
         Return row
     End Function
+
 
     Private Shared Function MakeChip(text As String) As Label
         Dim chip As New Label With {
@@ -1278,7 +1420,6 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 End Using
             End Using
         Catch ex As Exception
-            ' Non-fatal for the detail view
         End Try
         Return result
     End Function
@@ -1308,7 +1449,6 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
                 End Using
             End Using
         Catch ex As Exception
-            ' Non-fatal for the detail view
         End Try
         Return result
     End Function
@@ -1343,7 +1483,7 @@ txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.E
     End Function
 
     ' =========================================================================
-    '  SHARED PAINT / CONTROL HELPERS  (verbatim from InventoryLowStockPanelBuilder)
+    '  PAINT / CONTROL HELPERS
     ' =========================================================================
     Private Shared Sub PaintCard(panel As Panel, e As PaintEventArgs)
         PanelRenderer.Draw(panel, e, True)

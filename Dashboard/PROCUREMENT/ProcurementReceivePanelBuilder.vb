@@ -13,16 +13,16 @@ Imports MySql.Data.MySqlClient
 '    2. Receive — one PO's lines: product, ordered qty, already-received,
 '                 and a "qty received now" input. Partial receipt allowed.
 '
-'  SAVE — the heart of this screen — replicates
-'  InventoryStockAdjustmentPanelBuilder.CommitAdjustment() EXACTLY:
+'  SAVE — Phase 1 of the two-phase goods-receipt flow:
 '    * everything in ONE MySqlTransaction
-'    * FOR UPDATE re-read of products.stock_qty before each write
 '    * INSERT stock_movements (movement_type='Purchase', reference_type='receive',
-'      note='Received via PO ' & poNo)  then  UPDATE products.stock_qty += received
+'      note='Received via PO ' & poNo)   — records goods arriving at the dock
+'    * products.stock_qty is NOT updated here — that happens in Phase 2
+'      (Inventory → Put Away) when staff physically places goods on the shelf
 '    * rollback on any error
 '  After the writes, the PO becomes 'Received' (all lines fully in) or
-'  'Partially Received' (some still outstanding). reference_id = po_id lets us
-'  track cumulative receipts so a PO can be received over several sessions.
+'  'Partially Received' (some still outstanding). reference_id = po_id lets
+'  InventoryPutAwayPanelBuilder compute pending = received − shelved_qty.
 '
 '  Shared-only, no instance state. Verbatim helpers from
 '  InventoryLowStockPanelBuilder.
@@ -61,6 +61,7 @@ Public Class ProcurementReceivePanelBuilder
         Public ProductId As Integer
         Public ProductName As String
         Public Sku As String
+        Public ImagePath As String
         Public OrderedQty As Integer
         Public AlreadyReceived As Integer
         Public ReceiveNow As Integer
@@ -76,6 +77,7 @@ Public Class ProcurementReceivePanelBuilder
     Private Shared receiveLines As New List(Of ReceiveLine)
     Private Shared currentPoId As Integer
     Private Shared currentPoNo As String
+    Private Shared currentSupplierName As String
     Private Shared btnSaveRef As Button
 
     ' =========================================================================
@@ -162,47 +164,157 @@ Public Class ProcurementReceivePanelBuilder
     End Function
 
     Private Shared Function BuildReceiveCard(po As ReceivePORow) As Panel
-        Dim card As New BufferedPanel With {.Height = 84, .BackColor = CardBg, .Cursor = Cursors.Hand}
-        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        Dim cardH As Integer = 138
+        Dim card As New BufferedPanel With {.Height = cardH, .BackColor = CardBg, .Cursor = Cursors.Hand}
 
+        ' ── Paint: PanelRenderer + clipped left accent bar ───────────────────────
+        AddHandler card.Paint,
+            Sub(s, e)
+                PaintCard(CType(s, Panel), e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim accentClr As Color = If(po.Status = "Partially Received", WarningClr, MintDeep)
+                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
+                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
+                    e.Graphics.SetClip(clipPath)
+                    Using br As New SolidBrush(accentClr)
+                        e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, cardH - 28))
+                    End Using
+                    e.Graphics.ResetClip()
+                End Using
+            End Sub
+
+        ' ── Text ─────────────────────────────────────────────────────────────────
         Dim lblPo As New Label With {
-            .Text = po.PoNo, .Font = New Font("Segoe UI", 12, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
+            .Text = po.PoNo,
+            .Font = New Font("Segoe UI", 16, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(22, 18), .BackColor = Color.Transparent
+        }
+        Dim lblSupplier As New Label With {
+            .Text = po.SupplierName,
+            .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(24, 52), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
-            .Text = po.SupplierName & "   " & ChrW(8226) & "   " &
-                    If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d, yyyy"), "No expected date") &
+            .Text = If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d, yyyy"), "No expected date") &
                     "   " & ChrW(8226) & "   " & po.ItemCount & If(po.ItemCount = 1, " item", " items"),
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(20, 44), .BackColor = Color.Transparent
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = Color.FromArgb(72, 92, 87), .AutoSize = True,
+            .Location = New Point(24, 76), .BackColor = Color.Transparent
         }
-        card.Controls.AddRange({lblPo, lblMeta})
+        card.Controls.AddRange({lblPo, lblSupplier, lblMeta})
 
-        Dim st = StatusInfo(po.Status)
+        ' ── Status badge — solid fill, TOP-RIGHT ─────────────────────────────────
+        Dim badgeFore As Color = Color.White
+        Dim badgeBack As Color
+        Select Case po.Status
+            Case "Ordered" : badgeBack = MintDeep
+            Case "Partially Received" : badgeBack = WarningClr
+            Case Else : badgeBack = SubText
+        End Select
         Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
-            .Padding = New Padding(9, 4, 9, 4), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            .Text = StatusInfo(po.Status).text,
+            .Font = New Font("Segoe UI Semibold", 11.0F, FontStyle.Bold),
+            .ForeColor = badgeFore, .BackColor = badgeBack,
+            .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(badge, 11)
+        RoundLabel(badge, 12)
         card.Controls.Add(badge)
 
-        Dim lnkReceive As Label = MakeLink("Receive " & ChrW(8594), MintPrimary)
-        lnkReceive.Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        card.Controls.Add(lnkReceive)
+        ' ── "Receive >" pill — thick drawn chevron, BOTTOM-RIGHT ─────────────────
+        Dim vpH As Integer = 38
+        Dim vpW As Integer = 114
+        Dim receivePill As New BufferedPanel With {
+            .Size = New Size(vpW, vpH),
+            .BackColor = TileBg,
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        Dim vpRgn As New GraphicsPath()
+        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
+        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
+        vpRgn.CloseFigure()
+        receivePill.Region = New Region(vpRgn)
 
+        AddHandler receivePill.Paint,
+            Sub(s, e)
+                Dim b As BufferedPanel = CType(s, BufferedPanel)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
+                    Using br As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                Using f As New Font("Segoe UI Semibold", 11.5F, FontStyle.Bold),
+                      br As New SolidBrush(MintDeep)
+                    Dim sf As New StringFormat With {
+                        .Alignment = StringAlignment.Near,
+                        .LineAlignment = StringAlignment.Center
+                    }
+                    e.Graphics.DrawString("Receive", f, br, New RectangleF(14, 0, 68, b.Height), sf)
+                End Using
+                Dim chX As Single = b.Width - 22
+                Dim midY As Single = b.Height / 2.0F
+                Dim arm As Single = 9
+                Using pen As New Pen(MintDeep, 2.5F)
+                    pen.LineJoin = LineJoin.Round
+                    pen.StartCap = LineCap.Round
+                    pen.EndCap = LineCap.Round
+                    e.Graphics.DrawLines(pen, New PointF() {
+                        New PointF(chX, midY - arm),
+                        New PointF(chX + arm * 0.7F, midY),
+                        New PointF(chX, midY + arm)
+                    })
+                End Using
+            End Sub
+
+        AddHandler receivePill.MouseEnter,
+            Sub()
+                receivePill.BackColor = Color.FromArgb(180, 230, 218)
+                receivePill.Invalidate()
+            End Sub
+        AddHandler receivePill.MouseLeave,
+            Sub()
+                receivePill.BackColor = TileBg
+                receivePill.Invalidate()
+            End Sub
+        card.Controls.Add(receivePill)
+
+        ' ── Click handlers ───────────────────────────────────────────────────────
         Dim capId As Integer = po.PoId
-        AddHandler lnkReceive.Click, Sub() LoadReceiveForm(capId)
+        AddHandler receivePill.Click, Sub() LoadReceiveForm(capId)
         AddHandler card.Click, Sub() LoadReceiveForm(capId)
         AddHandler lblPo.Click, Sub() LoadReceiveForm(capId)
+        AddHandler lblSupplier.Click, Sub() LoadReceiveForm(capId)
         AddHandler lblMeta.Click, Sub() LoadReceiveForm(capId)
 
+        ' ── Hover ────────────────────────────────────────────────────────────────
+        AddHandler card.MouseEnter,
+            Sub()
+                card.BackColor = Color.FromArgb(248, 252, 250)
+                card.Invalidate()
+            End Sub
+        AddHandler card.MouseLeave,
+            Sub()
+                card.BackColor = CardBg
+                card.Invalidate()
+            End Sub
+
+        ' ── Resize ───────────────────────────────────────────────────────────────
         AddHandler card.Resize,
             Sub()
-                lnkReceive.Left = card.Width - lnkReceive.Width - 22
-                lnkReceive.Top = 46
-                badge.Left = card.Width - badge.Width - 22
-                badge.Top = 16
+                Const rPad As Integer = 24
+                badge.Left = card.Width - badge.Width - rPad
+                badge.Top = 22
+                receivePill.Left = card.Width - receivePill.Width - rPad
+                receivePill.Top = cardH - receivePill.Height - 22
+                Dim rightStop As Integer = badge.Left - 20
+                lblPo.MaximumSize = New Size(Math.Max(80, rightStop - 22), 30)
+                lblSupplier.MaximumSize = New Size(Math.Max(80, rightStop - 24), 26)
+                lblMeta.MaximumSize = New Size(Math.Max(80, rightStop - 24), 26)
             End Sub
 
         Return card
@@ -262,6 +374,7 @@ Public Class ProcurementReceivePanelBuilder
 
         currentPoId = poId
         currentPoNo = poNo
+        currentSupplierName = supplierName
         receiveLines = LoadReceiveLines(poId)
 
         container.SuspendLayout()
@@ -269,67 +382,122 @@ Public Class ProcurementReceivePanelBuilder
         container.BackColor = MintBg
 
         Dim body As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 4, 24, 20), .AutoScroll = True
+            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(0, 4, 0, 20), .AutoScroll = True
         }
-
         ' ---- Lines card ----
-        Dim linesHeight As Integer = 64 + Math.Max(1, receiveLines.Count) * 64 + 14
+        Dim linesHeight As Integer = 80 + Math.Max(1, receiveLines.Count) * 92 + 14
         Dim linesCard As New BufferedPanel With {.Height = linesHeight, .BackColor = CardBg, .Dock = DockStyle.Top}
-        AddHandler linesCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        AddHandler linesCard.Paint,
+              Sub(s, e)
+                  PaintCard(CType(s, Panel), e)
+                  e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                  Dim clipRect As New Rectangle(1, 1, linesCard.Width - 2, linesCard.Height - 2)
+                  Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
+                      e.Graphics.SetClip(clipPath)
+                      Using br As New SolidBrush(MintDeep)
+                          e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, linesCard.Height - 28))
+                      End Using
+                      e.Graphics.ResetClip()
+                  End Using
+              End Sub
 
         Dim lblHead As New Label With {
-            .Text = "Line Items", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
+            .Text = "Line Items",
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, 16), .BackColor = Color.Transparent
         }
+        Dim itemCountPill As New Label With {
+            .Text = receiveLines.Count & If(receiveLines.Count = 1, " item", " items"),
+            .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+            .ForeColor = MintDeep, .BackColor = TileBg,
+            .AutoSize = True, .Padding = New Padding(10, 4, 10, 4),
+            .Location = New Point(130, 20)
+        }
+        RoundLabel(itemCountPill, 10)
+        itemCountPill.Top = lblHead.Top + (lblHead.PreferredHeight - itemCountPill.PreferredHeight) \ 2
         Dim lblHint As New Label With {
-            .Text = "Enter how many of each you're receiving now. Partial receipts are fine.",
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(22, 40), .BackColor = Color.Transparent
+            .Text = "All remaining quantities will be received on save.",
+            .Font = New Font("Segoe UI", 9.0F), .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(22, 48), .BackColor = Color.Transparent
         }
-        linesCard.Controls.AddRange({lblHead, lblHint})
+        linesCard.Controls.AddRange({lblHead, itemCountPill, lblHint})
 
         If receiveLines.Count = 0 Then
-            Dim lbl As New Label With {
-                .Text = "This purchase order has no line items.", .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(20, 64), .BackColor = Color.Transparent
-            }
-            linesCard.Controls.Add(lbl)
+            linesCard.Controls.Add(New Label With {
+                .Text = "This purchase order has no line items.",
+                .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(20, 72), .BackColor = Color.Transparent
+            })
         Else
-            Dim y As Integer = 64
+            Dim y As Integer = 72
             For Each ln In receiveLines
-                Dim r As Panel = BuildReceiveLineRow(ln, 64)
-                r.Location = New Point(0, y)
-                r.Width = linesCard.ClientSize.Width - 4
+                Dim r As Panel = BuildReceiveLineRow(ln, 84)
+                r.Location = New Point(12, y)
+                r.Width = linesCard.ClientSize.Width - 24
                 r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 linesCard.Controls.Add(r)
-                y += 64
+                y += 92
             Next
             AddHandler linesCard.Resize,
                 Sub()
-                    Dim w As Integer = linesCard.ClientSize.Width - 4
+                    Dim w As Integer = linesCard.ClientSize.Width - 24
                     For Each c As Control In linesCard.Controls
                         If TypeOf c Is Panel Then c.Width = w
                     Next
                 End Sub
         End If
 
-        body.Controls.Add(linesCard)
-
         ' ---- Header bar ----
-        Dim header As New Panel With {.Height = 110, .BackColor = MintBg, .Padding = New Padding(24, 18, 24, 0), .Dock = DockStyle.Top}
+        Dim header As New Panel With {
+            .Height = 86, .BackColor = MintBg,
+            .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
+        }
+
+        Dim iconPath As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        Dim picBack As New PictureBox With {
+            .Size = New Size(22, 22), .Location = New Point(24, 30),
+            .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
+        }
+        If IO.File.Exists(iconPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPath)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                                0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                picBack.Image = bmp
+                raw.Dispose()
+            Catch
+            End Try
+        End If
+        AddHandler picBack.Click, Sub() RenderList()
+        AddHandler picBack.MouseEnter, Sub() picBack.BackColor = Color.FromArgb(30, 0, 130, 109)
+        AddHandler picBack.MouseLeave, Sub() picBack.BackColor = Color.Transparent
+
+        Dim textLeft As Integer = picBack.Left
         Dim lblTitle As New Label With {
-            .Text = "Receive " & poNo, .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 14)
+            .Text = "Receive " & poNo,
+            .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(textLeft + 32, 14), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
             .Text = supplierName & "   " & ChrW(8226) & "   " &
                     If(hasExp, "Expected " & expDate.ToString("MMM d, yyyy"), "No expected date"),
-            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 54)
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(textLeft + 34, 50), .BackColor = Color.Transparent
         }
-        Dim lnkBack As Label = MakeLink(ChrW(8592) & " Back to list", SubText)
-        lnkBack.Location = New Point(26, 78)
-        AddHandler lnkBack.Click, Sub() RenderList()
-        header.Controls.AddRange({lblTitle, lblMeta, lnkBack})
 
         btnSaveRef = New Button With {
             .Text = "Save Receipt", .Size = New Size(150, 42),
@@ -340,77 +508,183 @@ Public Class ProcurementReceivePanelBuilder
         btnSaveRef.FlatAppearance.BorderSize = 0
         RoundControl(btnSaveRef, 10)
         AddHandler btnSaveRef.Click, Sub() CommitReceive()
-        header.Controls.Add(btnSaveRef)
-        AddHandler header.Resize, Sub()
-                                      btnSaveRef.Top = 26
-                                      btnSaveRef.Left = header.Width - 24 - btnSaveRef.Width
-                                  End Sub
-        btnSaveRef.Top = 26
+
+        header.Controls.AddRange({picBack, lblTitle, lblMeta, btnSaveRef})
+        AddHandler header.Resize,
+            Sub()
+                btnSaveRef.Top = 22
+                btnSaveRef.Left = header.Width - 24 - btnSaveRef.Width
+            End Sub
+        btnSaveRef.Top = 22
         btnSaveRef.Left = 700
+        linesCard.Dock = DockStyle.None
+        linesCard.Width = body.ClientSize.Width - 48
+        linesCard.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        linesCard.Location = New Point(32, 12)
+
+        body.Controls.Add(linesCard)
+
+        AddHandler body.Resize,
+            Sub()
+                linesCard.Width = Math.Max(200, body.ClientSize.Width - 64)
+            End Sub
 
         container.Controls.Add(body)
         container.Controls.Add(header)
         container.ResumeLayout()
+
+        ' Force resize to settle widths
+        body.PerformLayout()
     End Sub
 
     Private Shared Function BuildReceiveLineRow(ln As ReceiveLine, height As Integer) As Panel
-        Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
+        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+
         AddHandler row.Paint,
             Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 20, row.Height - 1, row.Width - 20, row.Height - 1)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As New Rectangle(0, 3, row.Width - 1, row.Height - 6)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using br As New SolidBrush(Color.FromArgb(246, 251, 249))
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                    Using pen As New Pen(Color.FromArgb(200, 228, 218), 1.0F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
                 End Using
             End Sub
 
+        ' ── Product image or initial fallback ────────────────────────────────
+        Dim avSize As Integer = 52
+        Dim avLeft As Integer = 14
+        Dim avTop As Integer = (height - avSize) \ 2
+
+        Dim imgLoaded As Boolean = False
+        If Not String.IsNullOrWhiteSpace(ln.ImagePath) AndAlso IO.File.Exists(ln.ImagePath) Then
+            Try
+                Dim pic As New PictureBox With {
+                    .Size = New Size(avSize, avSize),
+                    .Location = New Point(avLeft, avTop),
+                    .SizeMode = PictureBoxSizeMode.Zoom,
+                    .BackColor = Color.Transparent
+                }
+                pic.Image = Image.FromFile(ln.ImagePath)
+                ' clip to rounded square
+                Dim clipPath As New GraphicsPath()
+                clipPath.AddArc(0, 0, 12, 12, 180, 90)
+                clipPath.AddArc(avSize - 12, 0, 12, 12, 270, 90)
+                clipPath.AddArc(avSize - 12, avSize - 12, 12, 12, 0, 90)
+                clipPath.AddArc(0, avSize - 12, 12, 12, 90, 90)
+                clipPath.CloseFigure()
+                pic.Region = New Region(clipPath)
+                row.Controls.Add(pic)
+                imgLoaded = True
+            Catch
+            End Try
+        End If
+
+        If Not imgLoaded Then
+            Dim initial As String = If(String.IsNullOrWhiteSpace(ln.ProductName), "?",
+                                       ln.ProductName.Trim().Substring(0, 1).ToUpperInvariant())
+            Dim avatar As New BufferedPanel With {
+                .Size = New Size(avSize, avSize),
+                .Location = New Point(avLeft, avTop),
+                .BackColor = Color.Transparent
+            }
+            AddHandler avatar.Paint,
+                Sub(s, e)
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                    Dim av As New Rectangle(0, 0, avSize - 1, avSize - 1)
+                    Using path As GraphicsPath = RoundRect(av, 12)
+                        Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 135.0F)
+                            e.Graphics.FillPath(br, path)
+                        End Using
+                    End Using
+                    Using f As New Font("Segoe UI", 20, FontStyle.Bold),
+                          br As New SolidBrush(Color.White)
+                        Dim sz As SizeF = e.Graphics.MeasureString(initial, f)
+                        e.Graphics.DrawString(initial, f, br,
+                            (avSize - sz.Width) / 2.0F - 1,
+                            (avSize - sz.Height) / 2.0F)
+                    End Using
+                End Sub
+            row.Controls.Add(avatar)
+        End If
+
+        ' ── Text ─────────────────────────────────────────────────────────────
+        Dim textX As Integer = avLeft + avSize + 16
         Dim lblName As New Label With {
-            .Text = ln.ProductName, .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 12), .BackColor = Color.Transparent
+            .Text = ln.ProductName,
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(textX, 10), .BackColor = Color.Transparent
         }
-        Dim lblMeta As New Label With {
-            .Text = ln.Sku & "   " & ChrW(8226) & "   Ordered " & ln.OrderedQty &
-                    "   " & ChrW(8226) & "   Already received " & ln.AlreadyReceived,
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(20, 35), .BackColor = Color.Transparent
+        Dim lblSku As New Label With {
+            .Text = ln.Sku,
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(textX, 36), .BackColor = Color.Transparent
         }
-        row.Controls.AddRange({lblName, lblMeta})
+        Dim lblOrderInfo As New Label With {
+            .Text = "Ordered: " & ln.OrderedQty,
+            .Font = New Font("Segoe UI", 10.5F), .ForeColor = Color.FromArgb(72, 92, 87),
+            .AutoSize = True,
+            .Location = New Point(textX, 56), .BackColor = Color.Transparent
+        }
+        row.Controls.AddRange({lblName, lblSku, lblOrderInfo})
 
-        ' Remaining badge
-        Dim remBadge As New Label With {
-            .Text = ln.Remaining & " left", .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = If(ln.Remaining > 0, WarningClr, PositiveClr),
-            .BackColor = If(ln.Remaining > 0, Color.FromArgb(252, 240, 228), Color.FromArgb(232, 245, 233)),
-            .AutoSize = True, .Padding = New Padding(8, 3, 8, 3),
+        ' ── Qty tile ─────────────────────────────────────────────────────────
+        Dim tileW As Integer = 78
+        Dim tileH As Integer = 60
+        Dim qtyTile As New BufferedPanel With {
+            .Size = New Size(tileW, tileH),
+            .BackColor = Color.Transparent,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(remBadge, 10)
-        row.Controls.Add(remBadge)
-
-        ' Receive-now input
-        Dim lblCap As New Label With {
-            .Text = "Receive now", .Font = New Font("Segoe UI", 7.5F, FontStyle.Bold), .ForeColor = FaintText,
-            .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        Dim txtQty As New TextBox With {
-            .Text = ln.ReceiveNow.ToString(), .Font = New Font("Segoe UI", 11), .Width = 70,
-            .TextAlign = HorizontalAlignment.Center, .BorderStyle = BorderStyle.FixedSingle,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        row.Controls.AddRange({lblCap, txtQty})
-
-        Dim capLine As ReceiveLine = ln
-        AddHandler txtQty.TextChanged,
-            Sub()
-                capLine.ReceiveNow = SafeIntStr(txtQty.Text)
+        AddHandler qtyTile.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, tileW - 1, tileH - 1)
+                Using path As GraphicsPath = RoundRect(r, 10)
+                    ' White fill
+                    Using br As New SolidBrush(Color.White)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                    ' Hairline mint border
+                    Using pen As New Pen(Color.FromArgb(180, 210, 198), 1.0F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                ' Big number in MintDark
+                Using f As New Font("Segoe UI", 22, FontStyle.Bold),
+                      br As New SolidBrush(MintDark)
+                    Dim sf As New StringFormat With {
+                        .Alignment = StringAlignment.Center,
+                        .LineAlignment = StringAlignment.Near
+                    }
+                    e.Graphics.DrawString(ln.Remaining.ToString(), f, br,
+                        New RectangleF(0, 6, tileW, 36), sf)
+                End Using
+                ' Small label in SubText
+                Using f As New Font("Segoe UI", 7.5F),
+                      br As New SolidBrush(SubText)
+                    Dim sf As New StringFormat With {
+                        .Alignment = StringAlignment.Center,
+                        .LineAlignment = StringAlignment.Near
+                    }
+                    e.Graphics.DrawString("to receive", f, br,
+                        New RectangleF(0, 41, tileW, 14), sf)
+                End Using
             End Sub
+        row.Controls.Add(qtyTile)
 
         AddHandler row.Resize,
             Sub()
-                txtQty.Left = row.Width - txtQty.Width - 24
-                txtQty.Top = (height - txtQty.Height) \ 2 + 4
-                lblCap.Left = txtQty.Left
-                lblCap.Top = txtQty.Top - 15
-                remBadge.Left = txtQty.Left - remBadge.Width - 18
-                remBadge.Top = (height - remBadge.Height) \ 2
+                qtyTile.Left = row.Width - qtyTile.Width - 16
+                qtyTile.Top = (height - qtyTile.Height) \ 2
+                Dim rightStop As Integer = qtyTile.Left - 14
+                lblName.MaximumSize = New Size(Math.Max(80, rightStop - textX), 28)
+                lblSku.MaximumSize = New Size(Math.Max(80, rightStop - textX), 22)
+                lblOrderInfo.MaximumSize = New Size(Math.Max(80, rightStop - textX), 24)
             End Sub
 
         Return row
@@ -440,6 +714,38 @@ Public Class ProcurementReceivePanelBuilder
             Return
         End If
 
+        ' Guard: cannot receive before the expected date
+        Dim expectedDate As DateTime = DateTime.MinValue
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT expected_date FROM purchase_orders WHERE po_id = @id LIMIT 1", conn)
+                    cmd.Parameters.AddWithValue("@id", currentPoId)
+                    Using rdr = cmd.ExecuteReader()
+                        If rdr.Read() AndAlso Not IsDBNull(rdr("expected_date")) Then
+                            expectedDate = Convert.ToDateTime(rdr("expected_date"))
+                        End If
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not verify the expected date:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return
+        End Try
+
+        If expectedDate <> DateTime.MinValue AndAlso DateTime.Today < expectedDate.Date Then
+            AppModal.Show("This purchase order cannot be received before its expected date." &
+                          Environment.NewLine & Environment.NewLine &
+                          "Expected date: " & expectedDate.ToString("MMM d, yyyy") &
+                          Environment.NewLine &
+                          "Today: " & DateTime.Today.ToString("MMM d, yyyy"),
+                          "Too Early to Receive",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
         ' Decide the resulting PO status from cumulative receipts
         Dim fullyReceived As Boolean = True
         For Each ln In receiveLines
@@ -458,15 +764,10 @@ Public Class ProcurementReceivePanelBuilder
                 Using txn As MySqlTransaction = conn.BeginTransaction()
                     Try
                         For Each ln In toReceive
-                            ' FOR UPDATE re-read of current stock (mirrors CommitAdjustment)
-                            Dim avail As Integer = 0
-                            Using cmd As New MySqlCommand(
-                                "SELECT stock_qty FROM products WHERE product_id = @pid FOR UPDATE", conn, txn)
-                                cmd.Parameters.AddWithValue("@pid", ln.ProductId)
-                                avail = Convert.ToInt32(cmd.ExecuteScalar())
-                            End Using
-
-                            ' INSERT stock movement (Purchase / receive)
+                            ' INSERT stock movement (Purchase / receive).
+                            ' Records goods confirmed arrived from supplier.
+                            ' products.stock_qty is NOT updated here — inventory
+                            ' updates it in Phase 2 via the Put Away screen.
                             Using cmd As New MySqlCommand(
                                 "INSERT INTO stock_movements " &
                                 "(product_id, user_id, movement_type, qty_change, reference_type, reference_id, note, created_at) " &
@@ -476,14 +777,6 @@ Public Class ProcurementReceivePanelBuilder
                                 cmd.Parameters.AddWithValue("@qc", ln.ReceiveNow)
                                 cmd.Parameters.AddWithValue("@poid", currentPoId)
                                 cmd.Parameters.AddWithValue("@note", note)
-                                cmd.ExecuteNonQuery()
-                            End Using
-
-                            ' UPDATE stock_qty += received
-                            Using cmd As New MySqlCommand(
-                                "UPDATE products SET stock_qty = stock_qty + @qc WHERE product_id = @pid", conn, txn)
-                                cmd.Parameters.AddWithValue("@qc", ln.ReceiveNow)
-                                cmd.Parameters.AddWithValue("@pid", ln.ProductId)
                                 cmd.ExecuteNonQuery()
                             End Using
                         Next
@@ -522,13 +815,7 @@ Public Class ProcurementReceivePanelBuilder
             Return
         End Try
 
-        Dim totalUnits As Integer = 0
-        For Each ln In toReceive
-            totalUnits += ln.ReceiveNow
-        Next
-        AppModal.Show(totalUnits & If(totalUnits = 1, " unit", " units") & " received into stock." & Environment.NewLine &
-                      currentPoNo & " is now " & newStatus & ".", "Goods Received",
-                      MessageBoxButtons.OK, MessageBoxIcon.Information)
+        ShowReceiveReceipt(currentPoNo, currentSupplierName, toReceive, newStatus)
         RenderList()
     End Sub
 
@@ -569,13 +856,52 @@ Public Class ProcurementReceivePanelBuilder
         Return result
     End Function
 
+    ' =========================================================================
+    '  RECEIPT
+    ' =========================================================================
+    Private Shared Sub ShowReceiveReceipt(poNo As String, supplierName As String,
+                                          receivedLines As List(Of ReceiveLine),
+                                          newStatus As String)
+        Dim lines As New List(Of RLine)
+
+        lines.Add(New RLine("Purchase Order", poNo, LineStyle.Bold))
+        lines.Add(New RLine("Supplier", supplierName))
+        lines.Add(New RLine("Date Received", DateTime.Now.ToString("MMM d, yyyy  h:mm tt")))
+        lines.Add(New RLine("Status", newStatus))
+        lines.Add(Divider())
+
+        lines.Add(Section("Items Received"))
+        For Each ln In receivedLines
+            If ln.ReceiveNow > 0 Then
+                lines.Add(New RLine(ln.ProductName, "x" & ln.ReceiveNow, LineStyle.Bold))
+                lines.Add(New RLine("SKU: " & ln.Sku, "", LineStyle.Normal))
+                lines.Add(Spacer())
+            End If
+        Next
+        lines.Add(Divider())
+
+        Dim totalUnits As Integer = receivedLines.Where(Function(l) l.ReceiveNow > 0).Sum(Function(l) l.ReceiveNow)
+        Dim totalLines As Integer = receivedLines.Where(Function(l) l.ReceiveNow > 0).Count()
+        lines.Add(New RLine("Total Products", totalLines & If(totalLines = 1, " product", " products")))
+        lines.Add(New RLine("Total Units", totalUnits & If(totalUnits = 1, " unit", " units"), LineStyle.Bold))
+        lines.Add(Spacer())
+        lines.Add(New RLine("Goods are pending Put Away by Inventory staff.", "", LineStyle.Muted))
+
+        ReceiptPrinter.Preview(
+            "Goods Receipt — " & poNo,
+            lines,
+            receiptNo:=poNo,
+            storeName:="PAINT STORE",
+            storeTagline:="Goods Receipt Confirmation")
+    End Sub
+
     Private Shared Function LoadReceiveLines(poId As Integer) As List(Of ReceiveLine)
         Dim result As New List(Of ReceiveLine)
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT pi.po_item_id, pi.product_id, p.name AS pname, p.sku, pi.qty, " &
+                    "SELECT pi.po_item_id, pi.product_id, p.name AS pname, p.sku, p.image_path, pi.qty, " &
                     "COALESCE((SELECT SUM(sm.qty_change) FROM stock_movements sm " &
                     " WHERE sm.reference_id = @poid AND sm.reference_type = 'receive' " &
                     " AND sm.product_id = pi.product_id), 0) AS already " &
@@ -591,9 +917,10 @@ Public Class ProcurementReceivePanelBuilder
                                 .ProductId = SafeInt(rdr("product_id")),
                                 .ProductName = rdr("pname").ToString(),
                                 .Sku = rdr("sku").ToString(),
+                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
                                 .OrderedQty = ordered,
                                 .AlreadyReceived = already,
-                                .ReceiveNow = Math.Max(0, ordered - already)   ' default to remaining
+                                .ReceiveNow = Math.Max(0, ordered - already)
                             })
                         End While
                     End Using

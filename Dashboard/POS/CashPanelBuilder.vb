@@ -33,7 +33,7 @@ Public Class CashPanelBuilder
     Private Shared _shiftStarted As DateTime = DateTime.MinValue
     Private Shared _mainContainer As Panel
 
-    Private Shared ReadOnly IconBasePath As String = "C:\Users\DELL\source\repos\PaintStore_POS\"
+    Private Shared ReadOnly IconBasePath As String = Application.StartupPath & "\"
     Private Shared ReadOnly IconCache As New Dictionary(Of String, Image)
 
     Private Shared Function GetIcon(fileName As String) As Image
@@ -192,8 +192,8 @@ Public Class CashPanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
-            ' Silently show zero values on DB error
+        Catch ex As Exception
+            System.Diagnostics.Debug.WriteLine("LoadShiftData DB error: " & ex.Message)
         End Try
     End Sub
 

@@ -1,5 +1,6 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
+Imports System.Security.Cryptography
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
 
@@ -75,7 +76,9 @@ Public Class ProcurementPOPanelBuilder
         Public Sku As String
         Public Qty As Integer
         Public UnitCost As Decimal
-        Public RequestId As Integer   ' 0 = manual (no source request)
+        Public RequestId As Integer
+        Public ColorHex As String
+        Public ImagePath As String
         Public ReadOnly Property LineTotal As Decimal
             Get
                 Return Math.Round(UnitCost * Qty, 2)
@@ -88,6 +91,8 @@ Public Class ProcurementPOPanelBuilder
         Public Name As String
         Public Sku As String
         Public Price As Decimal
+        Public ImagePath As String
+        Public ColorHex As String
         Public Overrides Function ToString() As String
             Return Name & "  (" & Sku & ")"
         End Function
@@ -110,6 +115,7 @@ Public Class ProcurementPOPanelBuilder
         Public QtyRequested As Integer
         Public RequestedBy As String
         Public ImagePath As String
+        Public ColorHex As String
     End Class
 
     ' ── STATE ────────────────────────────────────────────────────────────────────
@@ -125,6 +131,7 @@ Public Class ProcurementPOPanelBuilder
     Private Shared dtExpectedRef As DateTimePicker
     Private Shared cmbProductRef As ComboBox
     Private Shared btnSaveRef As Button
+    Private Shared isOnNewPOForm As Boolean = False
 
     ' =========================================================================
     '  ENTRY POINTS
@@ -147,6 +154,7 @@ Public Class ProcurementPOPanelBuilder
     Private Shared Sub RenderList()
         Dim container As Panel = containerRef
         If container Is Nothing Then Return
+        isOnNewPOForm = False
 
         Dim rows As List(Of PORow) = LoadList(currentFilter)
 
@@ -156,7 +164,7 @@ Public Class ProcurementPOPanelBuilder
 
         ' ---- Scrolling list ----
         Dim listHost As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 4, 24, 20)
+           .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 0, 24, 20)
         }
         Dim rowsHost As New Panel With {
             .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True
@@ -164,7 +172,7 @@ Public Class ProcurementPOPanelBuilder
         listHost.Controls.Add(rowsHost)
 
         ' ---- Top region ----
-        Dim topRegion As Panel = BuildListTop()
+        Dim topRegion As Panel = BuildListTop(rows.Count)
         topRegion.Dock = DockStyle.Top
 
         container.Controls.Add(listHost)
@@ -199,19 +207,31 @@ Public Class ProcurementPOPanelBuilder
         End If
     End Sub
 
-    Private Shared Function BuildListTop() As Panel
-        Dim region As New Panel With {.Height = 150, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+    Private Shared Function BuildListTop(Optional totalCount As Integer = 0) As Panel
+        Dim region As New Panel With {.Height = 140, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
             .Text = "Purchase Orders", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(18, 9)
         }
+        Dim subTxt As String = If(currentFilter = "All",
+            If(totalCount = 0, "No active orders",
+               totalCount & If(totalCount = 1, " active order", " active orders")),
+            If(totalCount = 0, "No " & currentFilter.ToLower() & " orders",
+               totalCount & " " & currentFilter.ToLower() & If(totalCount = 1, " order", " orders")))
+        Dim lblSub As New Label With {
+                    .Text = subTxt, .Font = New Font("Segoe UI", 11),
+                    .ForeColor = SubText, .AutoSize = True,
+                    .Location = New Point(24, 55)
+                }
         region.Controls.Add(lblTitle)
+        region.Controls.Add(lblSub)
+
 
         ' ---- New PO button (top-right) ----
         Dim btnNew As New Button With {
-            .Text = "+ New PO", .Size = New Size(130, 40),
-            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
+    .Text = "+ New PO", .Size = New Size(130, 40),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
             .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
             .TextAlign = ContentAlignment.MiddleCenter,
             .Padding = New Padding(0),
@@ -219,7 +239,7 @@ Public Class ProcurementPOPanelBuilder
         }
         btnNew.FlatAppearance.BorderSize = 0
         RoundControl(btnNew, 10)
-        AddHover(btnNew, MintPrimary, MintHover)
+        AddHover(btnNew, MintDeep, DeepHover)
         AddHandler btnNew.Click, Sub() LoadNewPOForm(0)
         region.Controls.Add(btnNew)
         AddHandler region.Resize, Sub()
@@ -232,7 +252,7 @@ Public Class ProcurementPOPanelBuilder
         ' ---- Filter tabs ----
         Dim tabs() As String = {"All", "Draft", "Ordered", "Received", "Cancelled"}
         Dim tabRow As New FlowLayoutPanel With {
-            .Left = 24, .Top = 84, .Height = 44, .AutoSize = False, .Width = 700,
+           .Left = 24, .Top = 88, .Height = 44, .AutoSize = False, .Width = 700,
             .BackColor = Color.Transparent, .WrapContents = False,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Top
         }
@@ -281,71 +301,260 @@ Public Class ProcurementPOPanelBuilder
         Return tab
     End Function
 
-    Private Shared Function BuildPOCard(po As PORow) As Panel
-        Dim card As New BufferedPanel With {.Height = 76, .BackColor = CardBg, .Cursor = Cursors.Hand}
-        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+    ' Rounded 40px thumbnail for a PO line:
+    '   paint (color_hex) -> swatch · other (image_path) -> photo · else initial
+    ' Overload: draw a thumb from raw fields (used by the pending picker).
+    Private Shared Sub PaintLineThumb(g As Graphics, box As Rectangle,
+                                      colorHex As String, imagePath As String, productName As String)
+        g.SmoothingMode = SmoothingMode.AntiAlias
+        Using path As GraphicsPath = RoundRect(box, 11)
+            ' 1 — paint colour swatch
+            If Not String.IsNullOrWhiteSpace(colorHex) Then
+                Using b As New SolidBrush(HexToColor(colorHex, MintPrimary))
+                    g.FillPath(b, path)
+                End Using
+                Using pen As New Pen(Color.FromArgb(45, 0, 0, 0), 1.0F)
+                    g.DrawPath(pen, path)
+                End Using
+                Using hi As New SolidBrush(Color.FromArgb(70, 255, 255, 255))
+                    g.FillEllipse(hi, box.X + 7, box.Y + 6, 16, 9)
+                End Using
+                Return
+            End If
 
+            ' 2 — product photo, centre-cropped
+            If Not String.IsNullOrWhiteSpace(imagePath) Then
+                Try
+                    Dim full As String = imagePath
+                    If Not IO.Path.IsPathRooted(full) Then full = IO.Path.Combine(Application.StartupPath, full)
+                    If IO.File.Exists(full) Then
+                        Using img As Image = Image.FromFile(full)
+                            g.SetClip(path)
+                            Dim src As Rectangle = CoverCrop(img.Size, box.Size)
+                            g.DrawImage(img, box, src.X, src.Y, src.Width, src.Height, GraphicsUnit.Pixel)
+                            g.ResetClip()
+                        End Using
+                        Using pen As New Pen(Color.FromArgb(30, 0, 0, 0), 1.0F)
+                            g.DrawPath(pen, path)
+                        End Using
+                        Return
+                    End If
+                Catch
+                End Try
+            End If
+
+            ' 3 — fallback initial avatar
+            Using br As New LinearGradientBrush(box, MintPrimary, MintDeep, 90.0F)
+                g.FillPath(br, path)
+            End Using
+            Dim ini As String = If(String.IsNullOrWhiteSpace(productName), "?",
+                                   productName.Trim().Substring(0, 1).ToUpperInvariant())
+            Using f As New Font("Segoe UI Semibold", 15, FontStyle.Bold), tb As New SolidBrush(Color.White)
+                Dim sz = g.MeasureString(ini, f)
+                g.DrawString(ini, f, tb, box.X + (box.Width - sz.Width) / 2.0F, box.Y + (box.Height - sz.Height) / 2.0F)
+            End Using
+        End Using
+    End Sub
+
+    ' Source rect that centre-crops an image to the target's aspect ratio.
+    Private Shared Function CoverCrop(srcSize As Size, dstSize As Size) As Rectangle
+        If srcSize.Width <= 0 OrElse srcSize.Height <= 0 Then Return New Rectangle(0, 0, 1, 1)
+        Dim sa As Double = srcSize.Width / CDbl(srcSize.Height)
+        Dim da As Double = dstSize.Width / CDbl(dstSize.Height)
+        Dim cw, ch As Integer
+        If sa > da Then ch = srcSize.Height : cw = CInt(srcSize.Height * da) Else cw = srcSize.Width : ch = CInt(srcSize.Width / da)
+        Return New Rectangle((srcSize.Width - cw) \ 2, (srcSize.Height - ch) \ 2, cw, ch)
+    End Function
+
+    Private Shared Function BuildPOCard(po As PORow) As Panel
+        Dim card As New BufferedPanel With {.Height = 150, .BackColor = CardBg, .Cursor = Cursors.Hand}
+        AddHandler card.Paint,
+            Sub(s, e)
+                PaintCard(CType(s, Panel), e)
+                ' Left accent bar tinted by status
+                Dim st2 = StatusInfo(po.Status)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using br As New SolidBrush(st2.fore)
+                    Using path = RoundRect(New Rectangle(0, 18, 6, card.Height - 36), 3)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+            End Sub
+
+        ' ════════ LEFT COLUMN — identity + meta ════════
         Dim lblPo As New Label With {
-            .Text = po.PoNo, .Font = New Font("Segoe UI", 11.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
+            .Text = po.PoNo, .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(30, 24), .BackColor = Color.Transparent
         }
         Dim lblSupplier As New Label With {
-            .Text = po.SupplierName, .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(20, 42), .BackColor = Color.Transparent
+            .Text = po.SupplierName, .Font = New Font("Segoe UI", 13),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(32, 62), .BackColor = Color.Transparent
         }
-        Dim lblDates As New Label With {
-            .Text = "Ordered " & po.OrderDate.ToString("MMM d, yyyy") & "   " & ChrW(8226) & "   " &
-                    If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d, yyyy"), "No expected date") &
-                    "   " & ChrW(8226) & "   " & po.ItemCount & If(po.ItemCount = 1, " item", " items"),
-            .Font = New Font("Segoe UI", 9), .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(300, 28), .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Top
-        }
-        card.Controls.AddRange({lblPo, lblSupplier, lblDates})
+        card.Controls.AddRange({lblPo, lblSupplier})
 
-        ' Status badge
+        Dim metaY As Integer = 102
+        Dim ordered As (cap As Label, val As Label) = MakeMetaPair(
+            "ORDERED", po.OrderDate.ToString("MMM d, yyyy"), 32, metaY)
+        Dim expected As (cap As Label, val As Label) = MakeMetaPair(
+            "EXPECTED", If(po.HasExpected, po.ExpectedDate.ToString("MMM d, yyyy"), "—"), 230, metaY)
+        Dim items As (cap As Label, val As Label) = MakeMetaPair(
+            "ITEMS", po.ItemCount & If(po.ItemCount = 1, " item", " items"), 428, metaY)
+        card.Controls.AddRange({ordered.cap, ordered.val, expected.cap, expected.val,
+                                 items.cap, items.val})
+
+
+
+        ' Status badge — top-right of card
+
         Dim st = StatusInfo(po.Status)
-        Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
-            .Padding = New Padding(9, 4, 9, 4), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 11)
-        card.Controls.Add(badge)
+        Dim badgeFore As Color = Color.White
+        Dim badgeBack As Color
+        Select Case po.Status
+            Case "Ordered" : badgeBack = MintDeep
+            Case "Draft" : badgeBack = Color.FromArgb(115, 130, 126)
+            Case "Partially Received" : badgeBack = WarningClr
+            Case "Received" : badgeBack = PositiveClr
+            Case "Cancelled" : badgeBack = NegativeClr
+            Case Else : badgeBack = SubText
+        End Select
 
-        ' Total cost
-        Dim lblTotal As New Label With {
-            .Text = Peso & po.TotalCost.ToString("N2"), .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent,
+        Dim badge As New Label With {
+            .Text = st.text,
+            .Font = New Font("Segoe UI Semibold", 12.0F, FontStyle.Bold),
+            .ForeColor = badgeFore,
+            .BackColor = badgeBack,
+            .AutoSize = True,
+            .Padding = New Padding(16, 8, 16, 8),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        card.Controls.Add(lblTotal)
+        RoundLabel(badge, 14)
+        card.Controls.Add(badge)
 
-        ' View link
-        Dim lnkView As Label = MakeLink("View", MintPrimary)
-        lnkView.Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        card.Controls.Add(lnkView)
+        ' "View >" pill — bottom-right, same drawn chevron as Suppliers screen
+        Dim vpH As Integer = 44
+        Dim vpW As Integer = 110
+        Dim viewPill As New BufferedPanel With {
+            .Size = New Size(vpW, vpH),
+            .BackColor = TileBg,
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+
+        ' Pill-shaped region (fully rounded ends)
+        Dim vpRgn As New GraphicsPath()
+        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
+        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
+        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
+        vpRgn.CloseFigure()
+        viewPill.Region = New Region(vpRgn)
+
+        AddHandler viewPill.Paint,
+            Sub(s, e)
+                Dim b As BufferedPanel = CType(s, BufferedPanel)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                ' Pill fill
+                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
+                    Using br As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                ' "View" text
+                Using f As New Font("Segoe UI Semibold", 13.0F, FontStyle.Bold),
+                      br As New SolidBrush(MintDeep)
+                    Dim sf As New StringFormat With {
+                        .Alignment = StringAlignment.Near,
+                        .LineAlignment = StringAlignment.Center
+                    }
+                    e.Graphics.DrawString("View", f, br, New RectangleF(16, 0, 56, b.Height), sf)
+                End Using
+                ' Thick ">" chevron — rounded pen
+                Dim chX As Single = b.Width - 24
+                Dim midY As Single = b.Height / 2.0F
+                Dim arm As Single = 11
+                Using pen As New Pen(MintDeep, 3.0F)
+                    pen.LineJoin = LineJoin.Round
+                    pen.StartCap = LineCap.Round
+                    pen.EndCap = LineCap.Round
+                    e.Graphics.DrawLines(pen, New PointF() {
+                        New PointF(chX, midY - arm),
+                        New PointF(chX + arm * 0.7F, midY),
+                        New PointF(chX, midY + arm)
+                    })
+                End Using
+            End Sub
+
+        AddHandler viewPill.MouseEnter,
+            Sub()
+                viewPill.BackColor = Color.FromArgb(180, 230, 218)
+                viewPill.Invalidate()
+            End Sub
+        AddHandler viewPill.MouseLeave,
+            Sub()
+                viewPill.BackColor = TileBg
+                viewPill.Invalidate()
+            End Sub
+        card.Controls.Add(viewPill)
 
         Dim capId As Integer = po.PoId
-        AddHandler lnkView.Click, Sub() LoadDetail(capId)
+        AddHandler viewPill.Click, Sub() LoadDetail(capId)
         AddHandler card.Click, Sub() LoadDetail(capId)
         AddHandler lblPo.Click, Sub() LoadDetail(capId)
         AddHandler lblSupplier.Click, Sub() LoadDetail(capId)
-        AddHandler lblDates.Click, Sub() LoadDetail(capId)
 
         AddHandler card.Resize,
             Sub()
-                badge.Left = card.Width - badge.Width - 22
-                badge.Top = 16
-                lblTotal.Left = card.Width - lblTotal.Width - 22
-                lblTotal.Top = 40
-                lnkView.Left = card.Width - lnkView.Width - 22
-                lnkView.Top = 16
-                ' keep total/badge from colliding with the link on the same right edge
-                badge.Left = lnkView.Left - badge.Width - 14
+                Const rPad As Integer = 24
+                ' Badge — top-right
+                badge.Left = card.Width - badge.Width - rPad
+                badge.Top = 22
+                ' View pill — bottom-right
+                viewPill.Left = card.Width - viewPill.Width - rPad
+                viewPill.Top = card.Height - viewPill.Height - 20
+                ' Limit left-column text width so it never overlaps the right column
+                Dim rightStop As Integer = badge.Left - 20
+                lblPo.MaximumSize = New Size(Math.Max(80, rightStop - 30), 34)
+                lblSupplier.MaximumSize = New Size(Math.Max(80, rightStop - 32), 26)
             End Sub
 
         Return card
+    End Function
+
+    ' Re-tints a (typically dark/black) icon to a solid target colour, preserving alpha.
+    Private Shared Function TintImage(src As Image, target As Color) As Image
+        Dim bmp As New Bitmap(src.Width, src.Height)
+        Using g As Graphics = Graphics.FromImage(bmp)
+            Dim cm As New Imaging.ColorMatrix(New Single()() {
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 1, 0},
+                New Single() {target.R / 255.0F, target.G / 255.0F, target.B / 255.0F, 0, 1}
+            })
+            Dim ia As New Imaging.ImageAttributes()
+            ia.SetColorMatrix(cm)
+            g.DrawImage(src, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                        0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia)
+        End Using
+        src.Dispose()
+        Return bmp
+    End Function
+
+    ' Stacked label pair: small grey caption above a readable value.
+    Private Shared Function MakeMetaPair(caption As String, value As String, x As Integer, y As Integer) As (cap As Label, val As Label)
+        Dim cap As New Label With {
+            .Text = caption, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+            .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(x, y), .BackColor = Color.Transparent
+        }
+        Dim val As New Label With {
+            .Text = value, .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(x, y + 17), .BackColor = Color.Transparent
+        }
+        Return (cap, val)
     End Function
 
     ' =========================================================================
@@ -356,6 +565,7 @@ Public Class ProcurementPOPanelBuilder
         If container Is Nothing Then Return
 
         newLines = New List(Of POLine)()
+        isOnNewPOForm = True
 
         container.SuspendLayout()
         container.Controls.Clear()
@@ -430,7 +640,7 @@ Public Class ProcurementPOPanelBuilder
                 picBack.Image = Nothing
             End Try
         End If
-        AddHandler picBack.Click, Sub() RenderList()
+        AddHandler picBack.Click, Sub() TryLeaveNewPO()
         AddHandler picBack.MouseEnter,
             Sub()
                 picBack.BackColor = Color.FromArgb(30, 0, 130, 109)
@@ -452,14 +662,14 @@ Public Class ProcurementPOPanelBuilder
 
         btnSaveRef = New Button With {
             .Text = "Save Purchase Order", .Size = New Size(210, 44),
-            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
             .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
             .TextAlign = ContentAlignment.MiddleCenter,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         btnSaveRef.FlatAppearance.BorderSize = 0
         RoundControl(btnSaveRef, 12)
-        AddHover(btnSaveRef, MintPrimary, MintHover)
+        AddHover(btnSaveRef, MintDeep, DeepHover)
         AddHandler btnSaveRef.Click, Sub() CommitNewPO()
 
         region.Controls.AddRange({picBack, lblTitle, btnSaveRef})
@@ -536,7 +746,8 @@ Public Class ProcurementPOPanelBuilder
                 g.SmoothingMode = SmoothingMode.AntiAlias
 
                 ' card tile
-                Dim rect As New Rectangle(2, 2, row.Width - 6, row.Height - 6)
+
+                Dim rect As New Rectangle(8, 3, row.Width - 14, row.Height - 6)
                 Using path As GraphicsPath = RoundRect(rect, 12)
                     Using b As New SolidBrush(If(hovered, Color.FromArgb(228, 246, 239), TileBg))
                         g.FillPath(b, path)
@@ -547,7 +758,9 @@ Public Class ProcurementPOPanelBuilder
                 End Using
 
                 ' avatar (rounded square, mint, white initial)
+                ' thumbnail — paint swatch · photo · initial
                 Dim av As New Rectangle(16, (row.Height - 44) \ 2, 44, 44)
+                PaintLineThumb(g, av, req.ColorHex, req.ImagePath, req.ProductName)
                 Using path As GraphicsPath = RoundRect(av, 13)
                     e.Graphics.SetClip(path)
                     Dim imgLoaded As Boolean = False
@@ -1303,8 +1516,8 @@ Public Class ProcurementPOPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "p.image_path, pr.qty_requested, u.full_name AS reqby " &
+                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.color_hex, p.image_path, pr.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
@@ -1319,8 +1532,9 @@ Public Class ProcurementPOPanelBuilder
                                 .Sku = rdr("sku").ToString(),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .QtyRequested = SafeInt(rdr("qty_requested")),
-                               .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
-                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString())
+                                .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
+                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
+                                .ColorHex = If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString())
                             })
                         End If
                     End Using
@@ -1454,65 +1668,67 @@ Public Class ProcurementPOPanelBuilder
     Private Shared Sub LoadDetail(poId As Integer)
         Dim container As Panel = containerRef
         If container Is Nothing Then Return
+        isOnNewPOForm = False
 
         Dim po As PORow = Nothing
-        Dim supplierName As String = ""
         Dim lines As New List(Of POLine)
 
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT po.po_no, s.name AS sname, po.order_date, po.expected_date, " &
-                    "po.status, po.total_cost " &
-                    "FROM purchase_orders po JOIN suppliers s ON po.supplier_id = s.supplier_id " &
-                    "WHERE po.po_id = @id LIMIT 1", conn)
+                "SELECT po.po_no, s.name AS sname, po.order_date, po.expected_date, " &
+                "po.status, po.total_cost " &
+                "FROM purchase_orders po JOIN suppliers s ON po.supplier_id = s.supplier_id " &
+                "WHERE po.po_id = @id LIMIT 1", conn)
                     cmd.Parameters.AddWithValue("@id", poId)
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             Dim hasExp As Boolean = Not IsDBNull(rdr("expected_date"))
                             po = New PORow With {
-                                .PoId = poId,
-                                .PoNo = rdr("po_no").ToString(),
-                                .SupplierName = rdr("sname").ToString(),
-                                .OrderDate = If(IsDBNull(rdr("order_date")), DateTime.Today, Convert.ToDateTime(rdr("order_date"))),
-                                .HasExpected = hasExp,
-                                .ExpectedDate = If(hasExp, Convert.ToDateTime(rdr("expected_date")), DateTime.MinValue),
-                                .Status = rdr("status").ToString(),
-                                .TotalCost = If(IsDBNull(rdr("total_cost")), 0D, Convert.ToDecimal(rdr("total_cost")))
-                            }
+                            .PoId = poId,
+                            .PoNo = rdr("po_no").ToString(),
+                            .SupplierName = rdr("sname").ToString(),
+                            .OrderDate = If(IsDBNull(rdr("order_date")), DateTime.Today, Convert.ToDateTime(rdr("order_date"))),
+                            .HasExpected = hasExp,
+                            .ExpectedDate = If(hasExp, Convert.ToDateTime(rdr("expected_date")), DateTime.MinValue),
+                            .Status = rdr("status").ToString(),
+                            .TotalCost = If(IsDBNull(rdr("total_cost")), 0D, Convert.ToDecimal(rdr("total_cost")))
+                        }
                         End If
                     End Using
                 End Using
 
                 If po Is Nothing Then
                     AppModal.Show("That purchase order could not be found.", "Not Found",
-                                  MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                              MessageBoxButtons.OK, MessageBoxIcon.Warning)
                     Return
                 End If
 
                 Using cmd As New MySqlCommand(
-                    "SELECT pi.product_id, p.name AS pname, p.sku, pi.qty, pi.unit_cost, pi.line_cost " &
-                    "FROM po_items pi JOIN products p ON pi.product_id = p.product_id " &
-                    "WHERE pi.po_id = @id ORDER BY p.name ASC", conn)
+                                "SELECT pi.product_id, p.name AS pname, p.sku, p.color_hex, p.image_path, pi.qty, pi.unit_cost, pi.line_cost " &
+                                "FROM po_items pi JOIN products p ON pi.product_id = p.product_id " &
+                                "WHERE pi.po_id = @id ORDER BY p.name ASC", conn)
                     cmd.Parameters.AddWithValue("@id", poId)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             lines.Add(New POLine With {
-                                .ProductId = SafeInt(rdr("product_id")),
-                                .ProductName = rdr("pname").ToString(),
-                                .Sku = rdr("sku").ToString(),
-                                .Qty = SafeInt(rdr("qty")),
-                                .UnitCost = If(IsDBNull(rdr("unit_cost")), 0D, Convert.ToDecimal(rdr("unit_cost"))),
-                                .RequestId = 0
-                            })
+                            .ProductId = SafeInt(rdr("product_id")),
+                            .ProductName = rdr("pname").ToString(),
+                            .Sku = rdr("sku").ToString(),
+                            .Qty = SafeInt(rdr("qty")),
+                            .UnitCost = If(IsDBNull(rdr("unit_cost")), 0D, Convert.ToDecimal(rdr("unit_cost"))),
+                            .RequestId = 0,
+                            .ColorHex = If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString()),
+                            .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString())
+                        })
                         End While
                     End Using
                 End Using
             End Using
         Catch ex As Exception
             AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ex.Message,
-                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                      "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
 
@@ -1520,155 +1736,98 @@ Public Class ProcurementPOPanelBuilder
         container.Controls.Clear()
         container.BackColor = MintBg
 
-        ' Scrolling body
-        Dim body As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 4, 24, 20), .AutoScroll = True
-        }
+        ' ── HEADER BAR  (< Purchase Order  |  Print  |  Action btn) ─────────────
+        Dim header As New Panel With {
+        .Height = 80, .BackColor = MintBg,
+        .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
+    }
 
-        ' Header card
-        Dim headCard As New BufferedPanel With {.Height = 130, .BackColor = CardBg, .Dock = DockStyle.Top}
-        AddHandler headCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-
-        Dim lblPo As New Label With {
-            .Text = po.PoNo, .Font = New Font("Segoe UI", 16, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 16), .BackColor = Color.Transparent
-        }
-        Dim lblSup As New Label With {
-            .Text = po.SupplierName, .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 50), .BackColor = Color.Transparent
-        }
-        Dim lblMeta As New Label With {
-            .Text = "Ordered " & po.OrderDate.ToString("MMM d, yyyy") & "   " & ChrW(8226) & "   " &
-                    If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d, yyyy"), "No expected date") &
-                    "   " & ChrW(8226) & "   " & lines.Count & If(lines.Count = 1, " item", " items"),
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(22, 80), .BackColor = Color.Transparent
-        }
-        headCard.Controls.AddRange({lblPo, lblSup, lblMeta})
-
-        Dim st = StatusInfo(po.Status)
-        Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
-            .Padding = New Padding(10, 4, 10, 4), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 11)
-        headCard.Controls.Add(badge)
-
-        Dim lblTotal As New Label With {
-            .Text = Peso & po.TotalCost.ToString("N2"), .Font = New Font("Segoe UI", 18, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        headCard.Controls.Add(lblTotal)
-
-        AddHandler headCard.Resize,
-            Sub()
-                badge.Left = headCard.Width - badge.Width - 22
-                badge.Top = 20
-                lblTotal.Left = headCard.Width - lblTotal.Width - 22
-                lblTotal.Top = 70
-            End Sub
-
-        ' Lines card
-        Dim linesCard As New BufferedPanel With {
-            .Height = 60 + Math.Max(1, lines.Count) * 46 + 10, .BackColor = CardBg, .Dock = DockStyle.Top,
-            .Padding = New Padding(0, 12, 0, 0)
-        }
-        AddHandler linesCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-
-        Dim lblLinesHead As New Label With {
-            .Text = "Line Items", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
-        }
-        linesCard.Controls.Add(lblLinesHead)
-
-        Dim yLine As Integer = 52
-        If lines.Count = 0 Then
-            Dim lbl As New Label With {
-                .Text = "This purchase order has no line items.", .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(20, yLine), .BackColor = Color.Transparent
-            }
-            linesCard.Controls.Add(lbl)
-        Else
-            For Each ln In lines
-                Dim r As Panel = BuildDetailLineRow(ln, 46)
-                r.Location = New Point(0, yLine)
-                r.Width = linesCard.ClientSize.Width - 4
-                r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-                linesCard.Controls.Add(r)
-                yLine += 46
-            Next
-            AddHandler linesCard.Resize,
-                Sub()
-                    Dim w As Integer = linesCard.ClientSize.Width - 4
-                    For Each c As Control In linesCard.Controls
-                        If TypeOf c Is Panel Then c.Width = w
-                    Next
-                End Sub
+        Dim iconPath As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        Dim picBack As New PictureBox With {
+        .Size = New Size(22, 22), .Location = New Point(24, 30),
+        .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
+    }
+        If IO.File.Exists(iconPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPath)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 1, 0},
+                    New Single() {CSng(MintDeep.R / 255.0F), CSng(MintDeep.G / 255.0F), CSng(MintDeep.B / 255.0F), 0, 1}
+                })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                            0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                picBack.Image = bmp
+                raw.Dispose()
+            Catch
+                picBack.Image = Nothing
+            End Try
         End If
+        AddHandler picBack.Click, Sub() RenderList()
+        AddHandler picBack.MouseEnter, Sub()
+                                           picBack.BackColor = Color.FromArgb(30, 0, 130, 109)
+                                           picBack.Padding = New Padding(2)
+                                       End Sub
+        AddHandler picBack.MouseLeave, Sub()
+                                           picBack.BackColor = Color.Transparent
+                                           picBack.Padding = New Padding(0)
+                                       End Sub
 
-        ' Spacer so the Top-docked cards stack with a gap
-        Dim spacer1 As New Panel With {.Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-
-        body.Controls.Add(linesCard)
-        body.Controls.Add(spacer1)
-        body.Controls.Add(headCard)
-
-        ' Header bar (title + back + action)
-        Dim header As New Panel With {.Height = 80, .BackColor = MintBg, .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top}
-        Dim btnBackD As New Button With {
-            .Text = ChrW(8592), .Size = New Size(44, 44),
-            .FlatStyle = FlatStyle.Flat, .BackColor = Color.Transparent, .ForeColor = MintDeep,
-            .Font = New Font("Segoe UI", 16), .Cursor = Cursors.Hand,
-            .TextAlign = ContentAlignment.MiddleCenter, .TabStop = False,
-            .Location = New Point(16, 18)
-        }
-        btnBackD.FlatAppearance.BorderSize = 0
-        btnBackD.FlatAppearance.MouseOverBackColor = Color.Transparent
-        btnBackD.FlatAppearance.MouseDownBackColor = Color.Transparent
-        AddHandler btnBackD.Click, Sub() RenderList()
         Dim lblTitle As New Label With {
-            .Text = "Purchase Order", .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(btnBackD.Right + 6, 24),
-            .BackColor = Color.Transparent
-        }
-        header.Controls.AddRange({btnBackD, lblTitle})
+        .Text = "Purchase Order",
+        .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+        .ForeColor = MintDark, .AutoSize = True,
+        .Location = New Point(picBack.Right + 10, 18),
+        .BackColor = Color.Transparent
+    }
+        header.Controls.AddRange({picBack, lblTitle})
 
-        ' Action button: Mark as Ordered (Draft) or Receive Goods (Ordered)
+        Dim btnPrint As Button = Nothing
+
+
+
+
+
+
+        ' ── Action button (Mark as Ordered / Receive Goods) ──────────────────────
         If po.Status = "Draft" Then
             Dim btnOrder As New Button With {
-                .Text = "Mark as Ordered", .Size = New Size(170, 46),
-                .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
-                .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
-                .TextAlign = ContentAlignment.MiddleCenter,
-                .Anchor = AnchorStyles.Top Or AnchorStyles.Right, .Tag = ""
-            }
+            .Text = "Mark as Ordered", .Size = New Size(180, 46),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right, .Tag = ""
+        }
             btnOrder.FlatAppearance.BorderSize = 0
             RoundControl(btnOrder, 12)
             AddHover(btnOrder, MintPrimary, MintHover)
             Dim capId As Integer = po.PoId
-            AddHandler btnOrder.Click,
-                Sub()
-                    If CStr(If(btnOrder.Tag, "")) = "done" Then Return
-                    MarkOrdered(capId, btnOrder)
-                End Sub
+            AddHandler btnOrder.Click, Sub()
+                                           If CStr(If(btnOrder.Tag, "")) = "done" Then Return
+                                           MarkOrdered(capId, btnOrder)
+                                       End Sub
             header.Controls.Add(btnOrder)
             AddHandler header.Resize, Sub()
-                                          btnOrder.Top = 22
+                                          btnOrder.Top = 17
                                           btnOrder.Left = header.Width - 24 - btnOrder.Width
                                       End Sub
-            btnOrder.Top = 22
-            btnOrder.Left = 700
+            btnOrder.Top = 17 : btnOrder.Left = 700
+
         ElseIf po.Status = "Ordered" OrElse po.Status = "Partially Received" Then
             Dim btnReceive As New Button With {
-                .Text = "Receive Goods", .Size = New Size(160, 46),
-                .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
-                .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
-                .TextAlign = ContentAlignment.MiddleCenter,
-                .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-            }
+            .Text = "Receive Goods", .Size = New Size(160, 46),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
             btnReceive.FlatAppearance.BorderSize = 0
             RoundControl(btnReceive, 12)
             AddHover(btnReceive, MintDeep, DeepHover)
@@ -1676,57 +1835,573 @@ Public Class ProcurementPOPanelBuilder
             AddHandler btnReceive.Click, Sub() GoToReceive(capId)
             header.Controls.Add(btnReceive)
             AddHandler header.Resize, Sub()
-                                          btnReceive.Top = 22
+                                          btnReceive.Top = 17
                                           btnReceive.Left = header.Width - 24 - btnReceive.Width
                                       End Sub
-            btnReceive.Top = 22
-            btnReceive.Left = 700
+            btnReceive.Top = 17 : btnReceive.Left = 700
+
         End If
+
+        ' ── SCROLLABLE BODY ──────────────────────────────────────────────────────
+        Dim body As New Panel With {
+            .Dock = DockStyle.Fill, .BackColor = MintBg,
+            .Padding = New Padding(24, 12, 24, 24), .AutoScroll = True
+        }
+
+        Const cPadTop As Integer = 18        ' card top padding before eyebrow
+        Const cIdentH As Integer = 78        ' eyebrow + PO# + supplier
+        Const cDivH As Integer = 1
+        Const cMetaH As Integer = 62        ' ORDERED/EXPECTED/ITEMS strip
+        Const cSecH As Integer = 38        ' "LINE ITEMS" label + its divider
+        Const cLineH As Integer = 68        ' height of each line row
+        Const cLineGap As Integer = 8        ' gap between line rows
+        Const cTotalH As Integer = 64        ' total footer bar
+        Const cPadBot As Integer = 18        ' card bottom padding after total bar
+
+        Dim lineBlockH As Integer = If(lines.Count = 0,
+            50,  ' empty-state message height
+            lines.Count * (cLineH + cLineGap) - cLineGap + 8)
+
+        Dim poCardH As Integer = cPadTop + cIdentH + cDivH + cMetaH + cSecH + lineBlockH + cTotalH + cPadBot
+
+        Dim poCard As New BufferedPanel With {
+            .Height = poCardH,
+            .BackColor = CardBg,
+            .Margin = New Padding(0)
+        }
+        AddHandler poCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        ' ── 1. IDENTITY ROW ──────────────────────────────────────────────────────
+        Dim lblEyebrow As New Label With {
+            .Text = "Purchase Order",
+            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+            .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(22, cPadTop), .BackColor = Color.Transparent
+        }
+        Dim lblPoNum As New Label With {
+            .Text = po.PoNo,
+            .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, cPadTop + 16), .BackColor = Color.Transparent
+        }
+        Dim lblSupName As New Label With {
+            .Text = po.SupplierName,
+            .Font = New Font("Segoe UI", 11),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(22, cPadTop + 50), .BackColor = Color.Transparent
+        }
+
+        ' Status badge — top-right of card
+        Dim stI = StatusInfo(po.Status)
+        Dim detailBadgeFore As Color = Color.White
+        Dim detailBadgeBack As Color
+        Select Case po.Status
+            Case "Ordered" : detailBadgeBack = MintDeep
+            Case "Draft" : detailBadgeBack = Color.FromArgb(115, 130, 126)
+            Case "Partially Received" : detailBadgeBack = WarningClr
+            Case "Received" : detailBadgeBack = PositiveClr
+            Case "Cancelled" : detailBadgeBack = NegativeClr
+            Case Else : detailBadgeBack = SubText
+        End Select
+
+        Dim cardBadge As New Label With {
+            .Text = stI.text,
+            .Font = New Font("Segoe UI Semibold", 12.0F, FontStyle.Bold),
+            .ForeColor = detailBadgeFore,
+            .BackColor = detailBadgeBack,
+            .AutoSize = True,
+            .Padding = New Padding(16, 8, 16, 8),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        RoundLabel(cardBadge, 14)
+        poCard.Controls.AddRange({lblEyebrow, lblPoNum, lblSupName, cardBadge})
+
+        ' ── 2. IDENTITY / META DIVIDER ───────────────────────────────────────────
+        Dim divIdentMeta As New Panel With {
+            .Height = 1, .BackColor = RowDivider,
+            .Location = New Point(20, cPadTop + cIdentH + 2),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        poCard.Controls.Add(divIdentMeta)
+
+        ' ── 3. META STRIP  (ORDERED · EXPECTED · ITEMS) ──────────────────────────
+        Dim metaTopY As Integer = cPadTop + cIdentH + cDivH + 10
+        Dim metaDefs() As (cap As String, val As String) = {
+            ("ORDERED", po.OrderDate.ToString("MMM d, yyyy")),
+            ("EXPECTED", If(po.HasExpected, po.ExpectedDate.ToString("MMM d, yyyy"), "—")),
+            ("ITEMS", lines.Count & If(lines.Count = 1, " item", " items"))
+        }
+        For mi As Integer = 0 To metaDefs.Length - 1
+            Dim mx As Integer = 22 + mi * 148
+            Dim mCap As New Label With {
+                .Text = metaDefs(mi).cap,
+                .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
+                .ForeColor = FaintText, .AutoSize = True,
+                .Location = New Point(mx, metaTopY), .BackColor = Color.Transparent
+            }
+            Dim mVal As New Label With {
+                .Text = metaDefs(mi).val,
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .ForeColor = MintDark, .AutoSize = True,
+                .Location = New Point(mx, metaTopY + 16), .BackColor = Color.Transparent
+            }
+            poCard.Controls.AddRange({mCap, mVal})
+        Next
+
+        ' ── 4. SECTION LABEL "LINE ITEMS" + DIVIDER ──────────────────────────────
+        Dim lineSecTopY As Integer = metaTopY + cMetaH
+        Dim lblLinesSec As New Label With {
+            .Text = "LINE ITEMS",
+            .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
+            .ForeColor = FaintText, .AutoSize = True,
+            .Location = New Point(22, lineSecTopY), .BackColor = Color.Transparent
+        }
+        Dim divLineSec As New Panel With {
+            .Height = 1, .BackColor = RowDivider,
+            .Location = New Point(20, lineSecTopY + 18),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        poCard.Controls.AddRange({lblLinesSec, divLineSec})
+
+        ' ── 5. LINE ROWS ──────────────────────────────────────────────────────────
+        Dim lineStartY As Integer = lineSecTopY + cSecH
+        If lines.Count = 0 Then
+            Dim lblNoItems As New Label With {
+                .Text = "No line items on this purchase order.",
+                .Font = New Font("Segoe UI", 10.5F), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(22, lineStartY + 8),
+                .BackColor = Color.Transparent
+            }
+            poCard.Controls.Add(lblNoItems)
+        Else
+            Dim yLn As Integer = lineStartY
+            For Each ln In lines
+                Dim lRow As Panel = BuildUnifiedLineRow(ln, cLineH)
+                lRow.Location = New Point(14, yLn)
+                lRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+                poCard.Controls.Add(lRow)
+                Dim rl = TryCast(lRow.Tag, Action)
+                If rl IsNot Nothing Then rl()
+                yLn += cLineH + cLineGap
+            Next
+        End If
+
+        ' ── 6. TOTAL FOOTER BAR  (dark-mint gradient inside the card) ─────────────
+        Dim totalBarTopY As Integer = poCardH - cTotalH - cPadBot
+        Dim totalBar As New BufferedPanel With {
+            .Height = cTotalH,
+            .Location = New Point(14, totalBarTopY),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom,
+            .BackColor = Color.Transparent
+        }
+        AddHandler totalBar.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, totalBar.Width - 1, totalBar.Height - 1)
+                Using path As GraphicsPath = RoundRect(r, 14)
+                    Using br As New LinearGradientBrush(r, MintDark, TotalDeep, 90.0F)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+            End Sub
+
+        Dim lblTotalCap As New Label With {
+            .Text = "TOTAL",
+            .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(190, 235, 218),
+            .AutoSize = True, .BackColor = Color.Transparent
+        }
+        Dim lblTotalVal As New Label With {
+            .Text = Peso & po.TotalCost.ToString("N2"),
+            .Font = New Font("Segoe UI", 20, FontStyle.Bold),
+            .ForeColor = GoldValue,
+            .AutoSize = True, .BackColor = Color.Transparent
+        }
+        totalBar.Controls.AddRange({lblTotalCap, lblTotalVal})
+
+        Dim layoutTotalBar As Action =
+            Sub()
+                lblTotalCap.Left = 20
+                lblTotalCap.Top = (totalBar.Height - lblTotalCap.Height) \ 2
+                Dim vx As Integer = totalBar.Width - lblTotalVal.Width - 20
+                If vx < lblTotalCap.Right + 12 Then vx = lblTotalCap.Right + 12
+                lblTotalVal.Left = vx
+                lblTotalVal.Top = (totalBar.Height - lblTotalVal.Height) \ 2
+            End Sub
+        AddHandler totalBar.Resize, Sub() layoutTotalBar()
+        poCard.Controls.Add(totalBar)
+
+        ' ── CARD RESIZE — stretch dividers, reflow line rows, repin total bar ─────
+        AddHandler poCard.Resize,
+            Sub()
+                ' Badge — top-right
+                cardBadge.Left = poCard.Width - cardBadge.Width - 20
+                cardBadge.Top = cPadTop + 4
+
+                ' Dividers — full card width minus side padding
+                divIdentMeta.Width = poCard.Width - 40
+                divLineSec.Width = poCard.Width - 40
+
+                ' Line rows — fill card minus 14px each side
+                Dim lrw As Integer = poCard.Width - 28
+                For Each c As Control In poCard.Controls
+                    If TypeOf c Is Panel AndAlso c.Tag IsNot Nothing AndAlso TypeOf c.Tag Is Action Then
+                        c.Left = 14
+                        c.Width = lrw
+                        Dim relayout = TryCast(c.Tag, Action)
+                        If relayout IsNot Nothing Then relayout()
+                    End If
+                Next
+
+                ' Total bar — fill card minus 14px each side
+                totalBar.Left = 14
+                totalBar.Width = poCard.Width - 28
+                layoutTotalBar()
+            End Sub
+
+        ' ── BODY LAYOUT ──────────────────────────────────────────────────────────
+        Dim doBodyLayout As Action =
+            Sub()
+                If body.IsDisposed Then Return
+                Dim cw As Integer = body.ClientSize.Width - body.Padding.Horizontal
+                poCard.SetBounds(body.Padding.Left, body.Padding.Top, cw, poCardH)
+            End Sub
+
+        body.Controls.Add(poCard)
+        AddHandler body.Resize, Sub() If Not body.IsDisposed Then doBodyLayout()
 
         container.Controls.Add(body)
         container.Controls.Add(header)
         container.ResumeLayout()
+
+        body.BeginInvoke(Sub() doBodyLayout())
     End Sub
 
-    Private Shared Function BuildDetailLineRow(ln As POLine, height As Integer) As Panel
-        Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
+    Private Shared Function BuildUnifiedLineRow(ln As POLine, height As Integer) As Panel
+        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+
+        AddHandler row.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As New Rectangle(0, 0, row.Width - 1, row.Height - 1)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using b As New SolidBrush(TileBg) : e.Graphics.FillPath(b, path) : End Using
+                    Using pen As New Pen(Color.FromArgb(200, 228, 218), 1.0F) : e.Graphics.DrawPath(pen, path) : End Using
+                End Using
+                PaintLineThumb(e.Graphics, New Rectangle(12, (row.Height - 48) \ 2, 48, 48), ln.ColorHex, ln.ImagePath, ln.ProductName)
+            End Sub
 
         Dim lblName As New Label With {
-            .Text = ln.ProductName, .Font = New Font("Segoe UI", 10, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 6), .BackColor = Color.Transparent
+            .Text = ln.ProductName,
+            .Font = New Font("Segoe UI", 11.5F, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = False,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .BackColor = Color.Transparent,
+            .Location = New Point(62, 6), .Size = New Size(220, 22)
         }
         Dim lblSku As New Label With {
-            .Text = ln.Sku, .Font = New Font("Segoe UI", 8.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(20, 26), .BackColor = Color.Transparent
+            .Text = ln.Sku,
+            .Font = New Font("Segoe UI", 9),
+            .ForeColor = FaintText, .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .Location = New Point(62, 30)
         }
-        row.Controls.AddRange({lblName, lblSku})
 
-        Dim lblQty As New Label With {
+        ' Right top — "qty × ₱unit"
+        Dim lblQtyUnit As New Label With {
             .Text = ln.Qty & " " & ChrW(215) & " " & Peso & ln.UnitCost.ToString("N2"),
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText, .AutoSize = True,
-            .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        Dim lblLine As New Label With {
-            .Text = Peso & ln.LineTotal.ToString("N2"), .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDeep, .AutoSize = True, .BackColor = Color.Transparent,
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubText, .AutoSize = True,
+            .BackColor = Color.Transparent,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        row.Controls.AddRange({lblQty, lblLine})
+
+        ' Right bottom — line total in gold (mirrors the TOTAL bar)
+
+        Dim lblLineTotal As New Label With {
+            .Text = Peso & ln.LineTotal.ToString("N2"),
+            .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDeep, .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+
+        row.Controls.AddRange({lblName, lblSku, lblQtyUnit, lblLineTotal})
+
+        Dim layoutR As Action =
+            Sub()
+                If row.Width < 80 Then Return
+                Const rPad As Integer = 14
+                ' Line total — lower half, far right
+                lblLineTotal.Left = row.Width - lblLineTotal.Width - rPad
+                lblLineTotal.Top = (height \ 2) + 2
+                ' Qty × unit — upper half, far right, aligned with the total
+                lblQtyUnit.Left = row.Width - lblQtyUnit.Width - rPad
+                lblQtyUnit.Top = (height \ 2) - lblQtyUnit.Height - 1
+                ' Name width — stops before the right column
+                Dim rightStop As Integer = Math.Min(lblQtyUnit.Left, lblLineTotal.Left) - 12
+                lblName.Width = Math.Max(60, rightStop - 62)
+            End Sub
+
+        AddHandler row.Resize, Sub() layoutR()
+        AddHandler row.SizeChanged, Sub() layoutR()
+        row.Tag = layoutR
+        AddHandler row.HandleCreated,
+            Sub()
+                row.BeginInvoke(Sub()
+                                    layoutR()
+                                    row.Invalidate()
+                                End Sub)
+            End Sub
+
+        layoutR()
+        Return row
+    End Function
+
+    ' ── Detail line row — compact tile ──────────────────────────────────────────
+    ' Each row is self-contained: product name + SKU on the left,
+    ' qty × unit price in the middle, line total pinned right.
+    Private Shared Function BuildDetailLineRow(ln As POLine, height As Integer) As Panel
+        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+
+        AddHandler row.Paint,
+        Sub(s, e)
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+            Dim rect As New Rectangle(0, 0, row.Width - 1, row.Height - 1)
+            Using path As GraphicsPath = RoundRect(rect, 8)
+                Using b As New SolidBrush(TileBg) : e.Graphics.FillPath(b, path) : End Using
+                Using pen As New Pen(Color.FromArgb(200, 228, 218), 1.0F) : e.Graphics.DrawPath(pen, path) : End Using
+            End Using
+        End Sub
+
+        Dim lblName As New Label With {
+        .Text = ln.ProductName,
+        .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+        .ForeColor = MintDark, .AutoSize = False,
+        .TextAlign = ContentAlignment.MiddleLeft,
+        .BackColor = Color.Transparent,
+        .Location = New Point(16, 6), .Size = New Size(280, 22)
+    }
+        Dim lblSku As New Label With {
+        .Text = ln.Sku,
+        .Font = New Font("Segoe UI", 9),
+        .ForeColor = FaintText, .AutoSize = True,
+        .BackColor = Color.Transparent,
+        .Location = New Point(16, 30)
+    }
+
+        ' Qty × unit cost (centre-ish)
+        Dim lblQty As New Label With {
+        .Text = ln.Qty & " " & ChrW(215) & " " & Peso & ln.UnitCost.ToString("N2"),
+        .Font = New Font("Segoe UI", 10),
+        .ForeColor = SubText, .AutoSize = True,
+        .BackColor = Color.Transparent,
+        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+    }
+
+        ' Line total — bold, pinned right
+        Dim lblLineTotal As New Label With {
+            .Text = Peso & ln.LineTotal.ToString("N2"),
+            .Font = New Font("Segoe UI", 12.5F, FontStyle.Bold),
+            .ForeColor = MintDeep, .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+
+        row.Controls.AddRange({lblName, lblSku, lblQty, lblLineTotal})
 
         AddHandler row.Resize,
-            Sub()
-                lblLine.Left = row.Width - lblLine.Width - 24
-                lblLine.Top = (height - lblLine.Height) \ 2
-                lblQty.Left = lblLine.Left - lblQty.Width - 28
-                lblQty.Top = (height - lblQty.Height) \ 2
-            End Sub
+        Sub()
+            Const rPad As Integer = 16
+            lblLineTotal.Left = row.Width - lblLineTotal.Width - rPad
+            lblLineTotal.Top = (height - lblLineTotal.Height) \ 2
+
+            lblQty.Left = lblLineTotal.Left - lblQty.Width - 20
+            lblQty.Top = (height - lblQty.Height) \ 2
+
+            Dim rightStop As Integer = lblQty.Left - 12
+            lblName.Width = Math.Max(80, rightStop - 16)
+        End Sub
 
         Return row
     End Function
 
     ' =========================================================================
+    '  PRINT — builds a PrintDocument from the PO data and shows the dialog
+    ' =========================================================================
+    Private Shared Sub PrintPO(po As PORow, lines As List(Of POLine))
+        Dim pd As New Printing.PrintDocument()
+        pd.DocumentName = po.PoNo
+
+        AddHandler pd.PrintPage,
+        Sub(sender As Object, e As Printing.PrintPageEventArgs)
+            Dim g As Graphics = e.Graphics
+            Dim x As Integer = e.MarginBounds.Left
+            Dim y As Integer = e.MarginBounds.Top
+            Dim pageW As Integer = e.MarginBounds.Width
+
+            ' ── Fonts ────────────────────────────────────────────────────────
+            Dim fTitle As New Font("Segoe UI", 18, FontStyle.Bold)
+            Dim fSub As New Font("Segoe UI", 10)
+            Dim fCaption As New Font("Segoe UI", 8, FontStyle.Bold)
+            Dim fMeta As New Font("Segoe UI", 10, FontStyle.Bold)
+            Dim fSectionHead As New Font("Segoe UI", 11, FontStyle.Bold)
+            Dim fRowNormal As New Font("Segoe UI", 10)
+            Dim fRowBold As New Font("Segoe UI", 10, FontStyle.Bold)
+            Dim fTotal As New Font("Segoe UI", 13, FontStyle.Bold)
+
+            ' ── Brushes ──────────────────────────────────────────────────────
+            Dim brDark As New SolidBrush(Color.FromArgb(10, 79, 66))
+            Dim brSub As New SolidBrush(Color.FromArgb(90, 114, 107))
+            Dim brFaint As New SolidBrush(Color.FromArgb(150, 165, 160))
+            Dim brMint As New SolidBrush(Color.FromArgb(0, 168, 142))
+            Dim brDeep As New SolidBrush(Color.FromArgb(0, 130, 109))
+            Dim brWhite As New SolidBrush(Color.White)
+            Dim brTile As New SolidBrush(Color.FromArgb(236, 248, 244))
+            Dim brTotalBg As New SolidBrush(Color.FromArgb(0, 60, 50))
+
+            ' ── HEADER block ─────────────────────────────────────────────────
+            g.DrawString("Paint POS", fSub, brSub, x, y)
+            y += 18
+            g.DrawString(po.PoNo, fTitle, brDark, x, y)
+            y += 32
+            g.DrawString(po.SupplierName, fSub, brSub, x, y)
+            y += 20
+
+            ' Status pill (text only for print)
+            Dim stInfo = StatusInfo(po.Status)
+            g.DrawString("Status: " & stInfo.text, fSub, brSub, x, y)
+            y += 24
+
+            ' Divider line
+            g.DrawLine(New Pen(Color.FromArgb(228, 232, 230), 1), x, y, x + pageW, y)
+            y += 12
+
+            ' ── META row ─────────────────────────────────────────────────────
+            Dim colW As Integer = pageW \ 3
+            Dim metaItems() As (cap As String, val As String) = {
+                ("ORDERED", po.OrderDate.ToString("MMM d, yyyy")),
+                ("EXPECTED", If(po.HasExpected, po.ExpectedDate.ToString("MMM d, yyyy"), "—")),
+                ("ITEMS", lines.Count & If(lines.Count = 1, " item", " items"))
+            }
+            For i As Integer = 0 To metaItems.Length - 1
+                Dim mx As Integer = x + i * colW
+                g.DrawString(metaItems(i).cap, fCaption, brFaint, mx, y)
+                g.DrawString(metaItems(i).val, fMeta, brDark, mx, y + 13)
+            Next
+            y += 38
+
+            ' Divider
+            g.DrawLine(New Pen(Color.FromArgb(228, 232, 230), 1), x, y, x + pageW, y)
+            y += 14
+
+            ' ── LINE ITEMS table ─────────────────────────────────────────────
+            g.DrawString("Line Items", fSectionHead, brDark, x, y)
+            y += 22
+
+            ' Table header row
+            Dim colProduct As Integer = CInt(pageW * 0.45)
+            Dim colSku As Integer = CInt(pageW * 0.18)
+            Dim colQtyUnit As Integer = CInt(pageW * 0.22)
+            Dim colTotal As Integer = pageW - colProduct - colSku - colQtyUnit
+
+            g.FillRectangle(New SolidBrush(Color.FromArgb(236, 248, 244)), x, y, pageW, 20)
+            g.DrawString("Product", fCaption, brSub, x + 4, y + 4)
+            g.DrawString("SKU", fCaption, brSub, x + colProduct + 4, y + 4)
+            g.DrawString("Qty × Unit", fCaption, brSub, x + colProduct + colSku + 4, y + 4)
+            Dim totalStr As String = "Total"
+            Dim totalSz As SizeF = g.MeasureString(totalStr, fCaption)
+            g.DrawString(totalStr, fCaption, brSub,
+                         x + pageW - totalSz.Width - 4, y + 4)
+            y += 22
+
+            ' Line rows — alternating tile background
+            For i As Integer = 0 To lines.Count - 1
+                Dim ln = lines(i)
+                Dim rowH As Integer = 24
+                If i Mod 2 = 0 Then
+                    g.FillRectangle(New SolidBrush(Color.FromArgb(248, 252, 250)), x, y, pageW, rowH)
+                End If
+
+                g.DrawString(ln.ProductName, fRowBold, brDark, x + 4, y + 4)
+                g.DrawString(ln.Sku, fRowNormal, brFaint, x + colProduct + 4, y + 4)
+                g.DrawString(ln.Qty & " " & ChrW(215) & " " & Peso & ln.UnitCost.ToString("N2"),
+                             fRowNormal, brSub, x + colProduct + colSku + 4, y + 4)
+
+                Dim lineStr As String = Peso & ln.LineTotal.ToString("N2")
+                Dim lineSz As SizeF = g.MeasureString(lineStr, fRowBold)
+                g.DrawString(lineStr, fRowBold, brDeep,
+                             x + pageW - lineSz.Width - 4, y + 4)
+                y += rowH
+            Next
+
+            ' Bottom line
+            g.DrawLine(New Pen(Color.FromArgb(228, 232, 230), 1), x, y, x + pageW, y)
+            y += 12
+
+            ' ── TOTAL block ──────────────────────────────────────────────────
+            Dim totalBoxH As Integer = 36
+            g.FillRectangle(brTotalBg, x, y, pageW, totalBoxH)
+            g.DrawString("TOTAL", fSectionHead, New SolidBrush(Color.FromArgb(190, 235, 218)), x + 16, y + 8)
+            Dim grandStr As String = Peso & po.TotalCost.ToString("N2")
+            Dim grandSz As SizeF = g.MeasureString(grandStr, fTotal)
+            g.DrawString(grandStr, fTotal, New SolidBrush(Color.FromArgb(255, 196, 120)),
+                         x + pageW - grandSz.Width - 16, y + 6)
+            y += totalBoxH + 16
+
+            ' ── Footer ───────────────────────────────────────────────────────
+            g.DrawString("Printed " & DateTime.Now.ToString("MMM d, yyyy  h:mm tt") &
+                         "   |   Paint POS",
+                         fSub, brFaint, x, y)
+
+            ' Dispose fonts
+            For Each f As Font In {fTitle, fSub, fCaption, fMeta, fSectionHead, fRowNormal, fRowBold, fTotal}
+                f.Dispose()
+            Next
+            For Each br As SolidBrush In {brDark, brSub, brFaint, brMint, brDeep, brWhite, brTile, brTotalBg}
+                br.Dispose()
+            Next
+
+            e.HasMorePages = False
+        End Sub
+
+        Dim dlg As New PrintDialog With {.Document = pd, .UseEXDialog = True}
+        If dlg.ShowDialog() = DialogResult.OK Then
+            pd.Print()
+        End If
+    End Sub
+
+    ' =========================================================================
     '  ACTIONS
     ' =========================================================================
+    ' Returns True if the New PO form has work the user would lose on leaving.
+    Private Shared Function NewPODirty() As Boolean
+        Return isOnNewPOForm AndAlso newLines IsNot Nothing AndAlso newLines.Count > 0
+    End Function
+
+    ' Confirms before leaving the New PO form. Returns True if it's OK to leave.
+    ' Public so the parent form (sidebar nav) can call it too.
+    Public Shared Function ConfirmLeaveNewPO() As Boolean
+        If Not NewPODirty() Then
+            isOnNewPOForm = False
+            Return True
+        End If
+        If AppModal.Show(
+            "You have unsaved items on this purchase order." & Environment.NewLine &
+            "Leave without saving? Your changes will be lost.",
+            "Discard Purchase Order?",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning) = DialogResult.Yes Then
+            isOnNewPOForm = False
+            Return True
+        End If
+        Return False
+    End Function
+
+    ' Back-chevron handler: guard, then return to the list.
+    Private Shared Sub TryLeaveNewPO()
+        If ConfirmLeaveNewPO() Then RenderList()
+    End Sub
+
     Private Shared Sub MarkOrdered(poId As Integer, btn As Button)
         If AppModal.Show("Mark this purchase order as Ordered?" & Environment.NewLine &
                          "It will then be available to receive.", "Mark as Ordered",
@@ -1869,8 +2544,8 @@ Public Class ProcurementPOPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                             "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "p.image_path, pr.qty_requested, u.full_name AS reqby " &
+                         "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.image_path, p.color_hex, pr.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
@@ -1886,7 +2561,8 @@ Public Class ProcurementPOPanelBuilder
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .QtyRequested = SafeInt(rdr("qty_requested")),
                                 .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
-                                .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString())
+                              .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
+                                .ColorHex = If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString())
                             })
                         End While
                     End Using

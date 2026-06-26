@@ -533,7 +533,7 @@ Public Module ReceiptPrinter
                         If pd.ShowDialog() = DialogResult.OK Then doc.Print()
                     End Using
                 Catch ex As Exception
-                    MessageBox.Show("Print failed:" & Environment.NewLine & ex.Message,
+                    AppModal.Show("Print failed:" & Environment.NewLine & ex.Message,
                         "Print Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Try
             End Sub

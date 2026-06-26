@@ -914,13 +914,15 @@ Public Class SalesPanelBuilder
                     If fillW > 0 Then
                         Using br As New SolidBrush(b.clr)
                             g.FillRoundedRectangle(br, New Rectangle(trackX, midY - 5, fillW, 10), 5)
+                            g.FillRoundedRectangle(br, New Rectangle(trackX, midY - 5, fillW, 10), 5)
                         End Using
                     End If
                     Dim sf As New StringFormat With {.Alignment = StringAlignment.Far, .LineAlignment = StringAlignment.Center}
                     Using br As New SolidBrush(MintDark)
-                        g.DrawString(b.label, New Font("Segoe UI Semibold", 10), br,
-                            RectangleF.FromLTRB(trackX + trackW + 4, midY - 9, trackX + trackW + 4 + valW, midY + 9), sf)
-                    End Using
+                        Using fnt As New Font("Segoe UI Semibold", 10)
+                            g.DrawString(b.label, fnt, br,
+                                RectangleF.FromLTRB(trackX + trackW + 4, midY - 9, trackX + trackW + 4 + valW, midY + 9), sf)
+                        End Using : End Using
                 Next
             End Sub
 

@@ -1,6 +1,7 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel
+Imports MySql.Data.MySqlClient
 
 Public Class POS_STAFF
 
@@ -75,9 +76,13 @@ Public Class POS_STAFF
         Dim burgerFull As String = "burger-menu.png"
         Dim burgerRel As String = "burger-menu.png"
         If IO.File.Exists(burgerFull) Then
-            btnHamburger.Image = New Bitmap(Image.FromFile(burgerFull), New Size(22, 22))
+            Using img = Image.FromFile(burgerFull)
+                btnHamburger.Image = New Bitmap(img, New Size(22, 22))
+            End Using
         ElseIf IO.File.Exists(burgerRel) Then
-            btnHamburger.Image = New Bitmap(Image.FromFile(burgerRel), New Size(22, 22))
+            Using img = Image.FromFile(burgerRel)
+                btnHamburger.Image = New Bitmap(img, New Size(22, 22))
+            End Using
         Else
             ' Unicode fallback — three-bar "≡" drawn as text
             btnHamburger.Text = "≡"
@@ -330,6 +335,32 @@ Public Class POS_STAFF
     Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)
         shiftStartTime = DateTime.Now
         If ShiftTimer IsNot Nothing Then ShiftTimer.Stop() : ShiftTimer.Dispose()
+
+        ' INSERT shift into DB and store the ID
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status) " &
+                    "VALUES (@uid, '01', 0, NOW(), 'Open')", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                    cmd.ExecuteNonQuery()
+                End Using
+                Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
+                    Session.ShiftId = CInt(cmd.ExecuteScalar())
+                End Using
+                ' Load quota for this user
+                Using cmd As New MySqlCommand(
+                    "SELECT sales_quota FROM users WHERE user_id=@uid", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                    Dim result = cmd.ExecuteScalar()
+                    Session.UserQuota = If(result IsNot Nothing, CDec(result), 0D)
+                End Using
+            End Using
+        Catch ex As Exception
+            System.Diagnostics.Debug.WriteLine("CloseShiftOverlay DB error: " & ex.Message)
+        End Try
+
         ShiftOverlay.Dispose()
         SetActive(home)
         MainContainer.SuspendLayout()
@@ -421,7 +452,10 @@ Public Class POS_STAFF
         End Select
 
         If IO.File.Exists(iconPath) Then
-            Dim src As New Bitmap(Image.FromFile(iconPath), New Size(24, 24))
+            Dim src As Bitmap
+            Using img = Image.FromFile(iconPath)
+                src = New Bitmap(img, New Size(24, 24))
+            End Using
             Dim padded As New Bitmap(40, 24)
             Using g As Graphics = Graphics.FromImage(padded)
                 g.InterpolationMode = Drawing2D.InterpolationMode.HighQualityBicubic
@@ -584,6 +618,25 @@ Public Class POS_STAFF
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
+
+        ' Close the active shift on logout
+        If Session.ShiftId > 0 Then
+            Try
+                Using conn = Db.GetConnection()
+                    conn.Open()
+                    Using cmd As New MySqlCommand(
+                        "UPDATE shifts SET ended_at=NOW(), status='Closed' " &
+                        "WHERE shift_id=@sid", conn)
+                        cmd.Parameters.AddWithValue("@sid", Session.ShiftId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                End Using
+            Catch ex As Exception
+                System.Diagnostics.Debug.WriteLine("logout shift close error: " & ex.Message)
+            End Try
+            Session.ShiftId = 0
+        End If
+
         Dim loginForm As New LogIn()
         loginForm.Show()
         Me.Close()

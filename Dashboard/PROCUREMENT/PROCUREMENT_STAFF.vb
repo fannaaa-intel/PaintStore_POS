@@ -236,10 +236,10 @@ Public Class PROCUREMENT_STAFF
         Dim iconPath As String = ""
         Select Case btn.Name.ToLower()
             Case "dashboard" : iconPath = "home.png"
-            Case "purchaseorders" : iconPath = "record.png"
-            Case "suppliers" : iconPath = "sales.png"
-            Case "receivegoods" : iconPath = "transfer.png"
-            Case "deliverytracking" : iconPath = "transaction.png"
+            Case "purchaseorders" : iconPath = "cart.png"
+            Case "suppliers" : iconPath = "group.png"
+            Case "receivegoods" : iconPath = "received.png"
+            Case "deliverytracking" : iconPath = "express-delivery.png"
             Case "logout" : iconPath = "logout.png"
         End Select
 
@@ -344,6 +344,7 @@ Public Class PROCUREMENT_STAFF
     ' BUTTON CLICK HANDLERS
     ' ===========================================================================
     Private Sub dashboard_Click(sender As Object, e As EventArgs) Handles dashboard.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(dashboard)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()   ' safe — burger is on Form, not MainContainer
@@ -353,6 +354,7 @@ Public Class PROCUREMENT_STAFF
     End Sub
 
     Private Sub purchaseOrders_Click(sender As Object, e As EventArgs) Handles purchaseOrders.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(purchaseOrders)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
@@ -373,6 +375,7 @@ Public Class PROCUREMENT_STAFF
     End Sub
 
     Private Sub suppliers_Click(sender As Object, e As EventArgs) Handles suppliers.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(suppliers)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
@@ -382,6 +385,7 @@ Public Class PROCUREMENT_STAFF
     End Sub
 
     Private Sub receiveGoods_Click(sender As Object, e As EventArgs) Handles receiveGoods.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(receiveGoods)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
@@ -402,6 +406,7 @@ Public Class PROCUREMENT_STAFF
     End Sub
 
     Private Sub deliveryTracking_Click(sender As Object, e As EventArgs) Handles deliveryTracking.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(deliveryTracking)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
@@ -411,6 +416,7 @@ Public Class PROCUREMENT_STAFF
     End Sub
 
     Private Sub logout_Click(sender As Object, e As EventArgs) Handles logout.Click
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         If AppModal.Show("Are you sure you want to log out?", "Logout",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return

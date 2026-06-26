@@ -24,7 +24,7 @@ Public Class ReturnsPanelBuilder
     Private Shared ReadOnly RefundGold As Color = Color.FromArgb(255, 196, 120)
     Private Shared ReadOnly RefundAmber As Color = Color.FromArgb(196, 118, 22)
 
-    Private Shared ReadOnly IconBasePath As String = "C:\Users\DELL\source\repos\PaintStore_POS\"
+    Private Shared ReadOnly IconBasePath As String = Application.StartupPath & "\"
     Private Shared ReadOnly IconCache As New Dictionary(Of String, Image)
 
     Private Shared Function GetIcon(fileName As String) As Image
@@ -1348,4 +1348,7 @@ Public Class ReturnsPanelBuilder
         Return btn
     End Function
 
+    Private Sub ReturnsPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+    End Sub
 End Class

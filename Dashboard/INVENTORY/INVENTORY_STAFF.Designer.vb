@@ -27,6 +27,7 @@ Partial Class INVENTORY_STAFF
         Me.itemList = New System.Windows.Forms.Button()
         Me.stockLevels = New System.Windows.Forms.Button()
         Me.stockAdjustment = New System.Windows.Forms.Button()
+        Me.putAway = New System.Windows.Forms.Button()
         Me.lowStock = New System.Windows.Forms.Button()
         Me.logout = New System.Windows.Forms.Button()
         Me.Nav.SuspendLayout()
@@ -36,6 +37,7 @@ Partial Class INVENTORY_STAFF
         '
         Me.Nav.Controls.Add(Me.logout)
         Me.Nav.Controls.Add(Me.lowStock)
+        Me.Nav.Controls.Add(Me.putAway)
         Me.Nav.Controls.Add(Me.stockAdjustment)
         Me.Nav.Controls.Add(Me.stockLevels)
         Me.Nav.Controls.Add(Me.itemList)
@@ -82,6 +84,15 @@ Partial Class INVENTORY_STAFF
         Me.stockAdjustment.Text = "Stock Adjustment"
         Me.stockAdjustment.UseVisualStyleBackColor = True
         '
+        'putAway
+        '
+        Me.putAway.Location = New System.Drawing.Point(4, 435)
+        Me.putAway.Name = "putAway"
+        Me.putAway.Size = New System.Drawing.Size(100, 23)
+        Me.putAway.TabIndex = 6
+        Me.putAway.Text = "Incoming Stock"
+        Me.putAway.UseVisualStyleBackColor = True
+        '
         'lowStock
         '
         Me.lowStock.Location = New System.Drawing.Point(4, 355)
@@ -119,6 +130,7 @@ Partial Class INVENTORY_STAFF
     Friend WithEvents itemList As Button
     Friend WithEvents stockLevels As Button
     Friend WithEvents stockAdjustment As Button
+    Friend WithEvents putAway As Button
     Friend WithEvents lowStock As Button
     Friend WithEvents logout As Button
 End Class

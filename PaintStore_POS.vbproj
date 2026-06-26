@@ -149,6 +149,12 @@
     <Compile Include="Dashboard\INVENTORY\InventoryLowStockPanelBuilder.vb">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Dashboard\INVENTORY\InventoryPutAwayPanelBuilder.Designer.vb">
+      <DependentUpon>InventoryPutAwayPanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\INVENTORY\InventoryPutAwayPanelBuilder.vb">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Dashboard\INVENTORY\InventoryStockLevelPanelBuilder.Designer.vb">
       <DependentUpon>InventoryStockLevelPanelBuilder.vb</DependentUpon>
     </Compile>
@@ -276,6 +282,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\INVENTORY\InventoryLowStockPanelBuilder.resx">
       <DependentUpon>InventoryLowStockPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\INVENTORY\InventoryPutAwayPanelBuilder.resx">
+      <DependentUpon>InventoryPutAwayPanelBuilder.vb</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\INVENTORY\InventoryStockLevelPanelBuilder.resx">
       <DependentUpon>InventoryStockLevelPanelBuilder.vb</DependentUpon>

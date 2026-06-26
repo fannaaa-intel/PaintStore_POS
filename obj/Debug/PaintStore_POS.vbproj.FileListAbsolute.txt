@@ -57,3 +57,4 @@ C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementDe
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementPOPanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementReceivePanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementSuppliersPanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.InventoryPutAwayPanelBuilder.resources

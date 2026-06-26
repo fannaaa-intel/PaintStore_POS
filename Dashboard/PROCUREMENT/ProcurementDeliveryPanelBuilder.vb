@@ -184,62 +184,99 @@ Public Class ProcurementDeliveryPanelBuilder
 
     Private Shared Function BuildGroupHeader(name As String, count As Integer) As Panel
         Dim p As New Panel With {.Height = 38, .BackColor = Color.Transparent}
-        Dim accent As Color = GroupColor(name)
-        Dim dot As New Panel With {.Size = New Size(10, 10), .Location = New Point(2, 14), .BackColor = accent}
-        AddHandler dot.Paint, Sub(s, e)
-                                  e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                                  Using br As New SolidBrush(accent)
-                                      e.Graphics.FillEllipse(br, 0, 0, 10, 10)
-                                  End Using
-                              End Sub
-        Dim lbl As New Label With {
-            .Text = name & "  (" & count & ")", .Font = New Font("Segoe UI", 12, FontStyle.Bold),
-            .ForeColor = accent, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent
+        Dim accent As Color = If(name = "Overdue", NegativeClr,
+                              If(name = "Due Today", WarningClr,
+                              If(name = "Due This Week", MintPrimary, MintDeep)))
+
+        Dim dotSize As Integer = 10
+        Dim dotTop As Integer = 14
+        Dim dot As New BufferedPanel With {
+            .Size = New Size(dotSize, dotSize),
+            .Location = New Point(2, dotTop),
+            .BackColor = Color.Transparent
         }
+        AddHandler dot.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using br As New SolidBrush(accent)
+                    e.Graphics.FillEllipse(br, 0, 0, dotSize - 1, dotSize - 1)
+                End Using
+            End Sub
+
+        Dim lbl As New Label With {
+            .Text = name & "  (" & count & ")",
+            .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+            .ForeColor = accent, .AutoSize = True,
+            .Location = New Point(18, dotTop - 4),
+            .BackColor = Color.Transparent
+        }
+
+        ' vertically center dot to label
+        AddHandler lbl.Resize,
+            Sub()
+                dot.Top = lbl.Top + (lbl.Height - dotSize) \ 2
+            End Sub
+
         p.Controls.AddRange({dot, lbl})
         Return p
     End Function
 
     Private Shared Function BuildDeliveryCard(po As DeliveryPO) As Panel
-        Dim card As New BufferedPanel With {.Height = 84, .BackColor = CardBg, .Cursor = Cursors.Hand}
-        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        Dim cardH As Integer = 110
+        Dim card As New BufferedPanel With {.Height = cardH, .BackColor = CardBg, .Cursor = Cursors.Hand}
+        AddHandler card.Paint,
+            Sub(s, e)
+                PaintCard(CType(s, Panel), e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim accentClr As Color = If(GroupOf(po) = "Overdue", NegativeClr,
+                                         If(GroupOf(po) = "Due Today", WarningClr,
+                                         If(GroupOf(po) = "Due This Week", MintPrimary, MintDeep)))
+                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
+                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
+                    e.Graphics.SetClip(clipPath)
+                    Using br As New SolidBrush(accentClr)
+                        e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, cardH - 28))
+                    End Using
+                    e.Graphics.ResetClip()
+                End Using
+            End Sub
 
         Dim lblPo As New Label With {
-            .Text = po.PoNo, .Font = New Font("Segoe UI", 12, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
+            .Text = po.PoNo, .Font = New Font("Segoe UI", 16, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(22, 16), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
             .Text = po.SupplierName & "   " & ChrW(8226) & "   Ordered " & po.OrderDate.ToString("MMM d, yyyy") &
                     "   " & ChrW(8226) & "   " & po.ItemCount & If(po.ItemCount = 1, " item", " items"),
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(20, 44), .BackColor = Color.Transparent
+            .Font = New Font("Segoe UI", 10.5F), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(24, 50), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblPo, lblMeta})
 
         ' Expected date chip
         Dim expText As String = If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d"), "No date")
         Dim expChip As New Label With {
-            .Text = expText, .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = MintDeep, .BackColor = TileBg, .AutoSize = True, .Padding = New Padding(9, 4, 9, 4),
+            .Text = expText, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+            .ForeColor = MintDeep, .BackColor = TileBg, .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(expChip, 11)
+        RoundLabel(expChip, 12)
         card.Controls.Add(expChip)
 
-        ' Status badge
         Dim st = StatusInfo(po.Status)
         Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True, .Padding = New Padding(9, 4, 9, 4),
+            .Text = st.text, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+            .ForeColor = Color.White, .BackColor = If(po.Status = "Received", PositiveClr,
+                                                      If(po.Status = "Partially Received", WarningClr, MintDeep)),
+            .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(badge, 11)
+        RoundLabel(badge, 12)
         card.Controls.Add(badge)
 
-        ' Expand caret
         Dim caret As New Label With {
             .Text = If(expandedIds.Contains(po.PoId), ChrW(9650), ChrW(9660)),
-            .Font = New Font("Segoe UI", 8), .ForeColor = FaintText, .AutoSize = True,
+            .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True,
             .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         card.Controls.Add(caret)
@@ -263,17 +300,20 @@ Public Class ProcurementDeliveryPanelBuilder
 
         AddHandler card.Resize,
             Sub()
-                badge.Left = card.Width - badge.Width - 22
-                badge.Top = 16
+                Const rPad As Integer = 24
+                badge.Left = card.Width - badge.Width - rPad
+                badge.Top = 20
                 expChip.Left = badge.Left - expChip.Width - 10
-                expChip.Top = 16
-                caret.Left = card.Width - caret.Width - 24
-                caret.Top = 52
-                Dim rightEdge As Integer = card.Width - 22
+                expChip.Top = 20
+                caret.Left = card.Width - caret.Width - rPad
+                caret.Top = cardH - caret.Height - 18
                 If lnkReceive IsNot Nothing Then
-                    lnkReceive.Left = caret.Left - lnkReceive.Width - 14
-                    lnkReceive.Top = 48
+                    lnkReceive.Left = caret.Left - lnkReceive.Width - 16
+                    lnkReceive.Top = cardH - lnkReceive.Height - 18
                 End If
+                Dim rightStop As Integer = expChip.Left - 20
+                lblPo.MaximumSize = New Size(Math.Max(80, rightStop - 22), 30)
+                lblMeta.MaximumSize = New Size(Math.Max(80, rightStop - 24), 26)
             End Sub
 
         Return card
@@ -281,7 +321,7 @@ Public Class ProcurementDeliveryPanelBuilder
 
     Private Shared Function BuildItemsPanel(po As DeliveryPO) As Panel
         Dim items As List(Of DeliveryItem) = GetItems(po.PoId)
-        Dim h As Integer = 14 + Math.Max(1, items.Count) * 38 + 8
+        Dim h As Integer = 14 + Math.Max(1, items.Count) * 56 + 8
         Dim panel As New BufferedPanel With {.Height = h, .BackColor = Color.FromArgb(250, 252, 251)}
         AddHandler panel.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, False)
 
@@ -294,12 +334,12 @@ Public Class ProcurementDeliveryPanelBuilder
 
         Dim y As Integer = 12
         For Each it In items
-            Dim r As Panel = BuildItemRow(it, 38)
+            Dim r As Panel = BuildItemRow(it, 56)
             r.Location = New Point(0, y)
             r.Width = panel.ClientSize.Width - 4
             r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             panel.Controls.Add(r)
-            y += 38
+            y += 56
         Next
         AddHandler panel.Resize,
             Sub()
@@ -321,26 +361,23 @@ Public Class ProcurementDeliveryPanelBuilder
             End Sub
 
         Dim lblName As New Label With {
-            .Text = it.ProductName, .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(28, 6), .BackColor = Color.Transparent
+            .Text = it.ProductName, .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(28, 8), .BackColor = Color.Transparent
         }
         Dim lblQty As New Label With {
             .Text = "Ordered " & it.OrderedQty & If(it.Received > 0, "   " & ChrW(8226) & "   received " & it.Received, ""),
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(28, 6), .BackColor = Color.Transparent
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(28, 32), .BackColor = Color.Transparent
         }
-        ' Stack name over meta-ish: put qty on a second line by shifting
-        lblName.Location = New Point(28, 4)
-        lblQty.Location = New Point(28, 21)
         row.Controls.AddRange({lblName, lblQty})
 
         Dim ls = LineStatus(it)
         Dim badge As New Label With {
-            .Text = ls.text, .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = ls.fore, .BackColor = ls.back, .AutoSize = True, .Padding = New Padding(8, 3, 8, 3),
+            .Text = ls.text, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+            .ForeColor = ls.fore, .BackColor = ls.back, .AutoSize = True, .Padding = New Padding(12, 5, 12, 5),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(badge, 10)
+        RoundLabel(badge, 12)
         row.Controls.Add(badge)
 
         AddHandler row.Resize,
