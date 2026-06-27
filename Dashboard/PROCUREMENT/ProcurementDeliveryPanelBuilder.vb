@@ -321,70 +321,117 @@ Public Class ProcurementDeliveryPanelBuilder
 
     Private Shared Function BuildItemsPanel(po As DeliveryPO) As Panel
         Dim items As List(Of DeliveryItem) = GetItems(po.PoId)
-        Dim h As Integer = 14 + Math.Max(1, items.Count) * 56 + 8
-        Dim panel As New BufferedPanel With {.Height = h, .BackColor = Color.FromArgb(250, 252, 251)}
-        AddHandler panel.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, False)
+        Dim rowH As Integer = 76
+        Dim h As Integer = 14 + Math.Max(1, items.Count) * rowH + 8
+        Dim panel As New BufferedPanel With {
+        .Height = h,
+        .BackColor = Color.White
+    }
+
+        ' Border only — no background fill so rows aren't clipped
+        AddHandler panel.Paint,
+        Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, False)
 
         If items.Count = 0 Then
             panel.Controls.Add(New Label With {
-                .Text = "No line items on this purchase order.", .Font = New Font("Segoe UI", 9.5F),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(24, 16), .BackColor = Color.Transparent})
+            .Text = "No line items on this purchase order.",
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(24, 16),
+            .BackColor = Color.Transparent
+        })
             Return panel
         End If
 
-        Dim y As Integer = 12
+        Dim y As Integer = 8
         For Each it In items
-            Dim r As Panel = BuildItemRow(it, 56)
+            Dim r As Panel = BuildItemRow(it, rowH)
             r.Location = New Point(0, y)
             r.Width = panel.ClientSize.Width - 4
             r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             panel.Controls.Add(r)
-            y += 56
+            y += rowH
         Next
+
         AddHandler panel.Resize,
-            Sub()
-                Dim w As Integer = panel.ClientSize.Width - 4
-                For Each c As Control In panel.Controls
-                    If TypeOf c Is Panel Then c.Width = w
-                Next
-            End Sub
+        Sub()
+            Dim w As Integer = panel.ClientSize.Width - 4
+            For Each c As Control In panel.Controls
+                If TypeOf c Is Panel Then c.Width = w
+            Next
+        End Sub
         Return panel
     End Function
 
     Private Shared Function BuildItemRow(it As DeliveryItem, height As Integer) As Panel
-        Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
+        Dim rowH As Integer = height
+        Dim row As New BufferedPanel With {.Height = rowH, .BackColor = Color.Transparent}
+
         AddHandler row.Paint,
-            Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 24, row.Height - 1, row.Width - 24, row.Height - 1)
+        Sub(s, e)
+            If row.Parent Is Nothing Then Return
+            Dim isLast As Boolean = (row.Bottom >= row.Parent.Height - 16)
+            If Not isLast Then
+                Using pen As New Pen(Color.FromArgb(228, 232, 230), 1)
+                    e.Graphics.DrawLine(pen, 24, rowH - 1, row.Width - 24, rowH - 1)
                 End Using
-            End Sub
+            End If
+        End Sub
 
         Dim lblName As New Label With {
-            .Text = it.ProductName, .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(28, 8), .BackColor = Color.Transparent
-        }
+        .Text = it.ProductName,
+        .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+        .ForeColor = Color.FromArgb(10, 79, 66),
+        .AutoSize = True,
+        .Location = New Point(24, 12),
+        .BackColor = Color.Transparent
+    }
+
+        Dim lblSku As New Label With {
+        .Text = it.Sku,
+        .Font = New Font("Segoe UI", 9, FontStyle.Regular),
+        .ForeColor = Color.FromArgb(150, 165, 160),
+        .AutoSize = True,
+        .BackColor = Color.Transparent
+    }
+
+        Dim qtyText As String = "Ordered " & it.OrderedQty
+        If it.Received > 0 Then
+            qtyText &= "   " & ChrW(183) & "   Received " & it.Received
+        End If
         Dim lblQty As New Label With {
-            .Text = "Ordered " & it.OrderedQty & If(it.Received > 0, "   " & ChrW(8226) & "   received " & it.Received, ""),
-            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(28, 32), .BackColor = Color.Transparent
-        }
-        row.Controls.AddRange({lblName, lblQty})
+        .Text = qtyText,
+        .Font = New Font("Segoe UI", 11, FontStyle.Regular),
+        .ForeColor = Color.FromArgb(90, 114, 107),
+        .AutoSize = True,
+        .Location = New Point(24, 42),
+        .BackColor = Color.Transparent
+    }
+
+        row.Controls.AddRange({lblName, lblSku, lblQty})
 
         Dim ls = LineStatus(it)
         Dim badge As New Label With {
-            .Text = ls.text, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-            .ForeColor = ls.fore, .BackColor = ls.back, .AutoSize = True, .Padding = New Padding(12, 5, 12, 5),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
+        .Text = ls.text,
+        .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+        .ForeColor = ls.fore,
+        .BackColor = ls.back,
+        .AutoSize = True,
+        .Padding = New Padding(14, 6, 14, 6),
+        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+    }
         RoundLabel(badge, 12)
         row.Controls.Add(badge)
 
         AddHandler row.Resize,
-            Sub()
-                badge.Left = row.Width - badge.Width - 26
-                badge.Top = (height - badge.Height) \ 2
-            End Sub
+        Sub()
+            badge.Left = row.Width - badge.Width - 24
+            badge.Top = (rowH - badge.Height) \ 2
+            lblSku.Left = lblName.Right + 10
+            lblSku.Top = lblName.Top + (lblName.Height - lblSku.Height) \ 2
+            lblName.MaximumSize = New Size(Math.Max(80, badge.Left - 40), 30)
+        End Sub
 
         Return row
     End Function
@@ -441,7 +488,7 @@ Public Class ProcurementDeliveryPanelBuilder
         If it.Received >= it.OrderedQty AndAlso it.OrderedQty > 0 Then
             Return ("Received", PositiveClr, Color.FromArgb(232, 245, 233))
         ElseIf it.Received > 0 Then
-            Return ("Partial " & it.Received & "/" & it.OrderedQty, WarningClr, Color.FromArgb(252, 240, 228))
+            Return ("Partial  " & it.Received & "/" & it.OrderedQty, WarningClr, Color.FromArgb(252, 240, 228))
         Else
             Return ("Pending", FaintText, Color.FromArgb(238, 240, 239))
         End If
@@ -623,4 +670,7 @@ Public Class ProcurementDeliveryPanelBuilder
             End Sub
     End Sub
 
+    Private Sub ProcurementDeliveryPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+    End Sub
 End Class

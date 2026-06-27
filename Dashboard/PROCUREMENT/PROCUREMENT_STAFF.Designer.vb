@@ -90,6 +90,7 @@ Partial Class PROCUREMENT_STAFF
         Me.deliveryTracking.TabIndex = 4
         Me.deliveryTracking.Text = "Delivery Tracking"
         Me.deliveryTracking.UseVisualStyleBackColor = True
+
         '
         'logout
         '

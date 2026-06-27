@@ -131,6 +131,32 @@
     <Compile Include="Auth\SignUp.vb">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantDashPanelBuilder.Designer.vb">
+      <DependentUpon>AccountantDashPanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantDashPanelBuilder.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantIncomePanelBuilder.Designer.vb">
+      <DependentUpon>AccountantIncomePanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantIncomePanelBuilder.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantPayablesPanelBuilder.Designer.vb">
+      <DependentUpon>AccountantPayablesPanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantPayablesPanelBuilder.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantReportsPanelBuilder.Designer.vb">
+      <DependentUpon>AccountantReportsPanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantReportsPanelBuilder.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantSalesHistoryPanelBuilder.Designer.vb">
+      <DependentUpon>AccountantSalesHistoryPanelBuilder.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantSalesHistoryPanelBuilder.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\ACCOUNTANT_STAFF.Designer.vb">
+      <DependentUpon>ACCOUNTANT_STAFF.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ACCOUNTANT\ACCOUNTANT_STAFF.vb">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Dashboard\INVENTORY\InventoryHomePanelBuilder.Designer.vb">
       <DependentUpon>InventoryHomePanelBuilder.vb</DependentUpon>
     </Compile>
@@ -273,6 +299,24 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Auth\SignUp.resx">
       <DependentUpon>SignUp.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantDashPanelBuilder.resx">
+      <DependentUpon>AccountantDashPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantIncomePanelBuilder.resx">
+      <DependentUpon>AccountantIncomePanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantPayablesPanelBuilder.resx">
+      <DependentUpon>AccountantPayablesPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantReportsPanelBuilder.resx">
+      <DependentUpon>AccountantReportsPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantSalesHistoryPanelBuilder.resx">
+      <DependentUpon>AccountantSalesHistoryPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ACCOUNTANT\ACCOUNTANT_STAFF.resx">
+      <DependentUpon>ACCOUNTANT_STAFF.vb</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\INVENTORY\InventoryHomePanelBuilder.resx">
       <DependentUpon>InventoryHomePanelBuilder.vb</DependentUpon>

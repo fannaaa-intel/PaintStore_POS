@@ -437,13 +437,8 @@ Public Class LogIn
                 proc.Show()
                 Me.Hide()
             Case "Accountant"
-                ' Dedicated Accountant screen isn't built yet.
-                ' For now we open the dashboard so you can still get in.
-                AppModal.Show("Welcome, " & Session.CurrentFullName & " (" & role & ")." & vbCrLf &
-                            "A dedicated " & role & " screen isn't built yet — opening the dashboard.",
-                            "Logged in", MessageBoxButtons.OK, MessageBoxIcon.Information)
-                Dim dash As New Dashboard()
-                dash.Show()
+                Dim accForm As New ACCOUNTANT_STAFF()
+                accForm.Show()
                 Me.Hide()
             Case Else
                 AppModal.Show("Unknown role: " & role, "Login",

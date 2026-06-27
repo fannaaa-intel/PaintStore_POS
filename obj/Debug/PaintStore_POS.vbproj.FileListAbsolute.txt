@@ -58,3 +58,9 @@ C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementPO
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementReceivePanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ProcurementSuppliersPanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.InventoryPutAwayPanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ACCOUNTANT_STAFF.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantDashPanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantIncomePanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantPayablesPanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantSalesHistoryPanelBuilder.resources
+C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantReportsPanelBuilder.resources

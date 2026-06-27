@@ -357,8 +357,6 @@ Public Class TransactionPanelBuilder
         _lblQuotaBadge.Invalidate()
     End Sub
 
-
-
     Private Shared Function BuildContentArea() As Control
         Dim split As New TableLayoutPanel With {
         .Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 1,

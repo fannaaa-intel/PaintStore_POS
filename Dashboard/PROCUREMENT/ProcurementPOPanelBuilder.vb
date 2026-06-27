@@ -118,6 +118,35 @@ Public Class ProcurementPOPanelBuilder
         Public ColorHex As String
     End Class
 
+    ' ── QUOTE DATA MODEL ─────────────────────────────────────────────────────────
+    Private Class QuoteItem
+        Public ProductId As Integer
+        Public ProductName As String
+        Public Sku As String
+        Public Qty As Integer
+        Public UnitPrice As Decimal
+        Public ValidUntil As DateTime
+        Public HasValidUntil As Boolean
+        Public Notes As String
+        Public ReadOnly Property LineTotal As Decimal
+            Get
+                Return Math.Round(UnitPrice * Qty, 2)
+            End Get
+        End Property
+    End Class
+
+    Private Class ApprovedReqLite
+        Public RequestId As Integer
+        Public ProductId As Integer
+        Public ProductName As String
+        Public Sku As String
+        Public QtyRequested As Integer
+        Public UnitPrice As Decimal
+        Public Overrides Function ToString() As String
+            Return ProductName & "  (" & Sku & ")  ×" & QtyRequested
+        End Function
+    End Class
+
     ' ── STATE ────────────────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
     Private Shared currentFilter As String = "All"   ' All = active (not Cancelled/Received)
@@ -132,6 +161,11 @@ Public Class ProcurementPOPanelBuilder
     Private Shared cmbProductRef As ComboBox
     Private Shared btnSaveRef As Button
     Private Shared isOnNewPOForm As Boolean = False
+
+    ' Quote-within-PO state
+    Private Shared quoteItems As New List(Of QuoteItem)
+    Private Shared quoteHostPanelRef As Panel  ' the collapsible quote panel inside Settings card
+    Private Shared quoteExpanded As Boolean = False
 
     ' =========================================================================
     '  ENTRY POINTS
@@ -565,6 +599,8 @@ Public Class ProcurementPOPanelBuilder
         If container Is Nothing Then Return
 
         newLines = New List(Of POLine)()
+        quoteItems = New List(Of QuoteItem)()
+        quoteExpanded = False
         isOnNewPOForm = True
 
         container.SuspendLayout()
@@ -993,7 +1029,10 @@ Public Class ProcurementPOPanelBuilder
     End Function
 
     Private Shared Function BuildSettingsCard() As Panel
-        Dim card As New BufferedPanel With {.Height = 166, .BackColor = CardBg}
+        ' Outer wrapper — grows when quote panel expands
+        Dim wrapper As New Panel With {.BackColor = Color.Transparent, .Height = 225}
+
+        Dim card As New BufferedPanel With {.Height = 225, .BackColor = CardBg, .Dock = DockStyle.Top}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
         Dim lblSection As New Label With {
@@ -1037,7 +1076,68 @@ Public Class ProcurementPOPanelBuilder
         ThemeCalendar(dtExpectedRef)
         Dim expField As Panel = MakeField(dtExpectedRef, 210, 48)
 
-        card.Controls.AddRange({lblSection, lblHint, lblSup, supField, lblOrder, orderField, lblExp, expField})
+        ' --- Add Quote button — matches palette: solid MintDeep, white text, icon from file ---
+        Dim btnAddQuote As New Button With {
+            .Text = "  Add Quote",
+            .Size = New Size(148, 44),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = MintDeep,
+            .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10),
+            .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .ImageAlign = ContentAlignment.MiddleLeft,
+            .TextImageRelation = TextImageRelation.ImageBeforeText,
+            .Padding = New Padding(10, 0, 12, 0),
+            .Anchor = AnchorStyles.Bottom Or AnchorStyles.Right
+        }
+        btnAddQuote.FlatAppearance.BorderSize = 0
+        RoundControl(btnAddQuote, 10)
+        AddHover(btnAddQuote, MintDeep, DeepHover)
+        ' Override hover so it stays dark while expanded
+        AddHandler btnAddQuote.MouseLeave,
+            Sub()
+                btnAddQuote.BackColor = If(quoteExpanded, DeepHover, MintDeep)
+            End Sub
+
+        ' Load and tint down-arrow icon (white, 18×18)
+        Dim iconDown As Image = Nothing
+        Dim iconUp As Image = Nothing
+        Dim downPath As String = IO.Path.Combine(Application.StartupPath, "down-arrow.png")
+        Dim upPath As String = IO.Path.Combine(Application.StartupPath, "up-arrow.png")
+
+        Dim TintWhite As Func(Of String, Image) =
+            Function(path As String) As Image
+                If Not IO.File.Exists(path) Then Return Nothing
+                Try
+                    Dim raw As Image = Image.FromFile(path)
+                    Dim bmp As New Bitmap(18, 18)
+                    Using g As Graphics = Graphics.FromImage(bmp)
+                        g.InterpolationMode = Drawing2D.InterpolationMode.HighQualityBicubic
+                        Dim cm As New Imaging.ColorMatrix(New Single()() {
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 0, 0},
+                            New Single() {0, 0, 0, 1, 0},
+                            New Single() {1, 1, 1, 0, 1}
+                        })
+                        Dim ia As New Imaging.ImageAttributes()
+                        ia.SetColorMatrix(cm)
+                        g.DrawImage(raw, New Rectangle(0, 0, 18, 18),
+                                    0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                    End Using
+                    raw.Dispose()
+                    Return bmp
+                Catch
+                    Return Nothing
+                End Try
+            End Function
+
+        iconDown = TintWhite(downPath)
+        iconUp = TintWhite(upPath)
+        btnAddQuote.Image = iconDown
+
+        card.Controls.AddRange({lblSection, lblHint, lblSup, supField, lblOrder, orderField, lblExp, expField, btnAddQuote})
 
         ' force native controls to repaint at their final width (kills the ghost arrow)
         Dim repaintFields As Action =
@@ -1080,13 +1180,16 @@ Public Class ProcurementPOPanelBuilder
                 lblExp.Location = New Point(x, labY)
                 expField.SetBounds(x, fldY, expW, fldH)
 
+                ' Quote button — sits below the field row, right-aligned
+                btnAddQuote.Left = card.Width - padR - btnAddQuote.Width
+                btnAddQuote.Top = fldY + fldH + 12
+
                 repaintFields()
             End Sub
 
         AddHandler card.Resize, Sub() doLayout()
         AddHandler card.HandleCreated,
             Sub()
-                ' run after the message pump settles, then once more, repainting each time
                 card.BeginInvoke(Sub()
                                      doLayout()
                                      card.BeginInvoke(Sub()
@@ -1096,7 +1199,363 @@ Public Class ProcurementPOPanelBuilder
                                  End Sub)
             End Sub
         doLayout()
-        Return card
+
+        ' ── Inline Quote Panel (expands below the card, with margins) ─────────────
+        quoteHostPanelRef = BuildQuotePanel()
+        quoteHostPanelRef.Visible = False
+
+        ' Margin wrapper so the quote card floats with space on all sides
+        Dim quoteMargin As New Panel With {
+            .BackColor = Color.Transparent,
+            .Padding = New Padding(0, 15, 0, 10),
+            .Visible = False
+        }
+        quoteMargin.Controls.Add(quoteHostPanelRef)
+        quoteHostPanelRef.Dock = DockStyle.Fill
+
+        AddHandler btnAddQuote.Click,
+            Sub()
+                quoteExpanded = Not quoteExpanded
+                quoteMargin.Visible = quoteExpanded
+                quoteHostPanelRef.Visible = quoteExpanded
+                If quoteExpanded Then
+                    btnAddQuote.Text = "  Hide Quote"
+                    btnAddQuote.Image = iconUp
+                    btnAddQuote.BackColor = DeepHover
+                Else
+                    btnAddQuote.Text = "  Add Quote"
+                    btnAddQuote.Image = iconDown
+                    btnAddQuote.BackColor = MintDeep
+                End If
+                Dim quoteH As Integer = If(quoteExpanded, quoteHostPanelRef.Height + 28, 0)
+                quoteMargin.Height = quoteH
+                wrapper.Height = 225 + quoteH
+            End Sub
+
+        AddHandler quoteHostPanelRef.Resize,
+            Sub()
+                If quoteExpanded Then
+                    Dim quoteH As Integer = quoteHostPanelRef.Height + 28
+                    quoteMargin.Height = quoteH
+                    wrapper.Height = 225 + quoteH
+                End If
+            End Sub
+
+        wrapper.Controls.Add(quoteMargin)
+        wrapper.Controls.Add(card)
+        quoteMargin.Top = 230
+        quoteMargin.Left = 0
+        quoteMargin.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        AddHandler wrapper.Resize,
+            Sub()
+                quoteMargin.Width = wrapper.Width
+            End Sub
+
+        Return wrapper
+    End Function
+
+    ' ── Inline Quote Panel — appears below Order Details card ───────────────────
+    Private Shared Function BuildQuotePanel() As Panel
+        Dim approved As List(Of ApprovedReqLite) = LoadApprovedRequestsLite()
+
+        Dim quoteCard As New BufferedPanel With {.Height = 300, .BackColor = CardBg}
+        AddHandler quoteCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        ' Header — generous top padding, bigger title, clearly separated subtitle
+        Dim lblHead As New Label With {
+            .Text = "Quote Details",
+            .Font = New Font("Segoe UI", 15, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(24, 20), .BackColor = Color.Transparent
+        }
+        Dim lblSubHead As New Label With {
+            .Text = "Record the supplier's quoted price before placing the order.",
+            .Font = New Font("Segoe UI", 10.5F), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(24, 46), .BackColor = Color.Transparent
+        }
+        Dim divider As New Panel With {
+            .Height = 1, .BackColor = RowDivider,
+            .Location = New Point(20, 74), .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+
+        ' Row 1 — Request picker + Valid Until
+        Dim lblReq As Label = MakeFieldLabel("Approved Request")
+        Dim lblValid As Label = MakeFieldLabel("Valid Until")
+
+        Dim cmbReq As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 10.5F), .BackColor = CardBg
+        }
+        If approved.Count = 0 Then
+            cmbReq.Items.Add("— No approved requests —")
+            cmbReq.SelectedIndex = 0
+            cmbReq.Enabled = False
+        Else
+            cmbReq.Items.Add("— Select a request —")
+            For Each r In approved : cmbReq.Items.Add(r) : Next
+            cmbReq.SelectedIndex = 0
+        End If
+        Dim reqField As Panel = MakeField(cmbReq, 340, 44)
+
+        Dim dtValid As New DateTimePicker With {
+            .Format = DateTimePickerFormat.Custom, .CustomFormat = "MMM d, yyyy",
+            .Font = New Font("Segoe UI", 10.5F),
+            .Value = DateTime.Today.AddDays(14)
+        }
+        ThemeCalendar(dtValid)
+        Dim validField As Panel = MakeField(dtValid, 170, 44)
+
+        ' Row 2 — Unit Price + running Total label
+        Dim lblPrice As Label = MakeFieldLabel("Quoted Unit Price (" & Peso & ")")
+        Dim lblTotal As New Label With {
+            .Text = "Total:  " & Peso & "0.00",
+            .Font = New Font("Segoe UI Semibold", 11),
+            .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
+        }
+
+        Dim txtPrice As New TextBox With {
+            .Font = New Font("Segoe UI", 12), .ForeColor = MintDark,
+            .BackColor = CardBg, .BorderStyle = BorderStyle.None,
+            .Text = "0.00"
+        }
+        Dim priceField As Panel = MakeField(txtPrice, 160, 44)
+
+        ' Notes
+        Dim lblNotes As Label = MakeFieldLabel("Notes (optional)")
+        Dim txtNotes As New TextBox With {
+            .Font = New Font("Segoe UI", 10.5F), .ForeColor = MintDark,
+            .BackColor = CardBg, .BorderStyle = BorderStyle.None,
+            .Text = ""
+        }
+        Dim notesField As Panel = MakeField(txtNotes, 340, 44)
+
+        ' Save Quote button
+        Dim btnSaveQuote As New Button With {
+            .Text = "Save Quote", .Size = New Size(148, 44),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter
+        }
+        btnSaveQuote.FlatAppearance.BorderSize = 0
+        RoundControl(btnSaveQuote, 10)
+        AddHover(btnSaveQuote, MintDeep, DeepHover)
+
+        ' Live total update
+        Dim updateTotal As Action =
+            Sub()
+                Dim qty As Integer = 0
+                If TypeOf cmbReq.SelectedItem Is ApprovedReqLite Then
+                    qty = CType(cmbReq.SelectedItem, ApprovedReqLite).QtyRequested
+                End If
+                Dim price As Decimal = 0D
+                Decimal.TryParse(txtPrice.Text, price)
+                Dim tot As Decimal = Math.Round(price * qty, 2)
+                lblTotal.Text = "Total:  " & Peso & tot.ToString("N2")
+                If qty > 0 Then lblTotal.Text &= "   (" & qty & " " & ChrW(215) & " " & Peso & price.ToString("N2") & ")"
+            End Sub
+
+        AddHandler cmbReq.SelectedIndexChanged, Sub() updateTotal()
+        AddHandler txtPrice.TextChanged, Sub() updateTotal()
+
+        ' Save handler — writes quotations + quotation_items, flips request to Quoted
+        AddHandler btnSaveQuote.Click,
+            Sub()
+                If Not TypeOf cmbReq.SelectedItem Is ApprovedReqLite Then
+                    AppModal.Show("Please select an approved request.", "Validation",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+                Dim price As Decimal = 0D
+                If Not Decimal.TryParse(txtPrice.Text, price) OrElse price < 0 Then
+                    AppModal.Show("Please enter a valid unit price.", "Validation",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+
+                Dim req As ApprovedReqLite = CType(cmbReq.SelectedItem, ApprovedReqLite)
+
+                ' Supplier is whatever is currently selected in the PO form
+                Dim sup As SupItem = If(cmbSupplierRef IsNot Nothing,
+                    TryCast(cmbSupplierRef.SelectedItem, SupItem), Nothing)
+                If sup Is Nothing Then
+                    AppModal.Show("Please select a supplier in Order Details first.", "No Supplier",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+
+                Dim total As Decimal = Math.Round(price * req.QtyRequested, 2)
+                Dim notes As String = txtNotes.Text.Trim()
+                Dim quotNo As String = "QT-" & DateTime.Now.ToString("yyMMddHHmmss")
+
+                Try
+                    Using conn = Db.GetConnection()
+                        conn.Open()
+                        Using tx = conn.BeginTransaction()
+                            Dim quotId As Integer
+                            Using cmd As New MySqlCommand(
+                                "INSERT INTO quotations (quotation_no, request_id, supplier_id, created_by, " &
+                                "valid_until, status, notes, total_amount) " &
+                                "VALUES (@qno, @rid, @sid, @uid, @vd, 'Draft', @notes, @total)", conn, tx)
+                                cmd.Parameters.AddWithValue("@qno", quotNo)
+                                cmd.Parameters.AddWithValue("@rid", req.RequestId)
+                                cmd.Parameters.AddWithValue("@sid", sup.Id)
+                                cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                                cmd.Parameters.AddWithValue("@vd", dtValid.Value.Date)
+                                cmd.Parameters.AddWithValue("@notes",
+                                    If(notes = "", CType(DBNull.Value, Object), CObj(notes)))
+                                cmd.Parameters.AddWithValue("@total", total)
+                                cmd.ExecuteNonQuery()
+                                quotId = Convert.ToInt32(cmd.LastInsertedId)
+                            End Using
+
+                            Using cmd As New MySqlCommand(
+                                "INSERT INTO quotation_items (quotation_id, product_id, qty_requested, unit_price) " &
+                                "VALUES (@qid, @pid, @qty, @price)", conn, tx)
+                                cmd.Parameters.AddWithValue("@qid", quotId)
+                                cmd.Parameters.AddWithValue("@pid", req.ProductId)
+                                cmd.Parameters.AddWithValue("@qty", req.QtyRequested)
+                                cmd.Parameters.AddWithValue("@price", price)
+                                cmd.ExecuteNonQuery()
+                            End Using
+
+                            Using cmd As New MySqlCommand(
+                                "UPDATE purchase_requests SET status = 'Quoted' WHERE request_id = @rid", conn, tx)
+                                cmd.Parameters.AddWithValue("@rid", req.RequestId)
+                                cmd.ExecuteNonQuery()
+                            End Using
+
+                            tx.Commit()
+                        End Using
+                    End Using
+
+                    ' Auto-add this product as a PO line at the quoted price
+                    Dim already As Boolean = False
+                    For Each ln In newLines
+                        If ln.ProductId = req.ProductId Then
+                            ln.UnitCost = price   ' update the existing line's price
+                            already = True
+                            Exit For
+                        End If
+                    Next
+                    If Not already Then
+                        newLines.Add(New POLine With {
+                            .ProductId = req.ProductId, .ProductName = req.ProductName,
+                            .Sku = req.Sku, .Qty = req.QtyRequested,
+                            .UnitCost = price, .RequestId = req.RequestId
+                        })
+                    End If
+                    RebuildLines()
+                    RecomputeGrand()
+
+                    AppModal.Show("Quote " & quotNo & " saved as Draft." & Environment.NewLine &
+                                  "The item has been added to the line items at the quoted price.",
+                                  "Quote Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+
+                    ' Reset quote form for another entry
+                    cmbReq.SelectedIndex = 0
+                    txtPrice.Text = "0.00"
+                    txtNotes.Clear()
+                    updateTotal()
+
+                Catch ex As Exception
+                    AppModal.Show("Could not save quote:" & Environment.NewLine & ex.Message,
+                                  "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End Try
+            End Sub
+
+        quoteCard.Controls.AddRange({lblHead, lblSubHead, divider,
+                                     lblReq, reqField, lblValid, validField,
+                                     lblPrice, priceField, lblTotal,
+                                     lblNotes, notesField, btnSaveQuote})
+
+        ' Layout inside quote card
+        Dim doQLayout As Action =
+            Sub()
+                If quoteCard.Width < 120 Then Return
+                Const padL As Integer = 22
+                Const padR As Integer = 22
+                Const gap As Integer = 14
+                Dim w As Integer = quoteCard.Width
+
+                ' Divider
+                divider.Width = w - 40
+
+                ' Row 1 — label at 90, field at 112 (18px gap after divider at 74)
+                Const r1LabelY As Integer = 90
+                Const r1FieldY As Integer = 110
+                Dim reqW As Integer = CInt((w - padL - padR - gap) * 0.6)
+                Dim valW As Integer = w - padL - padR - gap - reqW
+                If valW < 160 Then valW = 160 : reqW = w - padL - padR - gap - valW
+                lblReq.Location = New Point(padL, r1LabelY)
+                reqField.SetBounds(padL, r1FieldY, reqW, 44)
+                lblValid.Location = New Point(reqField.Right + gap, r1LabelY)
+                validField.SetBounds(reqField.Right + gap, r1FieldY, valW, 44)
+
+                ' Row 2 — 20px breathing gap after row 1 fields
+                Const r2LabelY As Integer = 172
+                Const r2FieldY As Integer = 192
+                Dim priceW As Integer = 180
+                Dim notesW As Integer = w - padL - padR - gap - priceW - gap - 140
+                If notesW < 120 Then notesW = 120
+                lblPrice.Location = New Point(padL, r2LabelY)
+                priceField.SetBounds(padL, r2FieldY, priceW, 44)
+                lblNotes.Location = New Point(priceField.Right + gap, r2LabelY)
+                notesField.SetBounds(priceField.Right + gap, r2FieldY, notesW, 44)
+
+                ' Total label — vertically centred beside notes
+                lblTotal.Location = New Point(notesField.Right + gap,
+                                              r2FieldY + (44 - lblTotal.Height) \ 2)
+
+                ' Save button — 18px below row 2 fields
+                btnSaveQuote.Left = w - padR - btnSaveQuote.Width
+                btnSaveQuote.Top = r2FieldY + 44 + 18
+
+                quoteCard.Height = btnSaveQuote.Bottom + 22
+            End Sub
+
+        AddHandler quoteCard.Resize, Sub() doQLayout()
+        AddHandler quoteCard.HandleCreated,
+            Sub()
+                quoteCard.BeginInvoke(Sub() doQLayout())
+            End Sub
+        doQLayout()
+
+        Return quoteCard
+    End Function
+
+    ' Loads approved purchase requests for the inline quote picker.
+    Private Shared Function LoadApprovedRequestsLite() As List(Of ApprovedReqLite)
+        Dim result As New List(Of ApprovedReqLite)
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, " &
+                    "pr.qty_requested, p.unit_price " &
+                    "FROM purchase_requests pr " &
+                    "JOIN products p ON pr.product_id = p.product_id " &
+                    "WHERE pr.status = 'Approved' " &
+                    "ORDER BY pr.created_at DESC", conn)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            result.Add(New ApprovedReqLite With {
+                                .RequestId = SafeInt(rdr("request_id")),
+                                .ProductId = SafeInt(rdr("product_id")),
+                                .ProductName = rdr("pname").ToString(),
+                                .Sku = rdr("sku").ToString(),
+                                .QtyRequested = SafeInt(rdr("qty_requested")),
+                                .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D,
+                                               Convert.ToDecimal(rdr("unit_price")))
+                            })
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+        Return result
     End Function
 
     ' Rounded, bordered field wrapper. Inner control is resized to fill the
