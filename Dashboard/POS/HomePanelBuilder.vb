@@ -14,6 +14,8 @@ Public Class HomePanelBuilder
     Private Shared ReadOnly TileBg As Color = Color.FromArgb(236, 248, 244)
     Private Shared ReadOnly MintGreen As Color = Color.FromArgb(0, 195, 115)
     Private Shared ReadOnly AccentYellow As Color = Color.FromArgb(220, 170, 0)
+    Private Shared ReadOnly AccentOrange As Color = Color.FromArgb(232, 120, 30)
+    Private Shared ReadOnly AccentBlue As Color = Color.FromArgb(80, 160, 255)
     Private Shared ReadOnly AccentRed As Color = Color.FromArgb(210, 60, 60)
 
     ' ── LIVE CONTROLS ──────────────────────────────────────────────────────────
@@ -119,15 +121,17 @@ Public Class HomePanelBuilder
                 End Using
                 ' Today's sales total
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed'", conn)
+                    "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     todaySalesTotal = CDec(cmd.ExecuteScalar())
                 End Using
                 ' Recent 2 transactions today (completed sales only, so the feed
                 ' matches the Today's Sales figure and never shows held/voided rows)
                 Using cmd As New MySqlCommand(
                     "SELECT sale_no, sale_datetime, total FROM sales " &
-                    "WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' " &
+                    "WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid " &
                     "ORDER BY sale_datetime DESC LIMIT 2", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             recentTxns.Add((
@@ -271,7 +275,8 @@ Public Class HomePanelBuilder
             }
             Dim lValue As New Label With {
                 .Text = sd.value, .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-                .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 36)
+                .ForeColor = {MintPrimary, MintDark, AccentOrange, AccentBlue}(capI),
+                .AutoSize = True, .Location = New Point(20, 36)
             }
             Dim lSub As New Label With {
                 .Text = sd.subtitle, .Font = New Font("Segoe UI", 10),
@@ -656,7 +661,8 @@ Public Class HomePanelBuilder
             Using conn2 = Db.GetConnection()
                 conn2.Open()
                 Using cmd As New MySqlCommand(
-            "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE()", conn2)
+            "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     heldCount = CInt(cmd.ExecuteScalar())
                 End Using
             End Using
@@ -692,11 +698,13 @@ Public Class HomePanelBuilder
                         newLowStock = CInt(cmd.ExecuteScalar())
                     End Using
                     Using cmd As New MySqlCommand(
-                        "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed'", conn2)
+                        "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn2)
+                        cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                         newSalesTotal = CDec(cmd.ExecuteScalar())
                     End Using
                     Using cmd As New MySqlCommand(
-                        "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE()", conn2)
+                        "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
+                        cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                         newHeld = CInt(cmd.ExecuteScalar())
                     End Using
                 End Using
@@ -1116,7 +1124,8 @@ Public Class HomePanelBuilder
                 ' Sales today and transaction count
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) AS rev, COUNT(*) AS txns " &
-                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed'", conn)
+                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             Dim rev = CDec(rdr("rev"))
@@ -1131,7 +1140,8 @@ Public Class HomePanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(si.qty),0) FROM sale_items si " &
                     "JOIN sales s ON si.sale_id=s.sale_id " &
-                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed'", conn)
+                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed' AND s.user_id=@uid", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     SafeSetText(_lblItemsValue, CInt(cmd.ExecuteScalar()).ToString())
                 End Using
             End Using

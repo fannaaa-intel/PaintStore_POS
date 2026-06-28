@@ -217,7 +217,7 @@ Public Class ProcurementDashPanelBuilder
     '  TOP REGION  (title + 4 KPI cards)
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
-        Dim region As New Panel With {.Height = 240, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {.Height = 256, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
             .Text = "Dashboard", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
@@ -231,7 +231,7 @@ Public Class ProcurementDashPanelBuilder
 
         ' ---- KPI row: 4 cards ----
         Dim kpiRow As New TableLayoutPanel With {
-            .Left = 24, .Top = 96, .Height = 124, .ColumnCount = 4, .RowCount = 1,
+            .Left = 24, .Top = 96, .Height = 140, .ColumnCount = 4, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -275,12 +275,12 @@ Public Class ProcurementDashPanelBuilder
             .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
-            .Text = value, .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, 40), .BackColor = Color.Transparent
+            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = sub1, .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 88), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         Return card
@@ -301,19 +301,19 @@ Public Class ProcurementDashPanelBuilder
         ' ── Column header row (transparent, inset divider — no gray strip) ──
         Dim colHeader As New Panel With {.Height = 34, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
         Dim chProduct As New Label With {
-    .Text = "PRODUCT", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "PRODUCT", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
         Dim chQty As New Label With {
-    .Text = "QTY", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "QTY", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chBy As New Label With {
-    .Text = "REQUESTED BY", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "REQUESTED BY", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chWhen As New Label With {
-    .Text = "WHEN", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "WHEN", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chAction As New Label With {
-    .Text = "ACTION", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "ACTION", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent,
     .Anchor = AnchorStyles.Top Or AnchorStyles.Right}
         colHeader.Controls.AddRange({chProduct, chQty, chBy, chWhen, chAction})
@@ -385,13 +385,13 @@ Public Class ProcurementDashPanelBuilder
 
         ' Col 1 — Product name
         Dim lblName As New Label With {
-    .Text = req.ProductName, .Font = New Font("Segoe UI", 11.0F, FontStyle.Bold),
+    .Text = req.ProductName, .Font = New Font("Segoe UI", 13.0F, FontStyle.Bold),
     .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent,
     .Location = New Point(18, (height - 16) \ 2)}
 
         ' Col 2 — Qty pill
         Dim qtyPill As New Label With {
-    .Text = "x" & req.QtyRequested, .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "x" & req.QtyRequested, .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
     .ForeColor = MintDeep, .BackColor = Color.Transparent, .AutoSize = True,
     .Padding = New Padding(7, 2, 7, 2)
 }
@@ -399,11 +399,11 @@ Public Class ProcurementDashPanelBuilder
 
         ' Col 3 — Requested by
         Dim lblBy As New Label With {
-    .Text = req.RequestedBy, .Font = New Font("Segoe UI", 10.0F),
+    .Text = req.RequestedBy, .Font = New Font("Segoe UI", 11.0F),
     .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
 }
         Dim lblWhen As New Label With {
-    .Text = TimeAgo(req.CreatedAt), .Font = New Font("Segoe UI", 10.0F),
+    .Text = TimeAgo(req.CreatedAt), .Font = New Font("Segoe UI", 11.0F),
     .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
 }
 
@@ -445,19 +445,19 @@ Public Class ProcurementDashPanelBuilder
         ' ── Column header row (transparent, inset divider) ──
         Dim colHeader As New Panel With {.Height = 34, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
         Dim chPo As New Label With {
-    .Text = "PO NO.", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "PO NO.", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
         Dim chSupplier As New Label With {
-    .Text = "SUPPLIER", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "SUPPLIER", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chItems As New Label With {
-    .Text = "ITEMS", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "ITEMS", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chCost As New Label With {
-    .Text = "TOTAL", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "TOTAL", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent}
         Dim chStatus As New Label With {
-    .Text = "STATUS", .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+    .Text = "STATUS", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
     .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 9), .BackColor = Color.Transparent,
     .Anchor = AnchorStyles.Top Or AnchorStyles.Right}
         colHeader.Controls.AddRange({chPo, chSupplier, chItems, chCost, chStatus})
@@ -527,29 +527,29 @@ Public Class ProcurementDashPanelBuilder
 
         ' Col 1 — PO number
         Dim lblPo As New Label With {
-    .Text = po.PoNo, .Font = New Font("Segoe UI", 11.0F, FontStyle.Bold),
+    .Text = po.PoNo, .Font = New Font("Segoe UI", 13.0F, FontStyle.Bold),
     .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent,
     .Location = New Point(18, (height - 16) \ 2)}
 
         ' Col 2 — Supplier
         Dim lblSupplier As New Label With {
-    .Text = po.SupplierName, .Font = New Font("Segoe UI", 10.0F),
+    .Text = po.SupplierName, .Font = New Font("Segoe UI", 11.5F),
     .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
 }
         Dim lblItems As New Label With {
     .Text = po.ItemCount & If(po.ItemCount = 1, " item", " items"),
-    .Font = New Font("Segoe UI", 10.0F),
+    .Font = New Font("Segoe UI", 11.0F),
     .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
 }
         Dim lblCost As New Label With {
-    .Text = Peso & po.TotalCost.ToString("N2"), .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
+    .Text = Peso & po.TotalCost.ToString("N2"), .Font = New Font("Segoe UI", 12.0F, FontStyle.Bold),
     .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent
 }
 
         ' Col 5 — Badge (right-aligned)
         Dim st = DueBadge(po)
         Dim badge As New Label With {
-        .Text = st.text, .Font = New Font("Segoe UI", 8.25F, FontStyle.Bold),
+        .Text = st.text, .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
         .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
         .Padding = New Padding(8, 3, 8, 3), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
     }
@@ -577,11 +577,11 @@ Public Class ProcurementDashPanelBuilder
         Dim header As New Panel With {.Height = 56, .BackColor = Color.Transparent}
 
         Dim lblTitle As New Label With {
-            .Text = title, .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .Text = title, .Font = New Font("Segoe UI", 15, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(18, 16), .BackColor = Color.Transparent
         }
         Dim lblCount As New Label With {
-            .Text = countText, .Font = New Font("Segoe UI", 9.5F),
+            .Text = countText, .Font = New Font("Segoe UI", 10.5F),
             .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
@@ -686,11 +686,11 @@ Public Class ProcurementDashPanelBuilder
 
     Private Shared Function MakeLink(text As String, clr As Color) As Label
         Dim lbl As New Label With {
-            .Text = text, .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+            .Text = text, .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
             .ForeColor = clr, .AutoSize = True, .Cursor = Cursors.Hand, .BackColor = Color.Transparent
         }
-        AddHandler lbl.MouseEnter, Sub() lbl.Font = New Font("Segoe UI", 9.5F, FontStyle.Bold Or FontStyle.Underline)
-        AddHandler lbl.MouseLeave, Sub() lbl.Font = New Font("Segoe UI", 9.5F, FontStyle.Bold)
+        AddHandler lbl.MouseEnter, Sub() lbl.Font = New Font("Segoe UI", 10F, FontStyle.Bold Or FontStyle.Underline)
+        AddHandler lbl.MouseLeave, Sub() lbl.Font = New Font("Segoe UI", 10.0F, FontStyle.Bold)
         Return lbl
     End Function
 

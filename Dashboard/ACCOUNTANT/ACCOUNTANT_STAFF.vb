@@ -127,6 +127,7 @@ Public Class ACCOUNTANT_STAFF
         incomeExpenses.Text = "Income & Expenses"
         payables.Text = "Payables"
         salesHistory.Text = "Sales History"
+        auditTrail.Text = "Audit Trail"
         reports.Text = "Reports"
         logout.Text = "Logout"
 
@@ -139,7 +140,7 @@ Public Class ACCOUNTANT_STAFF
         }
         Nav.Controls.Add(lblMenu)
 
-        Dim navButtons() As Button = {home, incomeExpenses, payables, salesHistory, reports}
+        Dim navButtons() As Button = {home, incomeExpenses, payables, salesHistory, auditTrail, reports}
         Dim topPos As Integer = 128
         For Each btn In navButtons
             StyleButton(btn)
@@ -212,6 +213,7 @@ Public Class ACCOUNTANT_STAFF
             Case "incomeexpenses" : iconPath = "bar-chart.png"
             Case "payables" : iconPath = "clipboard.png"
             Case "saleshistory" : iconPath = "previous.png"
+            Case "audittrail" : iconPath = "clock.png"
             Case "reports" : iconPath = "inventory.png"
             Case "logout" : iconPath = "logout.png"
         End Select
@@ -317,6 +319,15 @@ Public Class ACCOUNTANT_STAFF
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
         AccountantSalesHistoryPanelBuilder.LoadSalesHistory(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub auditTrail_Click(sender As Object, e As EventArgs) Handles auditTrail.Click
+        SetActive(auditTrail)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AccountantAuditTrailPanelBuilder.LoadAuditTrail(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub

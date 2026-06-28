@@ -103,6 +103,7 @@ Public Class TransactionPanelBuilder
     Private Shared _lblItems As Label
     Private Shared _lblSubtotal As Label
     Private Shared _lblDiscount As Label
+    Private Shared _lblVat As Label
     Private Shared _lblGrandTotal As Label
 
     ' Last completed sale snapshot (for PRINT RECEIPT)
@@ -111,6 +112,7 @@ Public Class TransactionPanelBuilder
     Private Shared _lastSalePay As String = ""
     Private Shared _lastSaleSubtotal As Decimal = 0
     Private Shared _lastSaleDiscount As Decimal = 0
+    Private Shared _lastSaleVat As Decimal = 0
     Private Shared _lastSaleTotal As Decimal = 0
     Private Shared _lastSaleTendered As Decimal = 0
     Private Shared _lastSaleChange As Decimal = 0
@@ -129,7 +131,7 @@ Public Class TransactionPanelBuilder
         _activePayBtn = Nothing
         _activePayNormalClr = Color.Transparent
         _lblItems = Nothing : _lblSubtotal = Nothing
-        _lblDiscount = Nothing : _lblGrandTotal = Nothing
+        _lblDiscount = Nothing : _lblVat = Nothing : _lblGrandTotal = Nothing
         _catalogHost = Nothing : _cartHost = Nothing : _lblCatalogCount = Nothing
 
         ' Drop cached thumbnails so freshly-set images show immediately.
@@ -843,9 +845,10 @@ Public Class TransactionPanelBuilder
 
         ' Summary
         Dim summary As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(16, 6, 16, 10)}
-        Dim sgrid As New TableLayoutPanel With {.Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 4, .BackColor = Color.Transparent}
+        Dim sgrid As New TableLayoutPanel With {.Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 5, .BackColor = Color.Transparent}
         sgrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 55.0F))
         sgrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 45.0F))
+        sgrid.RowStyles.Add(New RowStyle(SizeType.Absolute, 26))
         sgrid.RowStyles.Add(New RowStyle(SizeType.Absolute, 26))
         sgrid.RowStyles.Add(New RowStyle(SizeType.Absolute, 26))
         sgrid.RowStyles.Add(New RowStyle(SizeType.Absolute, 26))
@@ -854,6 +857,7 @@ Public Class TransactionPanelBuilder
         _lblItems = MakeStat(sgrid, 0, "TOTAL ITEMS", "0")
         _lblSubtotal = MakeStat(sgrid, 1, "SUBTOTAL", "P 0.00")
         _lblDiscount = MakeStat(sgrid, 2, "DISCOUNT", "P 0.00")
+        _lblVat = MakeStat(sgrid, 3, "VAT (12%)", "P 0.00")
 
         Dim totalBlock As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0, 8, 0, 0)}
         Dim totalCard As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
@@ -873,7 +877,7 @@ Public Class TransactionPanelBuilder
         totalCard.Controls.Add(lblTotL)
         totalBlock.Controls.Add(totalCard)
         sgrid.SetColumnSpan(totalBlock, 2)
-        sgrid.Controls.Add(totalBlock, 0, 3)
+        sgrid.Controls.Add(totalBlock, 0, 4)
         summary.Controls.Add(sgrid)
 
         layout.Controls.Add(header, 0, 0)
@@ -937,9 +941,11 @@ Public Class TransactionPanelBuilder
         If disc < 0 Then disc = 0
         If disc > subtotal Then disc = subtotal
         Dim grand As Decimal = subtotal - disc
+        Dim vat As Decimal = Math.Round(grand * 12D / 112D, 2)
         If _lblItems IsNot Nothing Then _lblItems.Text = items.ToString()
         If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "P " & subtotal.ToString("N2")
         If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- P " & disc.ToString("N2")
+        If _lblVat IsNot Nothing Then _lblVat.Text = "P " & vat.ToString("N2")
         If _lblGrandTotal IsNot Nothing Then _lblGrandTotal.Text = "P " & grand.ToString("N2")
     End Sub
 
@@ -1444,7 +1450,7 @@ Public Class TransactionPanelBuilder
                         Using cmd As New MySqlCommand(
                             "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
                             "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due, reference_no) " &
-                            "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, 0, @total, @tendered, @change, @ref)", conn, txn)
+                        "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, @vat, @total, @tendered, @change, @ref)", conn, txn)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                             cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
@@ -1452,6 +1458,7 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
+                            cmd.Parameters.AddWithValue("@vat", Math.Round(total * 12D / 112D, 2))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.Parameters.AddWithValue("@tendered", amountTendered)
                             cmd.Parameters.AddWithValue("@change", changeDue)
@@ -1510,6 +1517,7 @@ Public Class TransactionPanelBuilder
             _lastSalePay = _payMethodName
             _lastSaleSubtotal = subtotal
             _lastSaleDiscount = discount
+            _lastSaleVat = Math.Round(total * 12D / 112D, 2)
             _lastSaleTotal = total
             _lastSaleTendered = amountTendered
             _lastSaleChange = changeDue
@@ -1630,13 +1638,14 @@ Public Class TransactionPanelBuilder
                         Using cmd As New MySqlCommand(
                             "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
                             "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due) " &
-                            "VALUES (@sno, @uid, @sid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, 0, @total, NULL, NULL)", conn, txn)
+                            "VALUES (@sno, @uid, @sid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, @vat, @total, NULL, NULL)", conn, txn)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                             cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
+                            cmd.Parameters.AddWithValue("@vat", Math.Round(total * 12D / 112D, 2))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.ExecuteNonQuery()
                         End Using
@@ -1681,7 +1690,8 @@ Public Class TransactionPanelBuilder
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand("SELECT sale_id, sale_no, total, sale_datetime FROM sales WHERE status = 'OnHold' ORDER BY sale_datetime DESC", conn)
+                Using cmd As New MySqlCommand("SELECT sale_id, sale_no, total, sale_datetime FROM sales WHERE status = 'OnHold' AND user_id = @uid ORDER BY sale_datetime DESC", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             held.Add((rdr.GetInt64("sale_id"), rdr.GetString("sale_no"), rdr.GetDecimal("total"), rdr.GetDateTime("sale_datetime")))
@@ -1746,7 +1756,8 @@ Public Class TransactionPanelBuilder
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand("SELECT sale_id, sale_no, total, status, sale_datetime FROM sales WHERE status IN ('Completed','OnHold') ORDER BY sale_datetime DESC LIMIT 50", conn)
+                Using cmd As New MySqlCommand("SELECT sale_id, sale_no, total, status, sale_datetime FROM sales WHERE status IN ('Completed','OnHold') AND user_id = @uid ORDER BY sale_datetime DESC LIMIT 50", conn)
+                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             candidates.Add((rdr.GetInt64("sale_id"), rdr.GetString("sale_no"), rdr.GetDecimal("total"), rdr.GetString("status"), rdr.GetDateTime("sale_datetime")))
@@ -1861,6 +1872,7 @@ Public Class TransactionPanelBuilder
             lines.Add(ReceiptPrinter.Divider())
             lines.Add(New ReceiptPrinter.RLine("Subtotal", "P " & _lastSaleSubtotal.ToString("N2")))
             If _lastSaleDiscount > 0 Then lines.Add(New ReceiptPrinter.RLine("Discount", "- P " & _lastSaleDiscount.ToString("N2")))
+            lines.Add(New ReceiptPrinter.RLine("VAT (12%)", "P " & _lastSaleVat.ToString("N2")))
             lines.Add(New ReceiptPrinter.RLine("TOTAL", "P " & _lastSaleTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
             If String.Equals(_lastSalePay, "Cash", StringComparison.OrdinalIgnoreCase) Then
                 lines.Add(New ReceiptPrinter.RLine("Tendered", "P " & _lastSaleTendered.ToString("N2")))
