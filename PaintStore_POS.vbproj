@@ -255,6 +255,7 @@
     <Compile Include="Modules\POS\ReceiptPrinter.vb" />
     <Compile Include="Modules\PasswordHelper.vb" />
     <Compile Include="Modules\POS\SaleCompleteModal.vb" />
+    <Compile Include="Modules\ReportPrinter.vb" />
     <Compile Include="Modules\Session.vb" />
     <Compile Include="Resources\Dashboard.Designer.vb">
       <DependentUpon>Dashboard.vb</DependentUpon>

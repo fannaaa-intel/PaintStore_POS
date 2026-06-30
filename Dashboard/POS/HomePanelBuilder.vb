@@ -49,9 +49,14 @@ Public Class HomePanelBuilder
     Private Shared Function GetIcon(path As String) As Image
         If String.IsNullOrEmpty(path) OrElse Not IO.File.Exists(path) Then Return Nothing
         If Not IconCache.ContainsKey(path) Then
-            Using fs As New IO.FileStream(path, IO.FileMode.Open, IO.FileAccess.Read)
-                IconCache(path) = Image.FromStream(fs)
-            End Using
+            Try
+                Dim bytes() As Byte = IO.File.ReadAllBytes(path)
+                Using ms As New IO.MemoryStream(bytes)
+                    IconCache(path) = Image.FromStream(ms)
+                End Using
+            Catch
+                Return Nothing
+            End Try
         End If
         Return IconCache(path)
     End Function
@@ -224,13 +229,64 @@ Public Class HomePanelBuilder
         End If
 
         clockChip.Controls.AddRange({lblClockTag, lblClock, clockIcon})
-        topBar.Controls.AddRange({lblGreet, lblDate, clockChip})
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 34),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = bb.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As New GraphicsPath()
+                    Dim r = 8
+                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
+                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
+                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
+                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
+                    path.CloseFigure()
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                StopTimer()
+                LoadHome(container, shiftStartTime)
+            End Sub
+
+        topBar.Controls.AddRange({lblGreet, lblDate, clockChip, btnRefresh})
 
         AddHandler wrap.Resize,
-            Sub()
-                topBar.Width = wrap.Width
-                clockChip.Left = topBar.Width - clockChip.Width - 4
-            End Sub
+    Sub()
+        topBar.Width = wrap.Width
+        clockChip.Left = topBar.Width - clockChip.Width - 4
+        btnRefresh.Top = clockChip.Top + (clockChip.Height - btnRefresh.Height) \ 2
+        btnRefresh.Left = clockChip.Left - btnRefresh.Width - 12
+    End Sub
 
         wrap.Controls.Add(topBar)
         curTop = topBar.Bottom + GAP
@@ -806,14 +862,16 @@ Public Class HomePanelBuilder
         thisNotifTimer.Start()
 
         ' Stop notif timer when container is disposed
+        ' Stop notif timer when container is disposed
+        Dim capturedNotifTimer As Timer = thisNotifTimer
         AddHandler container.Disposed,
-       Sub()
-           Try
-               thisNotifTimer.Stop()
-               thisNotifTimer.Dispose()
-           Catch
-           End Try
-       End Sub
+            Sub()
+                Try
+                    capturedNotifTimer.Stop()
+                    capturedNotifTimer.Dispose()
+                Catch
+                End Try
+            End Sub
 
         Dim nY As Integer = 70
         For Each n In smartNotifs
@@ -1162,6 +1220,7 @@ Public Class HomePanelBuilder
             If frm Is Nothing Then Return
             Select Case section
                 Case "New Transaction" : frm.transaction.PerformClick()
+                Case "Inventory" : frm.transaction.PerformClick()
                 Case "Sales History" : frm.sales.PerformClick()
                 Case "Cash Drawer" : frm.Reports.PerformClick()
                 Case Else

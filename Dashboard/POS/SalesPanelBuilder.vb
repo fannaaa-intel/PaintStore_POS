@@ -180,10 +180,67 @@ Public Class SalesPanelBuilder
                 End If
             End Sub
         clockTimer.Start()
+        AddHandler topBar.Disposed,
+            Sub()
+                clockTimer.Stop()
+                clockTimer.Dispose()
+            End Sub
 
-        topBar.Controls.AddRange({lblGreet, lblDate, lblClock})
+        ' ── Refresh button ────────────────────────────────────────────────
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 34),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(0, 110, 92),
+            .ForeColor = Color.FromArgb(200, 240, 225),
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s As Object, e As PaintEventArgs)
+                Dim b = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = b.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As New GraphicsPath()
+                    Dim r = 8
+                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
+                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
+                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
+                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
+                    path.CloseFigure()
+                    Using br As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(0, 90, 75)
+                btnRefresh.ForeColor = Color.White
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(0, 110, 92)
+                btnRefresh.ForeColor = Color.FromArgb(200, 240, 225)
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                If _container IsNot Nothing Then LoadSales(_container)
+            End Sub
+
+        topBar.Controls.AddRange({lblGreet, lblDate, lblClock, btnRefresh})
         AddHandler topBar.Resize,
-            Sub() lblClock.Location = New Point(topBar.Width - lblClock.Width - 18, (topBar.Height - lblClock.Height) \ 2)
+            Sub()
+                lblClock.Location = New Point(topBar.Width - lblClock.Width - 18, (topBar.Height - lblClock.Height) \ 2)
+                btnRefresh.Left = lblClock.Left - btnRefresh.Width - 12
+                btnRefresh.Top = (topBar.Height - btnRefresh.Height) \ 2
+            End Sub
         AddHandler wrap.Resize, Sub() topBar.Width = wrap.Width
 
         wrap.Controls.Add(topBar)
@@ -461,6 +518,19 @@ Public Class SalesPanelBuilder
                 searchWrap.Invalidate()
             End Sub
         AddHandler searchWrap.Click, Sub() txtSearch.Focus()
+        AddHandler txtSearch.TextChanged,
+            Sub()
+                If txtSearch.Text = "Search receipt..." Then Return
+                RefreshTransactionRowsWithSearch(txtSearch.Text.Trim())
+            End Sub
+        AddHandler txtSearch.KeyDown,
+            Sub(s, e)
+                If CType(e, KeyEventArgs).KeyCode = Keys.Escape Then
+                    txtSearch.Text = "Search receipt..."
+                    txtSearch.ForeColor = SubText
+                    RefreshTransactionRows()
+                End If
+            End Sub
         searchWrap.Controls.Add(txtSearch)
 
         toolRow.Controls.Add(filterHost)
@@ -557,6 +627,36 @@ Public Class SalesPanelBuilder
 
         ' Load first batch of rows
         RefreshTransactionRows()
+    End Sub
+
+    Private Shared Sub RefreshTransactionRowsWithSearch(searchTerm As String)
+        If _txnRowList Is Nothing Then Return
+        If String.IsNullOrWhiteSpace(searchTerm) Then
+            RefreshTransactionRows() : Return
+        End If
+
+        _txnRowList.SuspendLayout()
+        _txnRowList.Controls.Clear()
+
+        Dim data = LoadSalesFromDb(_activeFilter)
+        Dim filtered = data.Where(Function(r)
+                                      Return r.TxnNo.IndexOf(searchTerm, StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                   r.Products.IndexOf(searchTerm, StringComparison.OrdinalIgnoreCase) >= 0
+                                  End Function).ToArray()
+
+        For Each rd In filtered
+            _txnRowList.Controls.Add(BuildSalesRow(rd))
+        Next
+        For i = _txnRowList.Controls.Count - 1 To 0 Step -1
+            _txnRowList.Controls.SetChildIndex(_txnRowList.Controls(i), _txnRowList.Controls.Count - 1 - i)
+        Next
+
+        _txnRowList.ResumeLayout()
+        _txnRowList.Invalidate(True)
+
+        If _lblPaging IsNot Nothing Then
+            _lblPaging.Text = $"Showing {filtered.Length} of {data.Length} transaction(s) matching ""{searchTerm}"""
+        End If
     End Sub
 
     ' ── Refresh rows from DB based on current filter ──────────────────────────

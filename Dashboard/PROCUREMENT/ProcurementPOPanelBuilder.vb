@@ -1,6 +1,6 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
-Imports System.Security.Cryptography
+
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
 
@@ -231,12 +231,21 @@ Public Class ProcurementPOPanelBuilder
                 rowsHost.Controls.Add(card)
                 y += card.Height + 12
             Next
-            AddHandler rowsHost.Resize,
+            Dim onPickerResize As EventHandler = Sub(s, e)
+                                                     Dim w As Integer = rowsHost.ClientSize.Width - 4
+                                                     For Each c As Control In rowsHost.Controls
+                                                         c.Width = w
+                                                     Next
+                                                 End Sub
+            AddHandler rowsHost.Resize, onPickerResize
+            AddHandler rowsHost.VisibleChanged,
                 Sub()
-                    Dim w As Integer = rowsHost.ClientSize.Width - 4
-                    For Each c As Control In rowsHost.Controls
-                        c.Width = w
-                    Next
+                    If rowsHost.Visible Then
+                        Dim w As Integer = rowsHost.ClientSize.Width - 4
+                        For Each c As Control In rowsHost.Controls
+                            c.Width = w
+                        Next
+                    End If
                 End Sub
         End If
     End Sub
@@ -261,10 +270,46 @@ Public Class ProcurementPOPanelBuilder
         region.Controls.Add(lblTitle)
         region.Controls.Add(lblSub)
 
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() RenderList()
+        region.Controls.Add(btnRefresh)
 
         ' ---- New PO button (top-right) ----
         Dim btnNew As New Button With {
-    .Text = "+ New PO", .Size = New Size(130, 40),
+            .Text = "+ New PO", .Size = New Size(130, 40),
             .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
             .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
             .TextAlign = ContentAlignment.MiddleCenter,
@@ -276,12 +321,19 @@ Public Class ProcurementPOPanelBuilder
         AddHover(btnNew, MintDeep, DeepHover)
         AddHandler btnNew.Click, Sub() LoadNewPOForm(0)
         region.Controls.Add(btnNew)
-        AddHandler region.Resize, Sub()
-                                      btnNew.Top = 22
-                                      btnNew.Left = region.Width - 24 - btnNew.Width
-                                  End Sub
+
+        ' Position both buttons: [Refresh] [+New PO] right-aligned with 8px gap
+        AddHandler region.Resize,
+            Sub()
+                btnNew.Top = 22
+                btnNew.Left = region.Width - 24 - btnNew.Width
+                btnRefresh.Top = 22
+                btnRefresh.Left = btnNew.Left - 8 - btnRefresh.Width
+            End Sub
         btnNew.Top = 22
         btnNew.Left = 700
+        btnRefresh.Top = 22
+        btnRefresh.Left = 592
 
         ' ---- Filter tabs ----
         Dim tabs() As String = {"All", "Draft", "Ordered", "Received", "Cancelled"}
@@ -758,12 +810,21 @@ Public Class ProcurementPOPanelBuilder
                 rowsHost.Controls.Add(row)
                 y += 88
             Next
-            AddHandler rowsHost.Resize,
+            Dim onListResize As EventHandler = Sub(s, e)
+                                                   Dim w As Integer = rowsHost.ClientSize.Width - 4
+                                                   For Each c As Control In rowsHost.Controls
+                                                       c.Width = w
+                                                   Next
+                                               End Sub
+            AddHandler rowsHost.Resize, onListResize
+            AddHandler rowsHost.VisibleChanged,
                 Sub()
-                    Dim w As Integer = rowsHost.ClientSize.Width - 4
-                    For Each c As Control In rowsHost.Controls
-                        c.Width = w
-                    Next
+                    If rowsHost.Visible Then
+                        Dim w As Integer = rowsHost.ClientSize.Width - 4
+                        For Each c As Control In rowsHost.Controls
+                            c.Width = w
+                        Next
+                    End If
                 End Sub
         End If
 
@@ -1605,62 +1666,8 @@ Public Class ProcurementPOPanelBuilder
     End Function
 
 
-    ' Wrapper now keeps the inner control sized to the wrapper on every resize,
-    ' so fields built with MakeField can flex when their bounds change.
 
-    Private Shared Function BuildAddBar() As Panel
-        Dim bar As New Panel With {.Height = 80, .BackColor = Color.Transparent}
 
-        Dim lbl As Label = MakeFieldLabel("Add Item")
-        lbl.Location = New Point(2, 4)
-
-        cmbProductRef = New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDown, .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 11), .BackColor = CardBg,
-            .AutoCompleteMode = AutoCompleteMode.SuggestAppend,
-            .AutoCompleteSource = AutoCompleteSource.ListItems
-        }
-        For Each p In LoadProducts() : cmbProductRef.Items.Add(p) : Next
-        Dim prodField As Panel = MakeField(cmbProductRef, 380)
-        prodField.Location = New Point(0, 28)
-
-        Dim btnAdd As New Button With {
-            .Text = "+  Add Product", .Size = New Size(150, 46),
-            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
-            .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
-            .TextAlign = ContentAlignment.MiddleCenter,
-            .Location = New Point(392, 28)
-        }
-        btnAdd.FlatAppearance.BorderSize = 0
-        RoundControl(btnAdd, 10)
-        AddHover(btnAdd, MintDeep, DeepHover)
-        AddHandler btnAdd.Click, Sub() AddLineFromCombo()
-
-        bar.Controls.AddRange({lbl, prodField, btnAdd})
-        Return bar
-    End Function
-
-    Private Shared Function BuildGrandBar() As Panel
-        Dim bar As New BufferedPanel With {.Height = 68, .BackColor = CardBg}
-        AddHandler bar.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-
-        Dim lblCap As New Label With {
-            .Text = "Grand Total", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 22), .BackColor = Color.Transparent
-        }
-        lblGrandRef = New Label With {
-            .Text = Peso & "0.00", .Font = New Font("Segoe UI", 19, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        bar.Controls.AddRange({lblCap, lblGrandRef})
-        AddHandler bar.Resize,
-            Sub()
-                lblGrandRef.Left = bar.Width - lblGrandRef.Width - 22
-                lblGrandRef.Top = 18
-            End Sub
-        Return bar
-    End Function
 
     ' ---- Line rows ----
     Private Shared Sub RebuildLines()
@@ -2248,11 +2255,6 @@ Public Class ProcurementPOPanelBuilder
     }
         header.Controls.AddRange({picBack, lblTitle})
 
-        Dim btnPrint As Button = Nothing
-
-
-
-
 
 
         ' ── Action button (Mark as Ordered / Receive Goods) ──────────────────────
@@ -2617,73 +2619,6 @@ Public Class ProcurementPOPanelBuilder
         Return row
     End Function
 
-    ' ── Detail line row — compact tile ──────────────────────────────────────────
-    ' Each row is self-contained: product name + SKU on the left,
-    ' qty × unit price in the middle, line total pinned right.
-    Private Shared Function BuildDetailLineRow(ln As POLine, height As Integer) As Panel
-        Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
-
-        AddHandler row.Paint,
-        Sub(s, e)
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-            Dim rect As New Rectangle(0, 0, row.Width - 1, row.Height - 1)
-            Using path As GraphicsPath = RoundRect(rect, 8)
-                Using b As New SolidBrush(TileBg) : e.Graphics.FillPath(b, path) : End Using
-                Using pen As New Pen(Color.FromArgb(200, 228, 218), 1.0F) : e.Graphics.DrawPath(pen, path) : End Using
-            End Using
-        End Sub
-
-        Dim lblName As New Label With {
-        .Text = ln.ProductName,
-        .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-        .ForeColor = MintDark, .AutoSize = False,
-        .TextAlign = ContentAlignment.MiddleLeft,
-        .BackColor = Color.Transparent,
-        .Location = New Point(16, 6), .Size = New Size(280, 22)
-    }
-        Dim lblSku As New Label With {
-        .Text = ln.Sku,
-        .Font = New Font("Segoe UI", 9),
-        .ForeColor = FaintText, .AutoSize = True,
-        .BackColor = Color.Transparent,
-        .Location = New Point(16, 30)
-    }
-
-        ' Qty × unit cost (centre-ish)
-        Dim lblQty As New Label With {
-        .Text = ln.Qty & " " & ChrW(215) & " " & Peso & ln.UnitCost.ToString("N2"),
-        .Font = New Font("Segoe UI", 10),
-        .ForeColor = SubText, .AutoSize = True,
-        .BackColor = Color.Transparent,
-        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-    }
-
-        ' Line total — bold, pinned right
-        Dim lblLineTotal As New Label With {
-            .Text = Peso & ln.LineTotal.ToString("N2"),
-            .Font = New Font("Segoe UI", 12.5F, FontStyle.Bold),
-            .ForeColor = MintDeep, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-
-        row.Controls.AddRange({lblName, lblSku, lblQty, lblLineTotal})
-
-        AddHandler row.Resize,
-        Sub()
-            Const rPad As Integer = 16
-            lblLineTotal.Left = row.Width - lblLineTotal.Width - rPad
-            lblLineTotal.Top = (height - lblLineTotal.Height) \ 2
-
-            lblQty.Left = lblLineTotal.Left - lblQty.Width - 20
-            lblQty.Top = (height - lblQty.Height) \ 2
-
-            Dim rightStop As Integer = lblQty.Left - 12
-            lblName.Width = Math.Max(80, rightStop - 16)
-        End Sub
-
-        Return row
-    End Function
 
     ' =========================================================================
     '  PRINT — builds a PrintDocument from the PO data and shows the dialog
@@ -3093,16 +3028,6 @@ Public Class ProcurementPOPanelBuilder
         PanelRenderer.Draw(panel, e, True)
     End Sub
 
-    ' Fills a panel with a rounded solid colour (used for line tiles).
-    Private Shared Sub RoundFill(panel As Panel, e As PaintEventArgs, fill As Color, radius As Integer)
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-        Dim rect As New Rectangle(0, 0, panel.Width - 1, panel.Height - 1)
-        Using path As GraphicsPath = RoundRect(rect, radius)
-            Using b As New SolidBrush(fill)
-                e.Graphics.FillPath(b, path)
-            End Using
-        End Using
-    End Sub
 
     Private Shared Function MakeLink(text As String, clr As Color) As Label
         Dim lbl As New Label With {
@@ -3128,11 +3053,7 @@ Public Class ProcurementPOPanelBuilder
         Return 0
     End Function
 
-    Private Shared Function SafeDecStr(s As String) As Decimal
-        Dim d As Decimal
-        If Decimal.TryParse(s, d) Then Return Math.Max(0D, d)
-        Return 0D
-    End Function
+
 
     Private Shared Function HexToColor(hex As String, fallback As Color) As Color
         Try
@@ -3210,23 +3131,4 @@ Public Class ProcurementPOPanelBuilder
         AddHandler btn.MouseLeave, Sub() btn.BackColor = normal
     End Sub
 
-    ' "Back to list" as a tappable pill with hover.
-    Private Shared Function MakeBackPill() As Label
-        Dim pill As New Label With {
-            .Text = ChrW(8592) & "   Back to list",
-            .Font = New Font("Segoe UI Semibold", 11),
-            .ForeColor = MintDeep, .BackColor = TileBg,
-            .AutoSize = False,
-            .TextAlign = ContentAlignment.MiddleCenter, .Cursor = Cursors.Hand
-        }
-        RoundLabel(pill, 8)
-        pill.Size = New Size(150, 34)   ' set AFTER RoundLabel so the rounded region applies
-        AddHandler pill.MouseEnter, Sub() pill.BackColor = Color.FromArgb(210, 240, 235)
-        AddHandler pill.MouseLeave, Sub() pill.BackColor = TileBg
-        Return pill
-    End Function
-
-    Private Sub ProcurementPOPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
-
-    End Sub
 End Class

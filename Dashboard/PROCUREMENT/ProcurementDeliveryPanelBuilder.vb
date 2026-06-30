@@ -117,7 +117,48 @@ Public Class ProcurementDeliveryPanelBuilder
             .Font = New Font("Segoe UI", 11), .ForeColor = If(overdue > 0, NegativeClr, SubText),
             .AutoSize = True, .Location = New Point(30, 58)
         }
-        region.Controls.AddRange({lblTitle, lblSub})
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() LoadDelivery(containerRef)
+        AddHandler region.Resize,
+            Sub()
+                btnRefresh.Left = region.Width - btnRefresh.Width - 24
+                btnRefresh.Top = (region.Height - btnRefresh.Height) \ 2
+            End Sub
+
+        region.Controls.AddRange({lblTitle, lblSub, btnRefresh})
         Return region
     End Function
 
@@ -355,12 +396,21 @@ Public Class ProcurementDeliveryPanelBuilder
         Next
 
         AddHandler panel.Resize,
-        Sub()
-            Dim w As Integer = panel.ClientSize.Width - 4
-            For Each c As Control In panel.Controls
-                If TypeOf c Is Panel Then c.Width = w
-            Next
-        End Sub
+            Sub()
+                Dim w As Integer = panel.ClientSize.Width - 4
+                For Each c As Control In panel.Controls
+                    If TypeOf c Is Panel Then c.Width = w
+                Next
+            End Sub
+        AddHandler panel.VisibleChanged,
+            Sub()
+                If panel.Visible Then
+                    Dim w As Integer = panel.ClientSize.Width - 4
+                    For Each c As Control In panel.Controls
+                        If TypeOf c Is Panel Then c.Width = w
+                    Next
+                End If
+            End Sub
         Return panel
     End Function
 
@@ -475,14 +525,7 @@ Public Class ProcurementDeliveryPanelBuilder
         Return "Upcoming"
     End Function
 
-    Private Shared Function GroupColor(name As String) As Color
-        Select Case name
-            Case "Overdue" : Return NegativeClr
-            Case "Due Today" : Return WarningClr
-            Case "Due This Week" : Return MintPrimary
-            Case Else : Return SubText
-        End Select
-    End Function
+
 
     Private Shared Function LineStatus(it As DeliveryItem) As (text As String, fore As Color, back As Color)
         If it.Received >= it.OrderedQty AndAlso it.OrderedQty > 0 Then
@@ -560,7 +603,7 @@ Public Class ProcurementDeliveryPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            ' Non-fatal — just show an empty item list
+            Debug.WriteLine("ProcurementDelivery GetItems error (PO " & poId & "): " & ex.Message)
         End Try
         itemsCache(poId) = result
         Return result
@@ -619,15 +662,6 @@ Public Class ProcurementDeliveryPanelBuilder
         Return 0
     End Function
 
-    Private Shared Function HexToColor(hex As String, fallback As Color) As Color
-        Try
-            If Not String.IsNullOrEmpty(hex) AndAlso hex.StartsWith("#") AndAlso hex.Length = 7 Then
-                Return ColorTranslator.FromHtml(hex)
-            End If
-        Catch
-        End Try
-        Return fallback
-    End Function
 
     Private Shared Function RoundRect(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim r As Integer = radius
@@ -645,16 +679,7 @@ Public Class ProcurementDeliveryPanelBuilder
         Return path
     End Function
 
-    Private Shared Sub RoundControl(ctrl As Control, radius As Integer)
-        Dim path As New GraphicsPath()
-        Dim r As Integer = radius
-        path.AddArc(0, 0, r, r, 180, 90)
-        path.AddArc(ctrl.Width - r, 0, r, r, 270, 90)
-        path.AddArc(ctrl.Width - r, ctrl.Height - r, r, r, 0, 90)
-        path.AddArc(0, ctrl.Height - r, r, r, 90, 90)
-        path.CloseFigure()
-        ctrl.Region = New Region(path)
-    End Sub
+
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
         AddHandler lbl.Resize,
@@ -670,7 +695,5 @@ Public Class ProcurementDeliveryPanelBuilder
             End Sub
     End Sub
 
-    Private Sub ProcurementDeliveryPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
-    End Sub
 End Class

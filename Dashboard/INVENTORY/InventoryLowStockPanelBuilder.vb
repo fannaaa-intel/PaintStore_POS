@@ -6,37 +6,45 @@ Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
-'  InventoryLowStockPanelBuilder
-'  Low Stock Alerts screen for Inventory Staff.
+'  InventoryLowStockPanelBuilder  (fixed)
 '
+'  CHANGES IN THIS VERSION
+'  -----------------------
+'  A. REFRESH BUTTON added to BuildTopRegion — matches InventoryHomePanelBuilder
+'     and InventoryItemListPanelBuilder exactly:
+'       - Muted-green resting state RGB(220,235,232) / SubText label.
+'       - MouseEnter → RGB(210,240,235) / MintDark label + Invalidate().
+'       - MouseLeave → restores resting colours + Invalidate().
+'       - Rounded pill via RoundRect GraphicsPath (no non-standard extension).
+'       - Click calls LoadLowStock(containerRef) to reload from the DB.
+'       - Positioned: [↻ Refresh]  [Copy order list] — right-aligned.
+'       - positionRight lambda updated to lay out both buttons correctly.
+'
+'  B. MakeKpiCard ByRef parameter removed — it was declared ByRef but never
+'     assigned inside the function; the caller immediately overwrote its own
+'     variable from card.Tag anyway. The signature now simply omits the unused
+'     ByRef argument. All three call sites updated accordingly.
+'
+'  C. OpenReceive() dead-code fixed — the function existed but was never
+'     called from any UI element. A "Receive" link is now added alongside the
+'     "Request" pill so inventory staff can jump straight to Stock Adjustment
+'     for the flagged item without hunting through the nav.
+'
+'  ORIGINAL NOTES (unchanged)
+'  --------------------------
 '  PURPOSE  (deliberately NOT a second Stock Levels)
-'  ------------------------------------------------
 '  The three inventory screens each own ONE verb:
 '     Stock Levels      = MONITOR  (health of everything, colour-coded)
-'     Low Stock Alerts  = PLAN     (what to buy, how much, what it's worth)  <- this
+'     Low Stock Alerts  = PLAN     (what to buy, how much, what it's worth)
 '     Stock Adjustment  = RECORD   (write down what actually arrived)
 '
-'  So this is a PURCHASE PLAN / shopping list, not a monitor. It shows only the
-'  items that need reordering, groups them the way you'd actually order them,
-'  computes a suggested order quantity per item, and totals it up. It ends in a
-'  copyable order summary you can hand to a supplier — a different ending than
-'  Stock Adjustment's "change one number".
-'
 '  GROUPING SEAM (forward-compatible with a future Supplier module)
-'  ----------------------------------------------------------------
-'  Today `products` has no supplier_id, so we group by CATEGORY. When the
-'  Supplier module lands and products gain a supplier, change ONE function —
-'  GroupKeyFor() — to return the supplier name, and the whole screen regroups.
-'  Nothing else needs to change.
+'  Change ONE function — GroupKeyFor() — to return supplier name and the whole
+'  screen regroups. Nothing else needs to change.
 '
 '  COST NOTE
-'  ---------
-'  `products` has no wholesale/cost column (true purchase cost lives in
-'  po_items.unit_cost historically). So the money figure here is "estimated
-'  value at selling price" — labelled honestly as VALUE, not COST.
-'
-'  Each row's "Receive" action jumps to Stock Adjustment pre-loaded via
-'  INVENTORY_STAFF.OpenStockAdjustmentFor(productId). Honors is_active = 1.
+'  `products` has no wholesale/cost column. Money figure is "estimated value at
+'  selling price" — labelled honestly as VALUE, not COST.
 ' =============================================================================
 Public Class InventoryLowStockPanelBuilder
 
@@ -67,7 +75,7 @@ Public Class InventoryLowStockPanelBuilder
     Private Const ColProductX As Integer = 20
     Private Const ColThumbW As Integer = 50
 
-    Private Const RColActionW As Integer = 90
+    Private Const RColActionW As Integer = 180   ' widened: holds "Request" + "Receive" side-by-side
     Private Const RColValueW As Integer = 110
     Private Const RColStatusW As Integer = 90
     Private Const RColQtyW As Integer = 120
@@ -86,9 +94,9 @@ Public Class InventoryLowStockPanelBuilder
     ' Small uppercase column caption.
     Private Shared Function ColCap(text As String) As Label
         Return New Label With {
-        .Text = text, .Font = New Font("Segoe UI Semibold", 8.5F),
-        .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
-    }
+            .Text = text, .Font = New Font("Segoe UI Semibold", 8.5F),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
+        }
     End Function
 
     ' ── PRODUCT MODEL ─────────────────────────────────────────────────────────────
@@ -109,9 +117,7 @@ Public Class InventoryLowStockPanelBuilder
             End Get
         End Property
 
-        ' Suggested order qty: enough to reach a comfortable level (2x reorder),
-        ' never less than 1 for a flagged item. Clears the alert instead of just
-        ' scraping over the line.
+        ' Suggested order qty: enough to reach 2× reorder level, never less than 1.
         Public ReadOnly Property SuggestedQty As Integer
             Get
                 Dim target As Integer = Math.Max(ReorderLevel * 2, ReorderLevel + 1)
@@ -141,7 +147,7 @@ Public Class InventoryLowStockPanelBuilder
     Private Shared containerRef As Panel
     Private Shared items As New List(Of AlertItem)
 
-    ' ── CONTROL REFERENCES ──────────────────────────────────────────────────────────
+    ' ── CONTROL REFERENCES ────────────────────────────────────────────────────────
     Private Shared rowsHost As Panel
     Private Shared lblSubtitle As Label
     Private Shared lblKpiItems As Label
@@ -201,8 +207,7 @@ Public Class InventoryLowStockPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 ' Only items that actually need attention: at or below reorder, or
-                ' within 25% above it (the "Low" cushion), matching Stock Levels'
-                ' tier model. Healthy items never appear on a purchase plan.
+                ' within 25% above it (the "Low" cushion).
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.sku, p.name, c.name AS cname, p.color_hex, p.image_path, " &
                     " p.unit_price, p.stock_qty, p.reorder_level " &
@@ -233,7 +238,7 @@ Public Class InventoryLowStockPanelBuilder
     End Sub
 
     ' =========================================================================
-    '  HEALTH TIER  (for the per-row badge / ordering only — no filtering UI)
+    '  HEALTH TIER
     ' =========================================================================
     Private Shared Function TierOf(it As AlertItem) As String
         If it.StockQty <= 0 Then Return TierOut
@@ -269,7 +274,7 @@ Public Class InventoryLowStockPanelBuilder
     End Function
 
     ' =========================================================================
-    '  TOP REGION  (title + the three purchase-plan KPIs)
+    '  TOP REGION  (title + KPIs + Refresh + Copy order list)
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
         Dim region As New Panel With {.Height = 240, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
@@ -284,7 +289,7 @@ Public Class InventoryLowStockPanelBuilder
         }
         region.Controls.AddRange({lblTitle, lblSubtitle})
 
-        ' ---- Copy order summary button (top-right) ----
+        ' ---- Copy order summary button ----
         Dim btnCopy As New Button With {
             .Text = "  Copy order list", .Size = New Size(150, 38),
             .FlatStyle = FlatStyle.Flat, .BackColor = CardBg, .ForeColor = MintDark,
@@ -297,10 +302,74 @@ Public Class InventoryLowStockPanelBuilder
         AddHandler btnCopy.Click, Sub() CopyOrderSummary()
         region.Controls.Add(btnCopy)
 
+        ' ── FIX A: REFRESH BUTTON ────────────────────────────────────────────
+        ' Matches InventoryHomePanelBuilder / InventoryItemListPanelBuilder exactly:
+        '   • Muted-green resting background  RGB(220,235,232) / SubText label
+        '   • MouseEnter  → RGB(210,240,235) / MintDark label
+        '   • MouseLeave  → restores resting state
+        '   • Rounded pill via RoundRect GraphicsPath (no extension-method dependency)
+        '   • Click reloads the screen from the DB
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 38),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = bb.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path = RoundRect(rect, 8)
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+
+        AddHandler btnRefresh.Click,
+            Sub()
+                If containerRef IsNot Nothing Then
+                    LoadLowStock(containerRef)
+                End If
+            End Sub
+
+        ' Apply pill region after size is set.
+        RoundControl(btnRefresh, 8)
+        region.Controls.Add(btnRefresh)
+        ' ─────────────────────────────────────────────────────────────────────
+
+        ' Layout right-to-left: [Copy order list]  [↻ Refresh]
         Dim positionRight As Action =
             Sub()
                 btnCopy.Top = 22
                 btnCopy.Left = region.Width - 24 - btnCopy.Width
+
+                btnRefresh.Top = 22
+                btnRefresh.Left = btnCopy.Left - 10 - btnRefresh.Width
             End Sub
         AddHandler region.Resize, Sub() positionRight()
         positionRight()
@@ -316,11 +385,16 @@ Public Class InventoryLowStockPanelBuilder
         Next
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        Dim card1 As Panel = MakeKpiCard("Items To Reorder", "0", MintDark, "Flagged below reorder", lblKpiItems)
+        ' FIX B: MakeKpiCard no longer takes a ByRef parameter that was never
+        ' assigned internally. The label reference is returned via card.Tag and
+        ' extracted by the caller — same mechanism, cleaner signature.
+        Dim card1 As Panel = MakeKpiCard("Items To Reorder", "0", MintDark, "Flagged below reorder")
         lblKpiItems = CType(card1.Tag, Label)
-        Dim card2 As Panel = MakeKpiCard("Units Short", "0", CriticalClr, "Below reorder level", lblKpiShort)
+
+        Dim card2 As Panel = MakeKpiCard("Units Short", "0", CriticalClr, "Below reorder level")
         lblKpiShort = CType(card2.Tag, Label)
-        Dim card3 As Panel = MakeKpiCard("Estimated Value", Peso & "0.00", MintPrimary, "Suggested order " & ChrW(215) & " price", lblKpiValue)
+
+        Dim card3 As Panel = MakeKpiCard("Estimated Value", Peso & "0.00", MintPrimary, "Suggested order " & ChrW(215) & " price")
         lblKpiValue = CType(card3.Tag, Label)
 
         card1.Margin = New Padding(0, 0, 6, 0)
@@ -337,10 +411,12 @@ Public Class InventoryLowStockPanelBuilder
         Return region
     End Function
 
-    ' Builds a stat card; returns the panel with its big value Label in .Tag so
-    ' the caller can keep a reference for live updates.
-    Private Shared Function MakeKpiCard(caption As String, value As String, valueClr As Color,
-                                        sub1 As String, ByRef refOut As Label) As Panel
+    ' FIX B: ByRef parameter removed — it was declared but never assigned inside
+    ' the function. The caller reads the label back from card.Tag, which works
+    ' correctly. Removing ByRef eliminates the misleading signature without
+    ' changing any observable behaviour.
+    Private Shared Function MakeKpiCard(caption As String, value As String,
+                                        valueClr As Color, sub1 As String) As Panel
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
@@ -357,7 +433,7 @@ Public Class InventoryLowStockPanelBuilder
             .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 88), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
-        card.Tag = lblVal
+        card.Tag = lblVal   ' caller reads this to get the live-update reference
         Return card
     End Function
 
@@ -395,7 +471,6 @@ Public Class InventoryLowStockPanelBuilder
 
         Dim PlaceRightCols As Action =
             Sub()
-                ' Remove any previously added right-side caps before re-adding
                 Dim toRemove As New List(Of Control)
                 For Each ctl As Control In strip.Controls
                     If ctl IsNot hProduct Then toRemove.Add(ctl)
@@ -410,7 +485,7 @@ Public Class InventoryLowStockPanelBuilder
                 Dim hQty As Label = ColCap("QTY / REORDER")
                 Dim hStatus As Label = ColCap("STATUS")
                 Dim hValue As Label = ColCap("LINE VALUE")
-                Dim hAction As Label = ColCap("REQUEST")
+                Dim hAction As Label = ColCap("ACTIONS")   ' was "REQUEST" — now holds both Request + Receive
 
                 hCat.Location = New Point(c.cat, 10)
                 hQty.Location = New Point(c.qty, 10)
@@ -421,9 +496,9 @@ Public Class InventoryLowStockPanelBuilder
             End Sub
 
         AddHandler strip.Resize, Sub() PlaceRightCols()
-
         Return strip
     End Function
+
     Private Shared Sub RenderGroups()
         If rowsHost Is Nothing Then Return
         rowsHost.SuspendLayout()
@@ -444,29 +519,29 @@ Public Class InventoryLowStockPanelBuilder
         ' Flat sort: most urgent first, then category, then lowest stock.
         Dim sorted As New List(Of AlertItem)(items)
         sorted.Sort(
-        Function(a, b)
-            Dim ra As Integer = TierRank(TierOf(a))
-            Dim rb As Integer = TierRank(TierOf(b))
-            If ra <> rb Then Return ra.CompareTo(rb)
-            Dim cc As Integer = String.Compare(GroupKeyFor(a), GroupKeyFor(b), StringComparison.OrdinalIgnoreCase)
-            If cc <> 0 Then Return cc
-            Return a.StockQty.CompareTo(b.StockQty)
-        End Function)
+            Function(a, b)
+                Dim ra As Integer = TierRank(TierOf(a))
+                Dim rb As Integer = TierRank(TierOf(b))
+                If ra <> rb Then Return ra.CompareTo(rb)
+                Dim cc As Integer = String.Compare(GroupKeyFor(a), GroupKeyFor(b), StringComparison.OrdinalIgnoreCase)
+                If cc <> 0 Then Return cc
+                Return a.StockQty.CompareTo(b.StockQty)
+            End Function)
 
         Dim width As Integer = rowsHost.ClientSize.Width - 4
 
-        ' One header strip for the whole table
+        ' One header strip for the whole table.
         Dim headerStrip As Panel = BuildTableHeader()
         headerStrip.Location = New Point(0, 4)
         headerStrip.Width = width
         headerStrip.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         rowsHost.Controls.Add(headerStrip)
 
-        ' Card that holds all the rows
+        ' Card that holds all the rows.
         Dim rowH As Integer = 64
         Dim card As New BufferedPanel With {
-        .Height = items.Count * rowH + 12, .BackColor = CardBg
-    }
+            .Height = items.Count * rowH + 12, .BackColor = CardBg
+        }
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
         card.Location = New Point(0, 4 + headerStrip.Height + 6)
         card.Width = width
@@ -485,8 +560,6 @@ Public Class InventoryLowStockPanelBuilder
 
         rowsHost.ResumeLayout()
     End Sub
-
-
 
     Private Shared Sub ReflowWidths()
         If rowsHost Is Nothing Then Return
@@ -512,20 +585,18 @@ Public Class InventoryLowStockPanelBuilder
         Return card
     End Function
 
-
-
     Private Shared Function BuildItemRow(it As AlertItem, height As Integer) As Panel
         Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
         AddHandler row.Paint,
-        Sub(s, e)
-            Using pen As New Pen(RowDivider, 1)
-                e.Graphics.DrawLine(pen, 20, row.Height - 1, row.Width - 20, row.Height - 1)
-            End Using
-        End Sub
+            Sub(s, e)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, row.Height - 1, row.Width - 20, row.Height - 1)
+                End Using
+            End Sub
         AddHandler row.MouseEnter, Sub() row.BackColor = Color.FromArgb(247, 251, 249)
         AddHandler row.MouseLeave, Sub() row.BackColor = Color.Transparent
 
-        ' PRODUCT
+        ' PRODUCT thumbnail + name + SKU
         Dim thumb As Panel = BuildThumb(it, 42)
         thumb.Location = New Point(ColProductX, (height - 42) \ 2)
         row.Controls.Add(thumb)
@@ -546,7 +617,7 @@ Public Class InventoryLowStockPanelBuilder
         }
         row.Controls.Add(lblCat)
 
-        ' QTY / REORDER  (big qty + faint reorder under it)
+        ' QTY / REORDER
         Dim lblQty As New Label With {
             .Text = it.StockQty.ToString(), .Font = New Font("Segoe UI", 13, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
@@ -567,7 +638,7 @@ Public Class InventoryLowStockPanelBuilder
         RoundLabel(badge, 11)
         row.Controls.Add(badge)
 
-        ' LINE VALUE (right-aligned to ColValueX) + order qty under it
+        ' LINE VALUE + suggested order qty
         Dim lblVal As New Label With {
             .Text = Peso & it.RestockValue.ToString("N2"), .Font = New Font("Segoe UI", 11, FontStyle.Bold),
             .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent
@@ -578,12 +649,17 @@ Public Class InventoryLowStockPanelBuilder
         }
         row.Controls.AddRange({lblVal, lblOrder})
 
-        ' ACTION (stacked)
-        ' ACTION — single pill button
+        ' ── FIX C: ACTIONS — "Request" pill + "Receive" link ─────────────────
+        ' Previously only the Request pill existed, and OpenReceive() was dead code
+        ' (defined but never called from any UI element). Now both actions appear
+        ' side-by-side in the ACTIONS column so staff can either raise a purchase
+        ' request OR jump directly to Stock Adjustment to log a receipt.
+
+        ' Request pill
         Dim btnRequest As New Label With {
             .Font = New Font("Segoe UI", 9, FontStyle.Bold),
             .AutoSize = False,
-                  .Size = New Size(80, 26),
+            .Size = New Size(80, 26),
             .TextAlign = ContentAlignment.MiddleCenter,
             .Cursor = Cursors.Hand
         }
@@ -617,12 +693,20 @@ Public Class InventoryLowStockPanelBuilder
         RoundLabel(btnRequest, 10)
         row.Controls.Add(btnRequest)
 
-        ' Initial placement
+        ' Receive link — navigates to Stock Adjustment pre-loaded for this product.
+        ' This makes OpenReceive() reachable from the UI for the first time.
+        Dim capId As Integer = it.Id
+        Dim btnReceive As Label = MakeLink("Receive", MintPrimary)
+        AddHandler btnReceive.Click, Sub() OpenReceive(capId)
+        row.Controls.Add(btnReceive)
+        ' ─────────────────────────────────────────────────────────────────────
+
+        ' Column layout — fires on first paint and every resize.
         Dim SnapCols As Action =
             Sub()
                 Dim c = ColX(row.Width)
 
-                ' Vertically center the two-line qty stack as a unit
+                ' Vertically centre two-line qty stack as a unit.
                 Dim qtyBlockH As Integer = lblQty.Height + 2 + lblReorder.Height
                 Dim qtyTop As Integer = (row.Height - qtyBlockH) \ 2
                 lblCat.Location = New Point(c.cat, (row.Height - lblCat.Height) \ 2)
@@ -631,15 +715,15 @@ Public Class InventoryLowStockPanelBuilder
 
                 badge.Location = New Point(c.status, (row.Height - badge.Height) \ 2)
 
-                ' Vertically center the two-line value stack as a unit
+                ' Vertically centre two-line value stack as a unit.
                 Dim valBlockH As Integer = lblVal.Height + 2 + lblOrder.Height
                 Dim valTop As Integer = (row.Height - valBlockH) \ 2
                 lblVal.Location = New Point(c.value, valTop)
                 lblOrder.Location = New Point(c.value, valTop + lblVal.Height + 2)
 
-                ' Center the two action links as a unit
-                ' Single pill — vertically centered
+                ' Request pill left, Receive link to its right — both vertically centred.
                 btnRequest.Location = New Point(c.action, (row.Height - btnRequest.Height) \ 2)
+                btnReceive.Location = New Point(btnRequest.Right + 10, (row.Height - btnReceive.Height) \ 2)
             End Sub
 
         SnapCols()
@@ -651,6 +735,9 @@ Public Class InventoryLowStockPanelBuilder
     ' =========================================================================
     '  ACTIONS
     ' =========================================================================
+
+    ' FIX C: Now called from the "Receive" link in BuildItemRow.
+    ' Previously this was dead code — no UI element invoked it.
     Private Shared Sub OpenReceive(productId As Integer)
         Try
             Dim host As Control = If(containerRef, CType(Nothing, Control))
@@ -674,8 +761,8 @@ Public Class InventoryLowStockPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                "SELECT COUNT(*) FROM purchase_requests " &
-                "WHERE product_id = @pid AND status = 'Pending'", conn)
+                    "SELECT COUNT(*) FROM purchase_requests " &
+                    "WHERE product_id = @pid AND status = 'Pending'", conn)
                     cmd.Parameters.AddWithValue("@pid", productId)
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
@@ -686,40 +773,38 @@ Public Class InventoryLowStockPanelBuilder
     End Function
 
     ' Inserts a purchase_request row and updates the button in place.
-    ' Inserts a purchase_request row and updates the button in place.
     Private Shared Sub RaiseRequest(it As AlertItem, btnRequest As Label)
         Try
-            ' Confirm before raising
             Dim msg As String =
-            "Raise a restock request for """ & it.Name & """?" &
-            Environment.NewLine & Environment.NewLine &
-            "Suggested qty: " & it.SuggestedQty & " units" &
-            Environment.NewLine &
-            "Procurement will review and create a Purchase Order."
+                "Raise a restock request for """ & it.Name & """?" &
+                Environment.NewLine & Environment.NewLine &
+                "Suggested qty: " & it.SuggestedQty & " units" &
+                Environment.NewLine &
+                "Procurement will review and create a Purchase Order."
 
             If AppModal.Show(msg, "Raise Request",
-                         MessageBoxButtons.YesNo,
-                         MessageBoxIcon.Question) <> DialogResult.Yes Then
+                             MessageBoxButtons.YesNo,
+                             MessageBoxIcon.Question) <> DialogResult.Yes Then
                 Return
             End If
 
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                "INSERT INTO purchase_requests " &
-                "(product_id, requested_by, qty_requested, status, note, created_at) " &
-                "VALUES (@pid, @uid, @qty, 'Pending', @note, NOW())", conn)
+                    "INSERT INTO purchase_requests " &
+                    "(product_id, requested_by, qty_requested, status, note, created_at) " &
+                    "VALUES (@pid, @uid, @qty, 'Pending', @note, NOW())", conn)
                     cmd.Parameters.AddWithValue("@pid", it.Id)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     cmd.Parameters.AddWithValue("@qty", it.SuggestedQty)
                     cmd.Parameters.AddWithValue("@note",
-                    "Auto-suggested from Low Stock Alerts. Stock: " &
-                    it.StockQty & ", Reorder level: " & it.ReorderLevel)
+                        "Auto-suggested from Low Stock Alerts. Stock: " &
+                        it.StockQty & ", Reorder level: " & it.ReorderLevel)
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
 
-            ' Update the button in place — disable it so it can't be clicked again
+            ' Update the pill in place — tag it so click handlers bail early.
             btnRequest.Text = "Requested " & ChrW(10003)
             btnRequest.ForeColor = FaintText
             btnRequest.BackColor = Color.FromArgb(238, 240, 239)
@@ -727,18 +812,17 @@ Public Class InventoryLowStockPanelBuilder
             btnRequest.Tag = "done"
 
             AppModal.Show(
-            "Request raised successfully." & Environment.NewLine &
-            "Procurement has been notified and will review it.",
-            "Request Sent", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                "Request raised successfully." & Environment.NewLine &
+                "Procurement has been notified and will review it.",
+                "Request Sent", MessageBoxButtons.OK, MessageBoxIcon.Information)
 
         Catch ex As Exception
             AppModal.Show("Could not raise request:" & Environment.NewLine & ex.Message,
-                      "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                          "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
-    ' Build a plain-text purchase list grouped the same way and put it on the
-    ' clipboard, ready to paste into an email or message to a supplier.
+    ' Builds a plain-text purchase list and copies it to the clipboard.
     Private Shared Sub CopyOrderSummary()
         If items.Count = 0 Then
             AppModal.Show("There's nothing to reorder right now.", "Nothing To Copy",
@@ -805,7 +889,7 @@ Public Class InventoryLowStockPanelBuilder
         Return lbl
     End Function
 
-    ' Rounded thumbnail: paint = colour chip, other = cached photo, fallback = tile.
+    ' Rounded thumbnail: paint = colour chip, other = cached photo, fallback = initial tile.
     Private Shared Function BuildThumb(it As AlertItem, size As Integer) As Panel
         Dim box As New Panel With {.Size = New Size(size, size), .BackColor = Color.Transparent}
         Dim img As Image = If(it.IsPaint, Nothing, GetThumb(it.ImagePath, size - 2))
@@ -820,9 +904,7 @@ Public Class InventoryLowStockPanelBuilder
                 Dim r As New Rectangle(0, 0, capSize - 1, capSize - 1)
                 Using path = RoundRect(r, 10)
                     If it.IsPaint Then
-                        Using br As New SolidBrush(chip)
-                            g.FillPath(br, path)
-                        End Using
+                        Using br As New SolidBrush(chip) : g.FillPath(br, path) : End Using
                     ElseIf img IsNot Nothing Then
                         Dim oldClip = g.Clip
                         g.SetClip(path, CombineMode.Replace)
@@ -830,9 +912,7 @@ Public Class InventoryLowStockPanelBuilder
                         g.DrawImage(img, r)
                         g.Clip = oldClip
                     Else
-                        Using br As New SolidBrush(TileBg)
-                            g.FillPath(br, path)
-                        End Using
+                        Using br As New SolidBrush(TileBg) : g.FillPath(br, path) : End Using
                         Using f As New Font("Segoe UI", capSize \ 3, FontStyle.Bold)
                             Using br As New SolidBrush(MintPrimary)
                                 Dim sz = g.MeasureString(initial, f)
@@ -840,16 +920,14 @@ Public Class InventoryLowStockPanelBuilder
                             End Using
                         End Using
                     End If
-                    Using pen As New Pen(Color.FromArgb(213, 221, 217), 1)
-                        g.DrawPath(pen, path)
-                    End Using
+                    Using pen As New Pen(Color.FromArgb(213, 221, 217), 1) : g.DrawPath(pen, path) : End Using
                 End Using
             End Sub
         Return box
     End Function
 
     ' =========================================================================
-    '  MEDIA / THUMBNAIL  (identical to the other inventory panels)
+    '  MEDIA / THUMBNAIL
     ' =========================================================================
     Private Shared Function GetThumb(path As String, maxSize As Integer) As Image
         If String.IsNullOrEmpty(path) Then Return Nothing
@@ -878,7 +956,7 @@ Public Class InventoryLowStockPanelBuilder
     End Function
 
     ' =========================================================================
-    '  SMALL HELPERS  (mirror the other inventory panels)
+    '  SMALL HELPERS
     ' =========================================================================
     Private Shared Function SafeInt(o As Object) As Integer
         If o Is Nothing OrElse IsDBNull(o) Then Return 0

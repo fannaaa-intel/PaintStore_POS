@@ -1,82 +1,93 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
+Imports System.Linq
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
 '  AccountantAuditTrailPanelBuilder  —  Audit Trail (Read-Only)
 '
-'  LAYOUT  (Dock stacking — added in reverse order so Top bars stack down)
-'  ------
-'    TopBar      (Dock = Top,    64px)  : dark gradient — title + subtitle
-'    FilterBar   (Dock = Top,    52px)  : search box (left) + date pills (right)
-'    ColHeader   (Dock = Top,    34px)  : column label row
-'    SummaryBar  (Dock = Bottom, 48px)  : pinned totals — event count per module
-'    ScrollHost  (Dock = Fill)          : scrollable audit rows
+'  LAYOUT  (mirrors AccountantSalesHistoryPanelBuilder Document 2 EXACTLY)
+'  ──────────────────────────────────────────────────────────────────────────────
+'    TopRegion    (Dock = Top,  289px)
+'      ├─ TitleBar  (72px) : "Audit Trail" 28pt MintDark + search box + Refresh
+'      ├─ PillBar   (52px) : date pills (left) · module pills (right)
+'      └─ KpiBar   (165px) : 3 KPI cards — Total Events / POS / Procurement
+'    TableWrapper (Dock = Fill)
+'      spacers: Left 24px, Right 24px, Top 16px, Bottom 16px
+'      └─ listArea (BufferedPanel + PanelRenderer card shadow)
+'           ├─ ColHeader  (Dock = Top,  44px)
+'           ├─ _scrollHost (Dock = Fill, AutoScroll)
+'           └─ SummaryBar (Dock = Bottom, 44px) — INSIDE container
 '
-'  All data sourced from EXISTING tables — no new table required:
-'
-'    Sales       : sales JOIN users JOIN payment_methods
-'    Returns     : returns JOIN users JOIN sales
-'    Purchase Orders : purchase_orders JOIN users JOIN suppliers
-'    Stock Movements : stock_movements JOIN users JOIN products  (Adjustment only)
-'    Purchase Requests: purchase_requests JOIN users (requester + reviewer)
+'  Modules:
+'    POS         : sales JOIN users JOIN payment_methods
+'    POS         : returns JOIN users JOIN sales
+'    Inventory   : stock_movements JOIN users JOIN products (Adjustment)
+'    Procurement : purchase_orders JOIN users JOIN suppliers
+'    Procurement : purchase_requests JOIN users (requester + reviewer)
 ' =============================================================================
 Public Class AccountantAuditTrailPanelBuilder
 
-    ' ── PALETTE  (matches other Accountant panels exactly) ────────────────────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(0, 80, 72)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    ' ── PALETTE  (matches AccountantSalesHistoryPanelBuilder exactly) ─────────
+    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
+    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
     Private Shared ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
     Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
-    Private Shared ReadOnly HeaderBg As Color = Color.FromArgb(0, 60, 54)
     Private Shared ReadOnly CardBg As Color = Color.White
     Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
     Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
     Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
     Private Shared ReadOnly RowHover As Color = Color.FromArgb(224, 242, 235)
+    Private Shared ReadOnly AccentRed As Color = Color.FromArgb(210, 60, 60)
+    Private Shared ReadOnly Peso As String = ChrW(8369)
 
     ' Module badge colours
-    Private Shared ReadOnly BadgeSale As (fore As Color, back As Color) =
+    Private Shared ReadOnly BadgePOS As (fore As Color, back As Color) =
         (Color.FromArgb(0, 120, 92), Color.FromArgb(220, 248, 240))
-    Private Shared ReadOnly BadgeReturn As (fore As Color, back As Color) =
-        (Color.FromArgb(180, 40, 40), Color.FromArgb(255, 230, 230))
-    Private Shared ReadOnly BadgePO As (fore As Color, back As Color) =
-        (Color.FromArgb(30, 90, 180), Color.FromArgb(225, 235, 255))
-    Private Shared ReadOnly BadgeStock As (fore As Color, back As Color) =
+    Private Shared ReadOnly BadgeInventory As (fore As Color, back As Color) =
         (Color.FromArgb(140, 80, 0), Color.FromArgb(255, 240, 210))
-    Private Shared ReadOnly BadgeRequest As (fore As Color, back As Color) =
-        (Color.FromArgb(100, 40, 160), Color.FromArgb(240, 228, 255))
+    Private Shared ReadOnly BadgeProcurement As (fore As Color, back As Color) =
+        (Color.FromArgb(30, 90, 180), Color.FromArgb(225, 235, 255))
+
+    ' Filter key / label arrays
+    Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
+    Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
 
     ' ── DATA MODEL ────────────────────────────────────────────────────────────
     Private Class AuditRow
         Public EventDate As DateTime
         Public UserName As String
         Public UserRole As String
-        Public [Module] As String   ' "Sales" | "Returns" | "Purchase Orders" | "Stock" | "Requests"
-        Public Action As String     ' e.g. "Sale Completed", "Return Processed"
-        Public Detail As String     ' human-readable one-liner
+        Public [Module] As String   ' "POS", "Inventory", "Procurement"
+        Public Action As String
+        Public Detail As String
     End Class
 
     ' ── STATE ─────────────────────────────────────────────────────────────────
     Private Shared _container As Panel
     Private Shared _dateFilter As String = "all"
+    Private Shared _activeFilterIdx As Integer = 3
     Private Shared _searchQuery As String = ""
     Private Shared _moduleFilter As String = "all"
+    Private Shared _kpiPanels(3) As Panel
 
     Private Shared _allRows As New List(Of AuditRow)
     Private Shared _visibleRows As New List(Of AuditRow)
 
     ' Live-update references
     Private Shared _scrollHost As Panel
-    Private Shared _lblCount As Label
-    Private Shared _lblModBreakdown As Label
+    Private Shared _reflowAttached As Boolean = False
 
-    ' Pill button lists
-    Private Shared _datePills As New List(Of Button)
-    Private Shared _modPills As New List(Of Button)
+    ' Pill references for restyling
+    Private Shared _datePills() As Button
 
-    Private Shared ReadOnly Peso As String = ChrW(8369)
+    ' Pager
+    Private Const PAGE_SIZE As Integer = 50
+    Private Shared _currentPage As Integer = 0
+    Private Shared _lblPageInfo As Label
+    Private Shared _btnPrev As Button
+    Private Shared _btnNext As Button
 
     ' =========================================================================
     '  ENTRY POINT
@@ -85,33 +96,33 @@ Public Class AccountantAuditTrailPanelBuilder
                                      Optional dateFilter As String = "all")
         _container = container
         _dateFilter = dateFilter
+        Dim idx As Integer = Array.IndexOf(FilterKeys, dateFilter)
+        _activeFilterIdx = If(idx >= 0, idx, 3)
         _searchQuery = ""
         _moduleFilter = "all"
-        _datePills.Clear()
-        _modPills.Clear()
+        _reflowAttached = False
+        _currentPage = 0
 
         LoadData()
         Render()
     End Sub
 
     ' =========================================================================
-    '  DATA  — unions five financial event sources into one chronological list
+    '  DATA  — unions five financial event sources mapped to three modules
     ' =========================================================================
     Private Shared Sub LoadData()
         _allRows.Clear()
-
-        Dim dateWhere As String = BuildDateWhere()
 
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
 
-                ' ── 1. SALES ─────────────────────────────────────────────────
-                Dim sqlSales As String =
+                ' ── 1. POS: SALES ─────────────────────────────────────────────
+                ReadRows(conn,
                     "SELECT s.sale_datetime AS event_date, " &
                     "       u.full_name AS user_name, " &
                     "       r.role_name AS user_role, " &
-                    "       'Sales' AS module, " &
+                    "       'POS' AS module, " &
                     "       'Sale Completed' AS action, " &
                     "       CONCAT(s.sale_no, ' · ', COALESCE(pm.name,'Cash'), " &
                     "              ' · " & Peso & "', FORMAT(s.total,2)) AS detail " &
@@ -120,16 +131,15 @@ Public Class AccountantAuditTrailPanelBuilder
                     "JOIN roles r ON u.role_id = r.role_id " &
                     "LEFT JOIN payment_methods pm ON s.method_id = pm.method_id " &
                     "WHERE s.status = 'Completed' " &
-                    dateWhere.Replace("WHERE ", "AND ")
+                    BuildDateWhereCol("s.sale_datetime").Replace("WHERE ", "AND "),
+                    "POS")
 
-                ReadRows(conn, sqlSales, "Sales")
-
-                ' ── 2. RETURNS ───────────────────────────────────────────────
-                Dim sqlReturns As String =
+                ' ── 2. POS: RETURNS ───────────────────────────────────────────
+                ReadRows(conn,
                     "SELECT rt.return_datetime AS event_date, " &
                     "       u.full_name AS user_name, " &
                     "       ro.role_name AS user_role, " &
-                    "       'Returns' AS module, " &
+                    "       'POS' AS module, " &
                     "       'Return Processed' AS action, " &
                     "       CONCAT(rt.return_no, ' · Ref: ', s.sale_no, " &
                     "              ' · " & Peso & "', FORMAT(rt.total_refund,2)) AS detail " &
@@ -137,33 +147,15 @@ Public Class AccountantAuditTrailPanelBuilder
                     "JOIN users u ON rt.processed_by = u.user_id " &
                     "JOIN roles ro ON u.role_id = ro.role_id " &
                     "JOIN sales s ON rt.sale_id = s.sale_id " &
-                    BuildDateWhereCol("rt.return_datetime")
+                    BuildDateWhereCol("rt.return_datetime"),
+                    "POS")
 
-                ReadRows(conn, sqlReturns, "Returns")
-
-                ' ── 3. PURCHASE ORDERS ───────────────────────────────────────
-                Dim sqlPO As String =
-                    "SELECT po.order_date AS event_date, " &
-                    "       u.full_name AS user_name, " &
-                    "       ro.role_name AS user_role, " &
-                    "       'Purchase Orders' AS module, " &
-                    "       CONCAT('PO ', po.status) AS action, " &
-                    "       CONCAT(po.po_no, ' · ', sup.name, " &
-                    "              ' · " & Peso & "', FORMAT(po.total_cost,2)) AS detail " &
-                    "FROM purchase_orders po " &
-                    "JOIN users u ON po.created_by = u.user_id " &
-                    "JOIN roles ro ON u.role_id = ro.role_id " &
-                    "JOIN suppliers sup ON po.supplier_id = sup.supplier_id " &
-                    BuildDateWhereCol("po.order_date")
-
-                ReadRows(conn, sqlPO, "Purchase Orders")
-
-                ' ── 4. STOCK ADJUSTMENTS ─────────────────────────────────────
-                Dim sqlStock As String =
+                ' ── 3. INVENTORY: STOCK ADJUSTMENTS ──────────────────────────
+                ReadRows(conn,
                     "SELECT sm.created_at AS event_date, " &
                     "       COALESCE(u.full_name,'System') AS user_name, " &
                     "       COALESCE(ro.role_name,'—') AS user_role, " &
-                    "       'Stock' AS module, " &
+                    "       'Inventory' AS module, " &
                     "       'Stock Adjustment' AS action, " &
                     "       CONCAT(p.name, ' · ', " &
                     "              IF(sm.qty_change > 0, '+',''), sm.qty_change, ' units', " &
@@ -174,16 +166,31 @@ Public Class AccountantAuditTrailPanelBuilder
                     "LEFT JOIN roles ro ON u.role_id = ro.role_id " &
                     "JOIN products p ON sm.product_id = p.product_id " &
                     "WHERE sm.movement_type = 'Adjustment' " &
-                    BuildDateWhereCol("sm.created_at").Replace("WHERE ", "AND ")
+                    BuildDateWhereCol("sm.created_at").Replace("WHERE ", "AND "),
+                    "Inventory")
 
-                ReadRows(conn, sqlStock, "Stock")
+                ' ── 4. PROCUREMENT: PURCHASE ORDERS ──────────────────────────
+                ReadRows(conn,
+                    "SELECT po.order_date AS event_date, " &
+                    "       u.full_name AS user_name, " &
+                    "       ro.role_name AS user_role, " &
+                    "       'Procurement' AS module, " &
+                    "       CONCAT('PO ', po.status) AS action, " &
+                    "       CONCAT(po.po_no, ' · ', sup.name, " &
+                    "              ' · " & Peso & "', FORMAT(po.total_cost,2)) AS detail " &
+                    "FROM purchase_orders po " &
+                    "JOIN users u ON po.created_by = u.user_id " &
+                    "JOIN roles ro ON u.role_id = ro.role_id " &
+                    "JOIN suppliers sup ON po.supplier_id = sup.supplier_id " &
+                    BuildDateWhereCol("po.order_date"),
+                    "Procurement")
 
-                ' ── 5. PURCHASE REQUESTS ─────────────────────────────────────
-                Dim sqlReq As String =
+                ' ── 5. PROCUREMENT: PURCHASE REQUESTS ────────────────────────
+                ReadRows(conn,
                     "SELECT pr.reviewed_at AS event_date, " &
                     "       COALESCE(rv.full_name,'—') AS user_name, " &
                     "       COALESCE(ro.role_name,'—') AS user_role, " &
-                    "       'Requests' AS module, " &
+                    "       'Procurement' AS module, " &
                     "       CONCAT('Request ', pr.status) AS action, " &
                     "       CONCAT(p.name, ' · Qty: ', pr.qty_requested, " &
                     "              ' · By: ', req.full_name) AS detail " &
@@ -193,18 +200,15 @@ Public Class AccountantAuditTrailPanelBuilder
                     "LEFT JOIN users rv ON pr.reviewed_by = rv.user_id " &
                     "LEFT JOIN roles ro ON rv.role_id = ro.role_id " &
                     "WHERE pr.reviewed_at IS NOT NULL " &
-                    BuildDateWhereCol("pr.reviewed_at").Replace("WHERE ", "AND ")
-
-                ReadRows(conn, sqlReq, "Requests")
+                    BuildDateWhereCol("pr.reviewed_at").Replace("WHERE ", "AND "),
+                    "Procurement")
 
             End Using
         Catch ex As Exception
             Debug.WriteLine("AuditTrail LoadData error: " & ex.Message)
         End Try
 
-        ' Sort all sources combined — newest first
         _allRows.Sort(Function(a, b) b.EventDate.CompareTo(a.EventDate))
-
         ApplyFilters()
     End Sub
 
@@ -213,15 +217,9 @@ Public Class AccountantAuditTrailPanelBuilder
             Using cmd As New MySqlCommand(sql, conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
-                        Dim dateVal As DateTime = DateTime.MinValue
-                        If Not IsDBNull(rdr("event_date")) Then
-                            dateVal = Convert.ToDateTime(rdr("event_date"))
-                        Else
-                            Continue While   ' skip rows with no date (unreviewed requests etc.)
-                        End If
-
+                        If IsDBNull(rdr("event_date")) Then Continue While
                         _allRows.Add(New AuditRow With {
-                            .EventDate = dateVal,
+                            .EventDate = Convert.ToDateTime(rdr("event_date")),
                             .UserName = rdr("user_name").ToString(),
                             .UserRole = rdr("user_role").ToString(),
                             .[Module] = moduleName,
@@ -232,14 +230,9 @@ Public Class AccountantAuditTrailPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine($"AuditTrail ReadRows ({moduleName}) error: " & ex.Message)
+            Debug.WriteLine($"AuditTrail ReadRows ({moduleName}): " & ex.Message)
         End Try
     End Sub
-
-    ' ── Date WHERE helpers ────────────────────────────────────────────────────
-    Private Shared Function BuildDateWhere() As String
-        Return BuildDateWhereCol("s.sale_datetime")
-    End Function
 
     Private Shared Function BuildDateWhereCol(col As String) As String
         Select Case _dateFilter
@@ -250,65 +243,81 @@ Public Class AccountantAuditTrailPanelBuilder
         End Select
     End Function
 
-    ' ── Apply search + module filter ──────────────────────────────────────────
     Private Shared Sub ApplyFilters()
         _visibleRows.Clear()
         For Each r In _allRows
-            ' Module filter
             If _moduleFilter <> "all" AndAlso r.[Module] <> _moduleFilter Then Continue For
-
-            ' Search filter
             If Not String.IsNullOrWhiteSpace(_searchQuery) Then
                 Dim q As String = _searchQuery.ToLower()
                 If Not (r.UserName.ToLower().Contains(q) OrElse
                         r.Action.ToLower().Contains(q) OrElse
-                        r.Detail.ToLower().Contains(q)) Then
-                    Continue For
-                End If
+                        r.Detail.ToLower().Contains(q)) Then Continue For
             End If
-
             _visibleRows.Add(r)
         Next
     End Sub
 
     ' =========================================================================
-    '  RENDER
+    '  RENDER  — mirrors AccountantSalesHistoryPanelBuilder exactly
     ' =========================================================================
     Private Shared Sub Render()
         _container.SuspendLayout()
         _container.Controls.Clear()
+        _reflowAttached = False
         _container.BackColor = MintBg
 
-        ' 5. SUMMARY BAR — Dock Bottom
-        Dim summaryBar As Panel = BuildSummaryBar()
-        summaryBar.Dock = DockStyle.Bottom
-
-        ' 4. SCROLL HOST — Dock Fill
-        _scrollHost = New Panel With {
+        ' ── Table wrapper (Fill) with 24px side spacers + 16px top/bottom ─────
+        Dim tableWrapper As New Panel With {
             .Dock = DockStyle.Fill,
-            .BackColor = CardBg,
-            .AutoScroll = True,
-            .Padding = New Padding(0, 2, 0, 4)
+            .BackColor = MintBg,
+            .Padding = New Padding(0)
         }
 
-        ' 3. COLUMN HEADER — Dock Top (innermost)
-        Dim colHeader As Panel = BuildColumnHeader()
-        colHeader.Dock = DockStyle.Top
+        Dim listArea As New BufferedPanel With {
+            .Dock = DockStyle.Fill,
+            .BackColor = CardBg,
+            .Padding = New Padding(1)
+        }
+        AddHandler listArea.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
-        ' 2. MODULE FILTER BAR — Dock Top
-        Dim modBar As Panel = BuildModuleFilterBar()
-        modBar.Dock = DockStyle.Top
+        _scrollHost = New Panel With {
+            .Dock = DockStyle.Fill,
+            .BackColor = Color.Transparent,
+            .AutoScroll = True,
+            .Padding = New Padding(0, 4, 0, 0)
+        }
 
-        ' 1. TOP BAR — Dock Top (outermost)
-        Dim topBar As Panel = BuildTopBar()
-        topBar.Dock = DockStyle.Top
+        Dim colHdr As Panel = BuildColHeader()
+        colHdr.Dock = DockStyle.Top
 
-        ' Add in correct Dock stacking order
-        _container.Controls.Add(_scrollHost)
-        _container.Controls.Add(summaryBar)
-        _container.Controls.Add(colHeader)
-        _container.Controls.Add(modBar)
-        _container.Controls.Add(topBar)
+        ' Pager bar INSIDE the container (Dock = Bottom)
+        Dim pagerBar As Panel = BuildPagerBar()
+        pagerBar.Dock = DockStyle.Bottom
+
+        listArea.Controls.Add(pagerBar)     ' Bottom — reserves space first
+        listArea.Controls.Add(colHdr)       ' Top — reserves space second  
+        listArea.Controls.Add(_scrollHost)  ' Fill — takes remaining middle space
+        colHdr.BringToFront()
+        _scrollHost.BringToFront()
+        _scrollHost.AutoScrollMinSize = New Size(0, 1)
+
+        Dim spacerBottom As New Panel With {.Dock = DockStyle.Bottom, .Height = 16, .BackColor = MintBg}
+        Dim spacerTop As New Panel With {.Dock = DockStyle.Top, .Height = 16, .BackColor = MintBg}
+        Dim spacerLeft As New Panel With {.Dock = DockStyle.Left, .Width = 24, .BackColor = MintBg}
+        Dim spacerRight As New Panel With {.Dock = DockStyle.Right, .Width = 24, .BackColor = MintBg}
+
+        tableWrapper.Controls.Add(listArea)
+        tableWrapper.Controls.Add(spacerBottom)
+        tableWrapper.Controls.Add(spacerTop)
+        tableWrapper.Controls.Add(spacerLeft)
+        tableWrapper.Controls.Add(spacerRight)
+
+        ' ── Top region ────────────────────────────────────────────────────────
+        Dim topRegion As Panel = BuildTopRegion()
+        topRegion.Dock = DockStyle.Top
+
+        _container.Controls.Add(tableWrapper)
+        _container.Controls.Add(topRegion)
 
         _container.ResumeLayout()
 
@@ -316,63 +325,93 @@ Public Class AccountantAuditTrailPanelBuilder
     End Sub
 
     ' =========================================================================
-    '  1. TOP BAR  — dark gradient, 64 px  (title + search)
+    '  TOP REGION  (72px title + 52px pills + 165px KPI = 289px)
+    '  Mirrors AccountantSalesHistoryPanelBuilder.BuildTopRegion EXACTLY
     ' =========================================================================
-    Private Shared Function BuildTopBar() As Panel
-        Dim bar As New Panel With {.Height = 64, .BackColor = MintDark}
+    Private Shared Function BuildTopRegion() As Panel
+        Const SIDE_PAD As Integer = 24
 
-        AddHandler bar.Paint,
-            Sub(s, e)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rc = New Rectangle(0, 0, bar.Width, bar.Height)
-                Using br As New LinearGradientBrush(rc, MintDark, HeaderBg,
-                                                    LinearGradientMode.Horizontal)
-                    g.FillRectangle(br, rc)
-                End Using
-            End Sub
+        Dim region As New Panel With {
+            .BackColor = MintBg,
+            .AutoSize = False,
+            .Height = 254
+        }
+
+        ' ── Zone 1: Title bar (72px) ──────────────────────────────────────────
+        Dim titleBar As New Panel With {
+            .Height = 72,
+            .Dock = DockStyle.Top,
+            .BackColor = Color.Transparent
+        }
 
         Dim lblTitle As New Label With {
             .Text = "Audit Trail",
-            .Font = New Font("Segoe UI", 15, FontStyle.Bold),
-            .ForeColor = Color.White,
-            .BackColor = Color.Transparent,
+            .Font = New Font("Segoe UI", 28, FontStyle.Bold),
+            .ForeColor = MintDark,
             .AutoSize = True,
-            .Location = New Point(22, 10)
+            .Location = New Point(SIDE_PAD, 16)
         }
 
-        Dim lblSub As New Label With {
-            .Text = "Financial Activity Log  —  Read Only",
-            .Font = New Font("Segoe UI", 9),
-            .ForeColor = Color.FromArgb(160, 210, 200),
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
-            .Location = New Point(24, 38)
+        Dim btnRefresh As New Button With {
+            .Text = "⟳  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
+        btnRefresh.FlatAppearance.BorderSize = 0
 
-        ' ── Inline search box (right side of top bar) ─────────────────────
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                Dim g = e.Graphics
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    g.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() LoadAuditTrail(_container, FilterKeys(_activeFilterIdx))
+
+        ' Search box
         Dim searchWrap As New Panel With {
-            .Size = New Size(260, 32),
-            .BackColor = Color.FromArgb(0, 100, 88),
-            .Cursor = Cursors.IBeam
+            .Size = New Size(240, 34),
+            .BackColor = CardBg,
+            .Cursor = Cursors.IBeam,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-
         Dim searchFocused As Boolean = False
 
         AddHandler searchWrap.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rc = searchWrap.ClientRectangle : rc.Inflate(-1, -1)
-                Using b As New SolidBrush(Color.FromArgb(0, 100, 88))
+                Using b As New SolidBrush(CardBg)
                     e.Graphics.FillRoundedRectangle(b, rc, 8)
                 End Using
-                Using p As New Pen(If(searchFocused,
-                                      MintPrimary,
-                                      Color.FromArgb(0, 160, 140)),
+                Using p As New Pen(If(searchFocused, MintPrimary, RowDivider),
                                    If(searchFocused, 1.8F, 1.0F))
                     e.Graphics.DrawRoundedRectangle(p, rc, 8)
                 End Using
-                Using p As New Pen(Color.FromArgb(0, 200, 170), 1.4F)
+                Using p As New Pen(Color.FromArgb(160, 180, 178), 1.4F)
                     e.Graphics.DrawEllipse(p, 10, 10, 12, 12)
                     e.Graphics.DrawLine(p, 20, 20, 25, 25)
                 End Using
@@ -381,17 +420,17 @@ Public Class AccountantAuditTrailPanelBuilder
         Dim txtSearch As New TextBox With {
             .Font = New Font("Segoe UI", 10),
             .BorderStyle = BorderStyle.None,
-            .BackColor = Color.FromArgb(0, 100, 88),
-            .ForeColor = Color.FromArgb(200, 240, 230),
+            .BackColor = CardBg,
+            .ForeColor = SubText,
             .Text = "Search user, action, detail…",
-            .Location = New Point(32, 8),
-            .Width = 220
+            .Location = New Point(34, 9),
+            .Width = 196
         }
 
         Dim btnClear As New Label With {
             .Text = "✕",
             .Font = New Font("Segoe UI", 9),
-            .ForeColor = Color.FromArgb(0, 200, 170),
+            .ForeColor = FaintText,
             .BackColor = Color.Transparent,
             .AutoSize = True,
             .Cursor = Cursors.Hand,
@@ -400,258 +439,378 @@ Public Class AccountantAuditTrailPanelBuilder
         AddHandler searchWrap.Resize,
             Sub() btnClear.Location = New Point(searchWrap.Width - btnClear.Width - 8,
                                                  (searchWrap.Height - btnClear.Height) \ 2)
-
         AddHandler btnClear.Click,
             Sub()
                 txtSearch.Text = "Search user, action, detail…"
-                txtSearch.ForeColor = Color.FromArgb(200, 240, 230)
+                txtSearch.ForeColor = SubText
                 btnClear.Visible = False
                 searchWrap.Invalidate()
                 _searchQuery = ""
                 ApplyFilters()
                 PopulateRows()
             End Sub
-
         AddHandler txtSearch.Enter,
             Sub()
                 searchFocused = True
                 If txtSearch.Text = "Search user, action, detail…" Then
                     txtSearch.Text = ""
-                    txtSearch.ForeColor = Color.White
+                    txtSearch.ForeColor = Color.FromArgb(45, 45, 45)
                 End If
                 searchWrap.Invalidate()
             End Sub
-
         AddHandler txtSearch.Leave,
             Sub()
                 searchFocused = False
                 If String.IsNullOrWhiteSpace(txtSearch.Text) Then
                     txtSearch.Text = "Search user, action, detail…"
-                    txtSearch.ForeColor = Color.FromArgb(200, 240, 230)
+                    txtSearch.ForeColor = SubText
                     btnClear.Visible = False
                 End If
                 searchWrap.Invalidate()
             End Sub
-
         AddHandler txtSearch.TextChanged,
             Sub()
-                Dim isPlaceholder As Boolean =
-                    (txtSearch.Text = "Search user, action, detail…")
+                Dim isPlaceholder As Boolean = (txtSearch.Text = "Search user, action, detail…")
                 btnClear.Visible = Not isPlaceholder AndAlso txtSearch.Text.Length > 0
                 If isPlaceholder Then Return
                 _searchQuery = txtSearch.Text.Trim()
                 ApplyFilters()
+                _currentPage = 0
                 PopulateRows()
             End Sub
-
         AddHandler searchWrap.Click, Sub() txtSearch.Focus()
         searchWrap.Controls.Add(txtSearch)
         searchWrap.Controls.Add(btnClear)
 
-        AddHandler bar.Resize,
+        AddHandler titleBar.Resize,
             Sub()
-                searchWrap.Location = New Point(bar.Width - searchWrap.Width - 22,
-                                                 (bar.Height - searchWrap.Height) \ 2)
+                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
+                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
+                searchWrap.Left = btnRefresh.Left - searchWrap.Width - 10
+                searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
             End Sub
 
-        bar.Controls.AddRange({lblTitle, lblSub, searchWrap})
-        Return bar
-    End Function
+        titleBar.Controls.Add(lblTitle)
+        titleBar.Controls.Add(searchWrap)
+        titleBar.Controls.Add(btnRefresh)
 
-    ' =========================================================================
-    '  2. MODULE FILTER BAR  — date pills left, module pills right, 52 px
-    ' =========================================================================
-    Private Shared Function BuildModuleFilterBar() As Panel
-        Dim bar As New Panel With {
-            .Height = 52,
-            .BackColor = MintBg
+        ' ── Zone 2: Pill bar (52px) — date pills LEFT, module pills RIGHT ─────
+        Dim pillBar As New Panel With {
+            .Height = 20,
+            .Dock = DockStyle.Top,
+            .BackColor = Color.Transparent
         }
 
-        ' ── Date pills ────────────────────────────────────────────────────────
-        Dim dateLabels() As String = {"Today", "This Week", "This Month", "All Time"}
-        Dim dateKeys() As String = {"today", "week", "month", "all"}
-
-        Dim dateHost As New FlowLayoutPanel With {
+        ' Date pills (left)
+        Dim filterHost As New FlowLayoutPanel With {
             .FlowDirection = FlowDirection.LeftToRight,
             .AutoSize = True,
             .BackColor = Color.Transparent,
-            .WrapContents = False
+            .WrapContents = False,
+            .Location = New Point(SIDE_PAD, 10)
         }
 
-        For i As Integer = 0 To dateLabels.Length - 1
-            Dim capKey As String = dateKeys(i)
-            Dim capLabel As String = dateLabels(i)
-            Dim isActive As Boolean = (_dateFilter = capKey)
+        ReDim _datePills(FilterLabels.Length - 1)
+
+        For i As Integer = 0 To FilterLabels.Length - 1
+            Dim idx As Integer = i
+            Dim capKey As String = FilterKeys(i)
 
             Dim pill As New Button With {
-                .Text = capLabel,
+                .Text = FilterLabels(i),
                 .FlatStyle = FlatStyle.Flat,
-                .Font = New Font("Segoe UI", 9.5F,
-                                      If(isActive, FontStyle.Bold, FontStyle.Regular)),
-                .ForeColor = If(isActive, Color.White, SubText),
-                .BackColor = If(isActive, MintPrimary, Color.FromArgb(230, 238, 235)),
-                .Size = New Size(90, 30),
                 .Cursor = Cursors.Hand,
+                .Size = New Size(96, 34),
                 .Margin = New Padding(0, 0, 6, 0)
             }
             pill.FlatAppearance.BorderSize = 0
-            RoundBtn(pill, 12)
-            _datePills.Add(pill)
 
+            Dim styleBtn As Action(Of Boolean, Boolean) =
+                Sub(active As Boolean, hover As Boolean)
+                    If active Then
+                        pill.BackColor = MintPrimary
+                        pill.ForeColor = Color.White
+                        pill.Font = New Font("Segoe UI Semibold", 9.5F)
+                    ElseIf hover Then
+                        pill.BackColor = Color.FromArgb(210, 240, 235)
+                        pill.ForeColor = MintDark
+                        pill.Font = New Font("Segoe UI", 9.5F)
+                    Else
+                        pill.BackColor = Color.FromArgb(220, 235, 232)
+                        pill.ForeColor = SubText
+                        pill.Font = New Font("Segoe UI", 9.5F)
+                    End If
+                    pill.Invalidate()
+                End Sub
+
+            AddHandler pill.Paint,
+                Sub(s, e)
+                    Dim bb = CType(s, Button)
+                    Dim g = e.Graphics
+                    g.SmoothingMode = SmoothingMode.AntiAlias
+                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                    Using br As New SolidBrush(bb.BackColor)
+                        g.FillRoundedRectangle(br, rect, 8)
+                    End Using
+                    TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+                End Sub
+
+            AddHandler pill.MouseEnter, Sub() If idx <> _activeFilterIdx Then styleBtn(False, True)
+            AddHandler pill.MouseLeave, Sub() If idx <> _activeFilterIdx Then styleBtn(False, False)
             AddHandler pill.Click,
                 Sub()
                     _dateFilter = capKey
-                    StyleDatePills(capKey)
+                    _activeFilterIdx = idx
+                    For j As Integer = 0 To _datePills.Length - 1
+                        If j = _activeFilterIdx Then
+                            _datePills(j).BackColor = MintPrimary
+                            _datePills(j).ForeColor = Color.White
+                            _datePills(j).Font = New Font("Segoe UI Semibold", 9.5F)
+                        Else
+                            _datePills(j).BackColor = Color.FromArgb(220, 235, 232)
+                            _datePills(j).ForeColor = SubText
+                            _datePills(j).Font = New Font("Segoe UI", 9.5F)
+                        End If
+                        _datePills(j).Invalidate()
+                    Next
+                    _currentPage = 0
                     LoadData()
                     PopulateRows()
                 End Sub
 
-            dateHost.Controls.Add(pill)
+            styleBtn(i = _activeFilterIdx, False)
+            _datePills(i) = pill
+            filterHost.Controls.Add(pill)
         Next
 
-        ' ── Module pills ──────────────────────────────────────────────────────
-        Dim modLabels() As String = {"All", "Sales", "Returns", "Purchase Orders", "Stock", "Requests"}
-        Dim modKeys() As String = {"all", "Sales", "Returns", "Purchase Orders", "Stock", "Requests"}
+        pillBar.Controls.Add(filterHost)
 
-        Dim modHost As New FlowLayoutPanel With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
+        AddHandler pillBar.Resize,
+            Sub()
+                Dim midY As Integer = (pillBar.Height - filterHost.Height) \ 2
+                filterHost.Top = If(filterHost.Height > 0, midY, 10)
+            End Sub
+
+        ' ── Zone 3: KPI bar (165px) — mirrors Doc 2 BuildKpiBar ──────────────
+        Dim kpiBar As Panel = BuildKpiBar()
+        kpiBar.Dock = DockStyle.Top
+        kpiBar.Height = 162
+
+        ' Stack: kpiBar first (innermost Top), then pillBar, then titleBar
+        region.Controls.Add(kpiBar)
+        region.Controls.Add(pillBar)
+        region.Controls.Add(titleBar)
+
+        Return region
+    End Function
+
+    ' =========================================================================
+    '  KPI BAR  —  165px, 3 cards: Total Events / Inventory / Procurement
+    '  Mirrors AccountantSalesHistoryPanelBuilder.BuildKpiBar EXACTLY
+    ' =========================================================================
+    Private Shared Function BuildKpiBar() As Panel
+        Const SIDE_PAD As Integer = 24
+
+        Dim totalEvents As Integer = _visibleRows.Count
+        Dim posCount As Integer = _visibleRows.Where(Function(r) r.[Module] = "POS").Count()
+        Dim invCount As Integer = _visibleRows.Where(Function(r) r.[Module] = "Inventory").Count()
+        Dim procCount As Integer = _visibleRows.Where(Function(r) r.[Module] = "Procurement").Count()
+
+        Dim bar As New Panel With {
+            .Height = 165,
             .BackColor = Color.Transparent,
-            .WrapContents = False
+            .Padding = New Padding(SIDE_PAD, 16, SIDE_PAD, 0)
         }
 
-        For i As Integer = 0 To modLabels.Length - 1
-            Dim capKey As String = modKeys(i)
-            Dim isActive As Boolean = (_moduleFilter = capKey)
+        Dim kpiRow As New TableLayoutPanel With {
+            .Dock = DockStyle.Fill,
+            .ColumnCount = 4,
+            .RowCount = 1,
+            .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        }
+        For i = 0 To 3
+            kpiRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25.0F))
+        Next
+        kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-            Dim pill As New Button With {
-                .Text = modLabels(i),
-                .FlatStyle = FlatStyle.Flat,
-                .Font = New Font("Segoe UI", 9.0F,
-                                      If(isActive, FontStyle.Bold, FontStyle.Regular)),
-                .ForeColor = If(isActive, Color.White, SubText),
-                .BackColor = If(isActive, MintDeep, Color.FromArgb(230, 238, 235)),
-                .AutoSize = True,
-                .MinimumSize = New Size(50, 28),
-                .Padding = New Padding(8, 0, 8, 0),
+        Dim kpiDef() As (caption As String, value As String, clr As Color, sub1 As String, modKey As String) = {
+            ("Total Events", totalEvents.ToString("N0"), MintPrimary, "All audit events in selected period", "all"),
+            ("POS Events", posCount.ToString("N0"), MintDeep, "Sales & returns at point of sale", "POS"),
+            ("Inventory Events", invCount.ToString("N0"), Color.FromArgb(140, 80, 0), "Stock adjustments", "Inventory"),
+            ("Procurement Events", procCount.ToString("N0"), Color.FromArgb(30, 90, 180), "Purchase orders & requests", "Procurement")
+        }
+
+        For i As Integer = 0 To 3
+            Dim kd = kpiDef(i)
+            Dim capModKey As String = kd.modKey
+            Dim capIdx As Integer = i
+
+            Dim card As New BufferedPanel With {
+                .Dock = DockStyle.Fill,
+                .BackColor = CardBg,
                 .Cursor = Cursors.Hand,
-                .Margin = New Padding(0, 0, 5, 0)
+                .Margin = New Padding(If(i = 0, 0, 6), 0, If(i = 3, 0, 6), 0)
             }
-            pill.FlatAppearance.BorderSize = 0
-            RoundBtn(pill, 12)
-            _modPills.Add(pill)
 
-            AddHandler pill.Click,
-                Sub()
-                    _moduleFilter = capKey
-                    StyleModPills(capKey)
+            AddHandler card.Paint,
+                Sub(s, e)
+                    Dim p = CType(s, Panel)
+                    Dim g = e.Graphics
+                    g.SmoothingMode = SmoothingMode.AntiAlias
+                    Dim isActive As Boolean = (_moduleFilter = capModKey)
+                    Dim rect As New Rectangle(1, 1, p.Width - 3, p.Height - 3)
+                    ' shadow
+                    Dim shadowRect As New Rectangle(rect.X + 1, rect.Y + 2, rect.Width - 2, rect.Height - 2)
+                    Using shadowBrush As New SolidBrush(Color.FromArgb(14, 0, 0, 0))
+                        Using sp = RoundRect(shadowRect, 14)
+                            g.FillPath(shadowBrush, sp)
+                        End Using
+                    End Using
+                    Using path = RoundRect(rect, 14)
+                        Using br As New SolidBrush(If(isActive, Color.FromArgb(236, 248, 244), CardBg))
+                            g.FillPath(br, path)
+                        End Using
+                        Using pen As New Pen(If(isActive, MintPrimary, Color.FromArgb(210, 220, 216)),
+                                             If(isActive, 2.0F, 1.0F))
+                            g.DrawPath(pen, path)
+                        End Using
+                    End Using
+                End Sub
+
+            Dim lblCap As New Label With {
+                .Text = kd.caption,
+                .Font = New Font("Segoe UI", 11),
+                .ForeColor = SubText,
+                .AutoSize = True,
+                .Location = New Point(22, 14),
+                .BackColor = Color.Transparent
+            }
+            Dim lblVal As New Label With {
+                .Text = kd.value,
+                .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+                .ForeColor = kd.clr,
+                .AutoSize = True,
+                .Location = New Point(20, 36),
+                .BackColor = Color.Transparent
+            }
+            Dim lblSub As New Label With {
+                .Text = kd.sub1,
+                .Font = New Font("Segoe UI", 10),
+                .ForeColor = SubText,
+                .AutoSize = True,
+                .Location = New Point(22, 100),
+                .BackColor = Color.Transparent
+            }
+            card.Controls.AddRange({lblCap, lblVal, lblSub})
+
+            Dim onClick As EventHandler =
+                Sub(s, e)
+                    _moduleFilter = If(_moduleFilter = capModKey, "all", capModKey)
+                    For j As Integer = 0 To 3
+                        If _kpiPanels(j) IsNot Nothing Then _kpiPanels(j).Invalidate()
+                    Next
+                    _currentPage = 0
                     ApplyFilters()
                     PopulateRows()
                 End Sub
 
-            modHost.Controls.Add(pill)
+            AddHandler card.Click, onClick
+            For Each child As Control In card.Controls
+                child.Cursor = Cursors.Hand
+                AddHandler child.Click, onClick
+            Next
+
+            _kpiPanels(capIdx) = card
+            kpiRow.Controls.Add(card, i, 0)
         Next
 
-        bar.Controls.Add(dateHost)
-        bar.Controls.Add(modHost)
-
-        AddHandler bar.Resize,
-            Sub()
-                Dim midY As Integer = (bar.Height - dateHost.Height) \ 2
-                dateHost.Location = New Point(22, midY)
-                modHost.Location = New Point(bar.Width - modHost.Width - 22,
-                                             (bar.Height - modHost.Height) \ 2)
-            End Sub
-
+        bar.Controls.Add(kpiRow)
         Return bar
     End Function
 
-    Private Shared Sub StyleDatePills(activeKey As String)
-        Dim keys() As String = {"today", "week", "month", "all"}
-        For i As Integer = 0 To Math.Min(_datePills.Count - 1, keys.Length - 1)
-            Dim isAct As Boolean = (keys(i) = activeKey)
-            _datePills(i).BackColor = If(isAct, MintPrimary, Color.FromArgb(230, 238, 235))
-            _datePills(i).ForeColor = If(isAct, Color.White, SubText)
-            _datePills(i).Font = New Font("Segoe UI", 9.5F,
-                                          If(isAct, FontStyle.Bold, FontStyle.Regular))
-            _datePills(i).Invalidate()
-        Next
-    End Sub
+    Private Shared Function MakeKpiCard(caption As String, value As String,
+                                         valueClr As Color, subLabel As String) As Panel
+        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
+        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
-    Private Shared Sub StyleModPills(activeKey As String)
-        Dim keys() As String = {"all", "Sales", "Returns", "Purchase Orders", "Stock", "Requests"}
-        For i As Integer = 0 To Math.Min(_modPills.Count - 1, keys.Length - 1)
-            Dim isAct As Boolean = (keys(i) = activeKey)
-            _modPills(i).BackColor = If(isAct, MintDeep, Color.FromArgb(230, 238, 235))
-            _modPills(i).ForeColor = If(isAct, Color.White, SubText)
-            _modPills(i).Font = New Font("Segoe UI", 9.0F,
-                                         If(isAct, FontStyle.Bold, FontStyle.Regular))
-            _modPills(i).Invalidate()
-        Next
-    End Sub
-
-    ' =========================================================================
-    '  3. COLUMN HEADER  — 34 px
-    ' =========================================================================
-    Private Shared Function BuildColumnHeader() As Panel
-        Dim hdr As New Panel With {
-            .Height = 34,
-            .BackColor = Color.FromArgb(247, 250, 249)
+        Dim lblCap As New Label With {
+            .Text = caption,
+            .Font = New Font("Segoe UI", 11),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(22, 14),
+            .BackColor = Color.Transparent
         }
+        Dim lblVal As New Label With {
+            .Text = value,
+            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .ForeColor = valueClr,
+            .AutoSize = True,
+            .Location = New Point(20, 36),
+            .BackColor = Color.Transparent
+        }
+        Dim lblSub As New Label With {
+            .Text = subLabel,
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(22, 100),
+            .BackColor = Color.Transparent
+        }
+        card.Controls.AddRange({lblCap, lblVal, lblSub})
+        Return card
+    End Function
+
+    ' =========================================================================
+    '  COLUMN HEADER  — 44px, matches Doc 2 style (label-based proportional)
+    ' =========================================================================
+    Private Shared Function BuildColHeader() As Panel
+        Dim hdr As New Panel With {.Height = 44, .BackColor = Color.Transparent}
+
+        Dim labels As Label() = {
+            MakeColLabel("DATE & TIME", New Point(24, 13)),
+            MakeColLabel("USER", New Point(0, 13)),
+            MakeColLabel("MODULE", New Point(0, 13)),
+            MakeColLabel("ACTION", New Point(0, 13)),
+            MakeColLabel("DETAIL", New Point(0, 13))
+        }
+        hdr.Controls.AddRange(labels)
+
+        AddHandler hdr.Resize,
+            Sub()
+                Dim w = hdr.Width
+                labels(0).Left = 24
+                labels(1).Left = CInt(w * 0.16)
+                labels(2).Left = CInt(w * 0.35)
+                labels(3).Left = CInt(w * 0.49)
+                labels(4).Left = CInt(w * 0.65)
+            End Sub
 
         AddHandler hdr.Paint,
             Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, 0, hdr.Width, 0)
-                    e.Graphics.DrawLine(p, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, hdr.Height - 1, hdr.Width - 20, hdr.Height - 1)
                 End Using
             End Sub
 
-        Dim grid As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill,
-            .ColumnCount = 5,
-            .RowCount = 1,
-            .BackColor = Color.Transparent,
-            .Padding = New Padding(4, 0, 4, 0)
-        }
-        grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
-        SetColumnStyles(grid)
-
-        Dim hdrTexts() As String = {"Date & Time", "User", "Module", "Action", "Detail"}
-        Dim hdrAligns() As ContentAlignment = {
-            ContentAlignment.MiddleLeft,
-            ContentAlignment.MiddleLeft,
-            ContentAlignment.MiddleCenter,
-            ContentAlignment.MiddleLeft,
-            ContentAlignment.MiddleLeft}
-
-        For idx = 0 To hdrTexts.Length - 1
-            grid.Controls.Add(New Label With {
-                .Text = hdrTexts(idx),
-                .Dock = DockStyle.Fill,
-                .TextAlign = hdrAligns(idx),
-                .Font = New Font("Segoe UI Semibold", 9),
-                .ForeColor = Color.FromArgb(122, 152, 144),
-                .BackColor = Color.Transparent,
-                .Padding = New Padding(If(idx = 0, 18, 4), 0, If(idx = 4, 18, 4), 0)
-            }, idx, 0)
-        Next
-
-        hdr.Controls.Add(grid)
         Return hdr
     End Function
 
-    Private Shared Sub SetColumnStyles(grid As TableLayoutPanel)
-        grid.ColumnStyles.Clear()
-        grid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 140))  ' Date & Time
-        grid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 160))  ' User
-        grid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 140))  ' Module badge
-        grid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 170))  ' Action
-        grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))   ' Detail (flex)
-    End Sub
+    Private Shared Function MakeColLabel(text As String, loc As Point) As Label
+        Return New Label With {
+            .Text = text,
+            .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = loc,
+            .BackColor = Color.Transparent
+        }
+    End Function
 
     ' =========================================================================
-    '  4. SCROLL HOST  — populated separately so filters can re-fill
+    '  POPULATE ROWS  — mirrors Doc 2 PopulateRows with paging
     ' =========================================================================
     Private Shared Sub PopulateRows()
         If _scrollHost Is Nothing Then Return
@@ -659,37 +818,69 @@ Public Class AccountantAuditTrailPanelBuilder
         _scrollHost.SuspendLayout()
         _scrollHost.Controls.Clear()
 
+        If _reflowAttached Then
+            RemoveHandler _scrollHost.Resize, AddressOf ReflowScrollHost
+            _reflowAttached = False
+        End If
+
         If _visibleRows.Count = 0 Then
             _scrollHost.Controls.Add(BuildEmptyRow(
                 If(String.IsNullOrWhiteSpace(_searchQuery) AndAlso _moduleFilter = "all",
-                   "No financial activity found for the selected period.",
+                   "No audit events found for the selected period.",
                    "No results match the current filter.")))
+            UpdatePager(0)
         Else
-            For i As Integer = _visibleRows.Count - 1 To 0 Step -1
-                _scrollHost.Controls.Add(BuildDataRow(_visibleRows(i)))
+            Dim pageRows = _visibleRows.Skip(_currentPage * PAGE_SIZE).Take(PAGE_SIZE).ToList()
+            Dim y As Integer = 4
+            For Each r As AuditRow In pageRows
+                Dim row As Panel = BuildDataRow(r)
+                row.Location = New Point(0, y)
+                row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+                _scrollHost.Controls.Add(row)
+                row.Width = _scrollHost.ClientSize.Width - 4
+                y += row.Height
             Next
+
+            If Not _reflowAttached Then
+                _reflowAttached = True
+                AddHandler _scrollHost.Resize, AddressOf ReflowScrollHost
+            End If
+
+            _scrollHost.AutoScrollMinSize = New Size(0, y + 8)
+            UpdatePager(_visibleRows.Count)
         End If
 
         _scrollHost.ResumeLayout()
         _scrollHost.Invalidate(True)
-
-        UpdateSummary()
     End Sub
 
-    ' ── Single data row ───────────────────────────────────────────────────────
+    Private Shared Sub ReflowScrollHost(sender As Object, e As EventArgs)
+        ReflowRows(_scrollHost)
+    End Sub
+
+    Private Shared Sub ReflowRows(host As Panel)
+        If host Is Nothing Then Return
+        Dim w As Integer = host.ClientSize.Width - 4
+        For Each c As Control In host.Controls
+            c.Width = w
+        Next
+    End Sub
+
+    ' ── Single data row (64px, matches Doc 2 row height) ─────────────────────
     Private Shared Function BuildDataRow(r As AuditRow) As Panel
-        Const ROW_H As Integer = 48
+        Const ROW_H As Integer = 64
 
         Dim row As New BufferedPanel With {
             .Height = ROW_H,
-            .Dock = DockStyle.Top,
-            .BackColor = Color.Transparent
+            .BackColor = Color.Transparent,
+            .Cursor = Cursors.Hand
         }
+
+        Dim modColors = GetModuleColors(r.[Module])
 
         AddHandler row.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-
                 If TypeOf row.Tag Is Boolean AndAlso CBool(row.Tag) Then
                     Dim rect As New Rectangle(8, 3, row.Width - 16, ROW_H - 6)
                     Using path As GraphicsPath = RoundRect(rect, 10)
@@ -698,144 +889,137 @@ Public Class AccountantAuditTrailPanelBuilder
                         End Using
                     End Using
                 End If
-
-                ' Coloured left accent bar per module
-                Dim accentColor As Color = GetModuleColors(r.[Module]).fore
-                Using br As New SolidBrush(accentColor)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 10, 3, ROW_H - 20))
+                ' Coloured left accent bar matching module
+                Using br As New SolidBrush(modColors.fore)
+                    e.Graphics.FillRectangle(br, New Rectangle(0, 12, 3, ROW_H - 24))
                 End Using
-
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 16, ROW_H - 1, row.Width - 16, ROW_H - 1)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, ROW_H - 1, row.Width - 20, ROW_H - 1)
                 End Using
             End Sub
 
-        Dim grid As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill,
-            .ColumnCount = 5,
-            .RowCount = 1,
-            .BackColor = Color.Transparent,
-            .Margin = New Padding(0),
-            .Padding = New Padding(4, 0, 4, 0)
-        }
-        grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
-        SetColumnStyles(grid)
-
-        ' Col 0 — Date & Time
-        grid.Controls.Add(New Label With {
-            .Text = r.EventDate.ToString("MM/dd/yy  h:mm tt"),
-            .Dock = DockStyle.Fill,
-            .TextAlign = ContentAlignment.MiddleLeft,
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText,
-            .BackColor = Color.Transparent,
-            .Padding = New Padding(18, 0, 4, 0)
-        }, 0, 0)
-
-        ' Col 1 — User (name + role underneath)
-        Dim userWrap As New Panel With {
-            .Dock = DockStyle.Fill,
+        ' Col 0 — Date & Time (stacked: date bold top, time faint below)
+        Dim lblDate As New Label With {
+            .Text = r.EventDate.ToString("MM/dd/yy"),
+            .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(45, 45, 45),
+            .AutoSize = True,
             .BackColor = Color.Transparent
         }
-        Dim lblName As New Label With {
-            .Text = r.UserName,
-            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = Color.FromArgb(45, 45, 45),
-            .BackColor = Color.Transparent,
+        Dim lblTime As New Label With {
+            .Text = r.EventDate.ToString("h:mm tt"),
+            .Font = New Font("Segoe UI", 9),
+            .ForeColor = FaintText,
             .AutoSize = True,
-            .Location = New Point(4, 8)
+            .BackColor = Color.Transparent
+        }
+
+        ' Col 1 — User (name bold top, role faint below)
+        Dim lblUser As New Label With {
+            .Text = r.UserName,
+            .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(45, 45, 45),
+            .AutoSize = True,
+            .BackColor = Color.Transparent
         }
         Dim lblRole As New Label With {
             .Text = r.UserRole,
-            .Font = New Font("Segoe UI", 8),
+            .Font = New Font("Segoe UI", 8.5F),
             .ForeColor = FaintText,
-            .BackColor = Color.Transparent,
             .AutoSize = True,
-            .Location = New Point(4, 27)
-        }
-        userWrap.Controls.AddRange({lblName, lblRole})
-        grid.Controls.Add(userWrap, 1, 0)
-
-        ' Col 2 — Module badge (centered)
-        Dim modColors = GetModuleColors(r.[Module])
-        Dim badgeWrap As New Panel With {
-            .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent
         }
+
+        ' Col 2 — Module badge
         Dim badge As New Label With {
             .Text = r.[Module],
-            .Font = New Font("Segoe UI", 8.25F, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
             .ForeColor = modColors.fore,
             .BackColor = Color.Transparent,
             .AutoSize = True,
-            .Padding = New Padding(8, 3, 8, 3)
+            .Padding = New Padding(10, 4, 10, 4)
         }
-        RoundLbl(badge, 10)
 
-        AddHandler badgeWrap.Resize,
-            Sub()
-                badge.Location = New Point(
-                    Math.Max(0, (badgeWrap.Width - badge.Width) \ 2),
-                    (ROW_H - badge.Height) \ 2)
-            End Sub
-
-        AddHandler badgeWrap.Paint,
+        AddHandler badge.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rc As New Rectangle(
-                    Math.Max(0, (badgeWrap.Width - badge.Width) \ 2),
-                    (ROW_H - badge.Height) \ 2,
-                    badge.Width, badge.Height)
+                Dim rc = badge.ClientRectangle : rc.Inflate(-1, -1)
                 Using br As New SolidBrush(modColors.back)
                     e.Graphics.FillRoundedRectangle(br, rc, 10)
                 End Using
-                rc.Inflate(-1, -1)
-                Using p As New Pen(modColors.fore, 0.6F)
+                Using p As New Pen(modColors.fore, 0.7F)
                     e.Graphics.DrawRoundedRectangle(p, rc, 10)
                 End Using
+                TextRenderer.DrawText(e.Graphics, badge.Text, badge.Font, badge.ClientRectangle,
+                    badge.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
 
-        badgeWrap.Controls.Add(badge)
-        grid.Controls.Add(badgeWrap, 2, 0)
-
         ' Col 3 — Action
-        grid.Controls.Add(New Label With {
+        Dim lblAction As New Label With {
             .Text = r.Action,
-            .Dock = DockStyle.Fill,
-            .TextAlign = ContentAlignment.MiddleLeft,
-            .Font = New Font("Segoe UI", 9.5F),
+            .Font = New Font("Segoe UI", 10),
             .ForeColor = MintDeep,
+            .AutoSize = True,
             .BackColor = Color.Transparent
-        }, 3, 0)
+        }
 
-        ' Col 4 — Detail (flex)
-        grid.Controls.Add(New Label With {
+        ' Col 4 — Detail
+        Dim lblDetail As New Label With {
             .Text = r.Detail,
-            .Dock = DockStyle.Fill,
-            .TextAlign = ContentAlignment.MiddleLeft,
-            .Font = New Font("Segoe UI", 9.5F),
+            .Font = New Font("Segoe UI", 10),
             .ForeColor = Color.FromArgb(60, 70, 68),
-            .BackColor = Color.Transparent,
-            .Padding = New Padding(4, 0, 18, 0)
-        }, 4, 0)
+            .AutoSize = True,
+            .BackColor = Color.Transparent
+        }
 
-        row.Controls.Add(grid)
+        row.Controls.AddRange({lblDate, lblTime, lblUser, lblRole, badge, lblAction, lblDetail})
 
-        ' Hover propagation
-        PropagateHover(row)
-        For Each c As Control In grid.Controls
-            AddHandler c.MouseEnter, Sub() SetRowHover(row, True)
-            AddHandler c.MouseLeave,
-                Sub()
-                    Dim pos = row.PointToClient(Cursor.Position)
-                    SetRowHover(row, row.ClientRectangle.Contains(pos))
-                End Sub
+        AddHandler row.Resize,
+            Sub()
+                Dim w = row.Width
+                Dim topY As Integer = 10
+                Dim botY As Integer = 36
+
+                lblDate.Left = 24 : lblDate.Top = topY
+                lblTime.Left = 24 : lblTime.Top = botY
+
+                lblUser.Left = CInt(w * 0.16) : lblUser.Top = topY
+                lblRole.Left = CInt(w * 0.16) : lblRole.Top = botY
+
+                Dim badgeX = CInt(w * 0.35)
+                Dim badgeY = (ROW_H - badge.Height) \ 2
+                badge.Location = New Point(badgeX, Math.Max(0, badgeY))
+
+                lblAction.Left = CInt(w * 0.49) : lblAction.Top = (ROW_H - lblAction.Height) \ 2
+                lblDetail.Left = CInt(w * 0.65) : lblDetail.Top = (ROW_H - lblDetail.Height) \ 2
+                lblDetail.MaximumSize = New Size(w - CInt(w * 0.65) - 20, 0)
+            End Sub
+
+        ' Row click → detail modal
+        Dim openDetail As Action =
+            Sub()
+                Dim sb As New System.Text.StringBuilder()
+                sb.AppendLine($"Date/Time : {r.EventDate:MMM dd, yyyy  hh:mm tt}")
+                sb.AppendLine($"User      : {r.UserName} ({r.UserRole})")
+                sb.AppendLine($"Module    : {r.[Module]}")
+                sb.AppendLine($"Action    : {r.Action}")
+                sb.AppendLine($"Detail    : {r.Detail}")
+                AppModal.Show(sb.ToString(),
+                              caption:=$"Audit Event — {r.[Module]}",
+                              buttons:=MessageBoxButtons.OK,
+                              icon:=MessageBoxIcon.Information)
+            End Sub
+
+        AddHandler row.Click, Sub() openDetail()
+        For Each ctrl As Control In row.Controls
+            AddHandler ctrl.Click, Sub() openDetail()
         Next
 
+        PropagateHover(row)
         Return row
     End Function
 
-    ' Empty state
     Private Shared Function BuildEmptyRow(message As String) As Panel
         Dim p As New Panel With {
             .Height = 90,
@@ -854,104 +1038,154 @@ Public Class AccountantAuditTrailPanelBuilder
     End Function
 
     ' =========================================================================
-    '  5. SUMMARY BAR  — pinned at bottom, 48 px
+    '  PAGER BAR — inside container, Dock Bottom (above summary)
+    '  Mirrors Doc 2 BuildPagerBar exactly
     ' =========================================================================
-    Private Shared Function BuildSummaryBar() As Panel
+    Private Shared Function BuildPagerBar() As Panel
+        ' Use a wrapper so the bar itself has side breathing room
+        Dim wrapper As New Panel With {
+    .Height = 52,
+    .BackColor = Color.Transparent,  ' ← was CardBg, change to Transparent
+    .Dock = DockStyle.Bottom
+}
+
+        AddHandler wrapper.Paint,
+    Sub(s, e)
+        ' Full-width top divider — connects to card's left and right borders
+        Using dp As New Pen(RowDivider, 1)
+            e.Graphics.DrawLine(dp, 0, 0, wrapper.Width, 0)
+        End Using
+    End Sub
+
         Dim bar As New Panel With {
-            .Height = 48,
-            .BackColor = Color.FromArgb(236, 246, 242)
-        }
+        .BackColor = Color.FromArgb(248, 251, 249),
+        .Height = 44,
+        .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
+    }
+
+        ' Position bar inset 16px each side, 4px from bottom
+        AddHandler wrapper.Resize,
+        Sub()
+            bar.Left = 16
+            bar.Width = wrapper.Width - 32
+            bar.Top = wrapper.Height - bar.Height - 4
+        End Sub
 
         AddHandler bar.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, 0, bar.Width, 0)
+        Sub(s, e)
+            Dim g = e.Graphics
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            Dim w = bar.Width
+            Dim h = bar.Height
+            Dim r As Integer = 10
+            If w <= 0 OrElse h <= 0 Then Return
+
+            Using gp As New GraphicsPath()
+                gp.AddArc(0, 0, r, r, 180, 90)
+                gp.AddArc(w - r, 0, r, r, 270, 90)
+                gp.AddArc(w - r, h - r, r, r, 0, 90)
+                gp.AddArc(0, h - r, r, r, 90, 90)
+                gp.CloseFigure()
+
+                Using fill As New SolidBrush(Color.FromArgb(248, 251, 249))
+                    g.FillPath(fill, gp)
                 End Using
-                Using br As New LinearGradientBrush(
-                        New Rectangle(0, 0, bar.Width, bar.Height),
-                        Color.FromArgb(230, 244, 240),
-                        Color.FromArgb(220, 238, 234),
-                        LinearGradientMode.Vertical)
-                    e.Graphics.FillRectangle(br, 0, 1, bar.Width, bar.Height - 1)
+                Using pen As New Pen(RowDivider, 1)
+                    g.DrawPath(pen, gp)
                 End Using
-            End Sub
+            End Using
+        End Sub
 
-        Dim lblCntCap As New Label With {
-            .Text = "Total Events:",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
-        }
-        _lblCount = New Label With {
-            .Text = "0",
-            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = MintDark,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
-        }
+        _btnPrev = New Button With {
+        .Text = "‹",
+        .FlatStyle = FlatStyle.Flat,
+        .Cursor = Cursors.Hand,
+        .Size = New Size(32, 32),
+        .BackColor = Color.FromArgb(220, 235, 232),
+        .ForeColor = MintDark,
+        .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+        .TextAlign = ContentAlignment.MiddleCenter
+    }
+        _btnPrev.FlatAppearance.BorderSize = 0
 
-        Dim lblBreakCap As New Label With {
-            .Text = "Breakdown:",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
-        }
-        _lblModBreakdown = New Label With {
-            .Text = "",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = MintDeep,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
-        }
+        _btnNext = New Button With {
+        .Text = "›",
+        .FlatStyle = FlatStyle.Flat,
+        .Cursor = Cursors.Hand,
+        .Size = New Size(32, 32),
+        .BackColor = Color.FromArgb(220, 235, 232),
+        .ForeColor = MintDark,
+        .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+        .TextAlign = ContentAlignment.MiddleCenter
+    }
+        _btnNext.FlatAppearance.BorderSize = 0
 
-        bar.Controls.AddRange({lblCntCap, _lblCount, lblBreakCap, _lblModBreakdown})
+        _lblPageInfo = New Label With {
+        .Font = New Font("Segoe UI", 9.5F),
+        .ForeColor = SubText,
+        .AutoSize = True,
+        .BackColor = Color.Transparent
+    }
 
         AddHandler bar.Resize,
-            Sub()
-                Dim midY As Integer = (bar.Height - lblCntCap.Height) \ 2
+        Sub()
+            Dim cx As Integer = bar.Width \ 2
+            _btnPrev.Left = cx - _btnPrev.Width - _lblPageInfo.Width \ 2 - 8
+            _btnPrev.Top = (bar.Height - _btnPrev.Height) \ 2
+            _lblPageInfo.Left = cx - _lblPageInfo.Width \ 2
+            _lblPageInfo.Top = (bar.Height - _lblPageInfo.Height) \ 2
+            _btnNext.Left = cx + _lblPageInfo.Width \ 2 + 8
+            _btnNext.Top = (bar.Height - _btnNext.Height) \ 2
+            bar.Invalidate()
+        End Sub
 
-                lblCntCap.Location = New Point(22, midY)
-                _lblCount.Location = New Point(lblCntCap.Right + 4,
-                                               midY + (lblCntCap.Height - _lblCount.Height) \ 2)
+        AddHandler _btnPrev.Click,
+        Sub()
+            If _currentPage > 0 Then
+                _currentPage -= 1
+                PopulateRows()
+            End If
+        End Sub
+        AddHandler _btnNext.Click,
+        Sub()
+            Dim totalPages As Integer = Math.Max(1, CInt(Math.Ceiling(_visibleRows.Count / PAGE_SIZE)))
+            If _currentPage < totalPages - 1 Then
+                _currentPage += 1
+                PopulateRows()
+            End If
+        End Sub
 
-                lblBreakCap.Location = New Point(_lblCount.Right + 24, midY)
-                _lblModBreakdown.Location = New Point(lblBreakCap.Right + 4,
-                                                      midY + (lblBreakCap.Height - _lblModBreakdown.Height) \ 2)
-            End Sub
-
-        Return bar
+        bar.Controls.AddRange({_btnPrev, _lblPageInfo, _btnNext})
+        wrapper.Controls.Add(bar)
+        Return wrapper
     End Function
 
-    Private Shared Sub UpdateSummary()
-        If _lblCount Is Nothing Then Return
-
-        _lblCount.Text = _visibleRows.Count.ToString("N0")
-
-        ' Build breakdown string: Sales: 3  Returns: 1  ...
-        Dim groups = _visibleRows.GroupBy(Function(r) r.[Module]).
-                                  OrderBy(Function(g) g.Key).
-                                  Select(Function(g) $"{g.Key}: {g.Count()}")
-        _lblModBreakdown.Text = If(groups.Any(), String.Join("   ", groups), "—")
+    Private Shared Sub UpdatePager(totalRows As Integer)
+        If _lblPageInfo Is Nothing Then Return
+        Dim totalPages As Integer = Math.Max(1, CInt(Math.Ceiling(totalRows / PAGE_SIZE)))
+        _lblPageInfo.Text = $"Page {_currentPage + 1} of {totalPages}  ({totalRows} total)"
+        _btnPrev.Enabled = (_currentPage > 0)
+        _btnNext.Enabled = (_currentPage < totalPages - 1)
+        If _lblPageInfo.Parent IsNot Nothing Then _lblPageInfo.Parent.PerformLayout()
     End Sub
+
+
+
 
     ' =========================================================================
     '  MODULE BADGE COLOURS
     ' =========================================================================
     Private Shared Function GetModuleColors(moduleName As String) As (fore As Color, back As Color)
         Select Case moduleName
-            Case "Sales" : Return BadgeSale
-            Case "Returns" : Return BadgeReturn
-            Case "Purchase Orders" : Return BadgePO
-            Case "Stock" : Return BadgeStock
-            Case "Requests" : Return BadgeRequest
+            Case "POS" : Return BadgePOS
+            Case "Inventory" : Return BadgeInventory
+            Case "Procurement" : Return BadgeProcurement
             Case Else : Return (SubText, Color.FromArgb(238, 238, 238))
         End Select
     End Function
 
     ' =========================================================================
-    '  SHARED HELPERS
+    '  HELPERS
     ' =========================================================================
     Private Shared Function RoundRect(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim r As Integer = radius
@@ -963,34 +1197,6 @@ Public Class AccountantAuditTrailPanelBuilder
         path.CloseFigure()
         Return path
     End Function
-
-    Private Shared Sub RoundLbl(lbl As Label, radius As Integer)
-        AddHandler lbl.Resize,
-            Sub()
-                Dim r As Integer = radius
-                Dim path As New GraphicsPath()
-                path.AddArc(0, 0, r, r, 180, 90)
-                path.AddArc(lbl.Width - r, 0, r, r, 270, 90)
-                path.AddArc(lbl.Width - r, lbl.Height - r, r, r, 0, 90)
-                path.AddArc(0, lbl.Height - r, r, r, 90, 90)
-                path.CloseFigure()
-                lbl.Region = New Region(path)
-            End Sub
-    End Sub
-
-    Private Shared Sub RoundBtn(btn As Button, radius As Integer)
-        AddHandler btn.Resize,
-            Sub()
-                Dim r As Integer = radius
-                Dim path As New GraphicsPath()
-                path.AddArc(0, 0, r, r, 180, 90)
-                path.AddArc(btn.Width - r, 0, r, r, 270, 90)
-                path.AddArc(btn.Width - r, btn.Height - r, r, r, 0, 90)
-                path.AddArc(0, btn.Height - r, r, r, 90, 90)
-                path.CloseFigure()
-                btn.Region = New Region(path)
-            End Sub
-    End Sub
 
     Private Shared Sub PropagateHover(row As Panel)
         AddHandler row.MouseEnter, Sub() SetRowHover(row, True)
@@ -1010,4 +1216,7 @@ Public Class AccountantAuditTrailPanelBuilder
         row.Invalidate()
     End Sub
 
+    Private Sub AccountantAuditTrailPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+    End Sub
 End Class

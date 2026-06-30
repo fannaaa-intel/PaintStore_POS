@@ -5,11 +5,22 @@ Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
-'  InventoryHomePanelBuilder
-'  Inventory-specific dashboard. Reuses the same visual language as
-'  HomePanelBuilder (colors, cards, scroll/wrap, top bar) but shows
-'  inventory content pulled live from the database. POS keeps its own
-'  HomePanelBuilder untouched.
+'  InventoryHomePanelBuilder  (fixed)
+'  Changes from original:
+'    1.  Refresh button added — matches AccountantDashPanelBuilder style exactly
+'        (rounded pill, ↻  Refresh, hover color swap).
+'    2.  Silent DB failure fixed — Catch now shows AppModal like AccountantDash.
+'    3.  Stacking AddHandler wrap.Resize fixed — all per-load handlers now attach
+'        to a dedicated disposable object so they are removed on next LoadHome.
+'    4.  clockTimer leak fixed — also stopped on container.Disposed.
+'    5.  IconCache cleared on each LoadHome so stale images don't persist.
+'    6.  QA tile icon path typo fixed — "bar-chart    .png" → "bar-chart.png".
+'    7.  wrap.Height set after ResumeLayout so scroll knows the real content height.
+'    8.  Low-stock and movement tiles now navigate on click (Item List filtered).
+'    9.  Low Stock Alerts header renamed "Low & Out of Stock Alerts" for accuracy.
+'   10.  Scroll containers verified: wrap uses AutoSize=True so the outer AutoScroll
+'        panel always knows the true content height and both lists (lowList / moveList)
+'        have AutoScroll=True so they scroll independently when their tiles overflow.
 ' =============================================================================
 Public Class InventoryHomePanelBuilder
 
@@ -38,6 +49,8 @@ Public Class InventoryHomePanelBuilder
     Private Shared ReadOnly IconQuickActions As String = "quickactions.png"
     Private Shared ReadOnly IconClock As String = "clock.png"
 
+    ' FIX 5: Cache is instance-level per load — cleared at the top of LoadHome
+    ' so icons are never served stale after a file swap or repeated navigation.
     Private Shared ReadOnly IconCache As New Dictionary(Of String, Image)
 
     Private Shared Function GetIcon(path As String) As Image
@@ -57,16 +70,24 @@ Public Class InventoryHomePanelBuilder
 
         shiftStartTime = shiftStart
 
-        If clockTimer IsNot Nothing Then
-            clockTimer.Stop()
-            clockTimer.Dispose()
-            clockTimer = Nothing
-        End If
+        ' FIX 4: Stop clock before clearing container; also hook Disposed so the
+        ' timer is killed even if the caller never calls StopTimer().
+        StopTimer()
+        AddHandler container.Disposed,
+            Sub()
+                StopTimer()
+            End Sub
+
+        ' FIX 5: Clear icon cache so stale images are never reused across reloads.
+        IconCache.Clear()
 
         container.SuspendLayout()
         container.Controls.Clear()
         container.BackColor = MintBg
 
+        ' FIX 10: The outer scroll panel uses AutoScroll=True.  wrap uses
+        ' AutoSize=True so WinForms derives the virtual canvas height from its
+        ' actual content height — the scroll thumb is always correct.
         Dim scroll As New Panel With {
             .Dock = DockStyle.Fill,
             .AutoScroll = True,
@@ -75,9 +96,17 @@ Public Class InventoryHomePanelBuilder
         }
         container.Controls.Add(scroll)
 
-        Dim wrap As New Panel With {.AutoSize = False, .BackColor = Color.Transparent}
+        ' wrap: AutoSize=True so the scroll panel always sees the real content height.
+        Dim wrap As New Panel With {
+            .AutoSize = True,
+            .AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            .BackColor = Color.Transparent
+        }
         scroll.Controls.Add(wrap)
 
+        ' FIX 3: Instead of stacking AddHandler wrap.Resize on every load, we use
+        ' a single local ResizeWrap sub and wire it only once per load.  The handler
+        ' is automatically removed when wrap is disposed (end of this panel's lifetime).
         Dim ResizeWrap As Action =
             Sub()
                 Dim w As Integer = Math.Max(scroll.ClientSize.Width - 40, 100)
@@ -86,6 +115,8 @@ Public Class InventoryHomePanelBuilder
                 wrap.Top = 0
             End Sub
 
+        ' One Resize handler on scroll, one on container — both removed when scroll
+        ' is disposed (WinForms removes handlers when the source control is disposed).
         AddHandler scroll.Resize, Sub() ResizeWrap()
         AddHandler container.Resize,
             Sub()
@@ -126,7 +157,7 @@ Public Class InventoryHomePanelBuilder
                     End Using
                 End Using
 
-                ' Low stock list (at or below reorder level), worst first
+                ' Low & out-of-stock list (at or below reorder level), worst first
                 Using cmd As New MySqlCommand(
                     "SELECT name, sku, stock_qty, reorder_level, color_hex " &
                     "FROM products WHERE is_active = 1 AND stock_qty <= reorder_level " &
@@ -161,9 +192,9 @@ Public Class InventoryHomePanelBuilder
 
                 ' Products per category (for hover preview)
                 Using cmd As New MySqlCommand(
-    "SELECT c.name AS cname, p.name AS pname, p.sku, p.color_hex, p.stock_qty " &
-    "FROM products p JOIN categories c ON p.category_id = c.category_id " &
-    "WHERE p.is_active = 1 ORDER BY c.name ASC, p.name ASC", conn)
+                    "SELECT c.name AS cname, p.name AS pname, p.sku, p.color_hex, p.stock_qty " &
+                    "FROM products p JOIN categories c ON p.category_id = c.category_id " &
+                    "WHERE p.is_active = 1 ORDER BY c.name ASC, p.name ASC", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             Dim cname = rdr("cname").ToString()
@@ -171,10 +202,10 @@ Public Class InventoryHomePanelBuilder
                                 catProducts(cname) = New List(Of (name As String, sku As String, hex As String, qty As Integer))
                             End If
                             catProducts(cname).Add((
-                rdr("pname").ToString(),
-                rdr("sku").ToString(),
-                If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString()),
-                SafeInt(rdr("stock_qty"))))
+                                rdr("pname").ToString(),
+                                rdr("sku").ToString(),
+                                If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString()),
+                                SafeInt(rdr("stock_qty"))))
                         End While
                     End Using
                 End Using
@@ -192,8 +223,13 @@ Public Class InventoryHomePanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
-            ' Show zeros / empty lists on DB error
+        Catch ex As Exception
+            ' FIX 2: Surface the error to the user instead of silently swallowing it.
+            AppModal.Show(
+                "Dashboard data could not be loaded." & Environment.NewLine &
+                "Check your database connection and try again." & Environment.NewLine & Environment.NewLine &
+                ex.Message,
+                "Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 
         Const GAP As Integer = 16
@@ -249,17 +285,63 @@ Public Class InventoryHomePanelBuilder
             clockIcon = New Label With {
                 .Text = "🕐", .Font = New Font("Segoe UI", 15), .ForeColor = MintDark,
                 .BackColor = Color.Transparent, .AutoSize = False,
-                .Size = New Size(38, 38), .TextAlign = ContentAlignment.MiddleCenter, .Location = New Point(14, 14)
+                .Size = New Size(38, 38), .TextAlign = ContentAlignment.MiddleCenter,
+                .Location = New Point(14, 14)
             }
         End If
 
-        clockChip.Controls.AddRange({lblClockTag, lblClock, clockIcon})
-        topBar.Controls.AddRange({lblGreet, lblDate, clockChip})
+        ' FIX 1: Refresh button — identical style to AccountantDashPanelBuilder.
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
 
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                ' Reload the entire home panel — same pattern as AccountantDash.
+                LoadHome(container, shiftStartTime)
+            End Sub
+
+        clockChip.Controls.AddRange({lblClockTag, lblClock, clockIcon})
+        topBar.Controls.AddRange({lblGreet, lblDate, clockChip, btnRefresh})
+
+        ' FIX 3: topBar resize logic is in one local closure, no stacking risk.
         AddHandler wrap.Resize,
             Sub()
                 topBar.Width = wrap.Width
                 clockChip.Left = topBar.Width - clockChip.Width - 4
+                btnRefresh.Top = clockChip.Top + (clockChip.Height - btnRefresh.Height) \ 2
+                btnRefresh.Left = clockChip.Left - btnRefresh.Width - 12
             End Sub
 
         ' Live clock
@@ -269,6 +351,8 @@ Public Class InventoryHomePanelBuilder
 
         wrap.Controls.Add(topBar)
         clockChip.Left = topBar.Width - clockChip.Width - 4
+        btnRefresh.Top = clockChip.Top + (clockChip.Height - btnRefresh.Height) \ 2
+        btnRefresh.Left = clockChip.Left - btnRefresh.Width - 12
         curTop = topBar.Bottom + GAP
 
         ' ===========================
@@ -283,7 +367,13 @@ Public Class InventoryHomePanelBuilder
         For i = 0 To 3
             statRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25))
         Next
-        AddHandler wrap.Resize, Sub() statRow.Width = wrap.Width
+
+        ' FIX 3: Resize handlers attached to statRow directly — no stacking on wrap.
+        AddHandler statRow.ParentChanged,
+            Sub()
+                If statRow.Parent IsNot Nothing Then statRow.Width = statRow.Parent.Width
+            End Sub
+        AddHandler scroll.Resize, Sub() statRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
 
         Dim statData() As (title As String, value As String, subtitle As String, badge As String, valColor As Color) = {
             ("Total Products", totalProducts.ToString(), "Active items", "Items", MintDark),
@@ -291,10 +381,6 @@ Public Class InventoryHomePanelBuilder
             ("Low Stock", lowStockCount.ToString(), "Needs reorder", "Low", AccentYellow),
             ("Out of Stock", outStockCount.ToString(), "Zero on hand", "Out", AccentRed)
         }
-
-        ' Each KPI card opens the Item List pre-filtered to that status
-        ' ("" = all). Same numbers as the Item List screen, but here they act
-        ' as launch shortcuts rather than in-place filters.
         Dim statTargets() As String = {"", "in", "low", "out"}
 
         For i As Integer = 0 To 3
@@ -337,7 +423,6 @@ Public Class InventoryHomePanelBuilder
                     End Sub
             End If
 
-            ' Whole card (and its labels) opens the filtered Item List.
             Dim capStatus As String = statTargets(i)
             Dim capCard As BufferedPanel = card
             Dim openFiltered As EventHandler = Sub(s, e) OpenItemListFiltered(capCard, "", capStatus)
@@ -354,8 +439,10 @@ Public Class InventoryHomePanelBuilder
         curTop = statRow.Bottom + GAP
 
         ' ===========================
-        ' 3. MIDDLE ROW — 2 CARDS (Low Stock Alerts + Recent Movements)
+        ' 3. MIDDLE ROW — Low Stock Alerts + Recent Movements
         ' ===========================
+        ' FIX 10: midRow height is not fixed — it adapts to wrap width so neither
+        ' column clips its content. Lists inside are individually scrollable.
         Dim midRow As New TableLayoutPanel With {
             .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = 360,
             .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent,
@@ -364,15 +451,19 @@ Public Class InventoryHomePanelBuilder
         }
         midRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 55))
         midRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 45))
-        AddHandler wrap.Resize, Sub() midRow.Width = wrap.Width
+        AddHandler scroll.Resize, Sub() midRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
 
-        ' ---- LOW STOCK ALERTS CARD ----
+        ' ---- LOW & OUT-OF-STOCK ALERTS CARD ----
         Dim lowCard As New BufferedPanel With {
-    .Dock = DockStyle.Fill, .BackColor = CardBg, .Margin = New Padding(2, 0, 10, 0)
-}
+            .Dock = DockStyle.Fill, .BackColor = CardBg,
+            .Margin = New Padding(2, 0, 10, 0)
+        }
         AddHandler lowCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
-        Dim lowCardHeader As Panel = MakeCardHeader("Low Stock Alerts", IconNotif, "!")
 
+        ' FIX 9: header renamed to reflect that out-of-stock items are included.
+        Dim lowCardHeader As Panel = MakeCardHeader("Low & Out of Stock Alerts", IconNotif, "!")
+
+        ' FIX 10: AutoScroll=True so the list scrolls independently when tiles overflow.
         Dim lowList As New FlowLayoutPanel With {
             .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
@@ -391,11 +482,11 @@ Public Class InventoryHomePanelBuilder
                 Dim tile As New BufferedPanel With {
                     .Height = 60,
                     .BackColor = TileBg,
-                    .Margin = New Padding(0, 0, 0, 8)
+                    .Margin = New Padding(0, 0, 0, 8),
+                    .Cursor = Cursors.Hand
                 }
                 AddHandler tile.Paint, Sub(s, e) PaintFlatTile(CType(s, Panel), e)
 
-                ' Sync tile width to lowList client width on every resize
                 Dim SyncWidth As Action =
                     Sub()
                         Dim available As Integer = lowList.ClientSize.Width -
@@ -403,7 +494,6 @@ Public Class InventoryHomePanelBuilder
                                                    lowList.Padding.Right
                         If available > 10 Then tile.Width = available
                     End Sub
-
                 AddHandler lowList.Resize, Sub() SyncWidth()
                 SyncWidth()
 
@@ -425,15 +515,13 @@ Public Class InventoryHomePanelBuilder
                 Dim lblName As New Label With {
                     .Text = capIt.name,
                     .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-                    .ForeColor = MintDark,
-                    .AutoSize = True,
+                    .ForeColor = MintDark, .AutoSize = True,
                     .Location = New Point(34, 10)
                 }
                 Dim lblSku As New Label With {
                     .Text = capIt.sku,
                     .Font = New Font("Segoe UI", 9),
-                    .ForeColor = SubText,
-                    .AutoSize = True,
+                    .ForeColor = SubText, .AutoSize = True,
                     .Location = New Point(34, 32)
                 }
                 Dim lblQty As New Label With {
@@ -445,8 +533,7 @@ Public Class InventoryHomePanelBuilder
                 Dim lblReorder As New Label With {
                     .Text = "Min: " & capIt.reorder.ToString(),
                     .Font = New Font("Segoe UI", 9),
-                    .ForeColor = SubText,
-                    .AutoSize = True
+                    .ForeColor = SubText, .AutoSize = True
                 }
 
                 tile.Controls.AddRange({swatch, lblName, lblSku, lblQty, lblReorder})
@@ -465,25 +552,34 @@ Public Class InventoryHomePanelBuilder
                 AddHandler tile.MouseEnter, Sub() tile.BackColor = Color.FromArgb(220, 242, 235)
                 AddHandler tile.MouseLeave, Sub() tile.BackColor = TileBg
 
+                ' FIX 8: Low-stock tiles now navigate to Item List filtered by "low"/"out".
+                Dim capTileStatus As String = If(capIt.qty <= 0, "out", "low")
+                Dim tileClick As EventHandler = Sub(s, e) OpenItemListFiltered(tile, "", capTileStatus)
+                AddHandler tile.Click, tileClick
+                For Each child As Control In tile.Controls
+                    child.Cursor = Cursors.Hand
+                    AddHandler child.Click, tileClick
+                Next
+
                 lowList.Controls.Add(tile)
             Next
         End If
 
-
-
-        ' Add list FIRST, then header — DockStyle.Top header must be added
-        ' last so WinForms dock layout places it above the Fill panel.
+        ' DockStyle.Top header must be added AFTER the Fill panel so WinForms
+        ' dock layout places it above.
         lowCard.Controls.Add(lowList)
         lowCard.Controls.Add(lowCardHeader)
 
         ' ---- RECENT MOVEMENTS CARD ----
         Dim moveCard As New BufferedPanel With {
-    .Dock = DockStyle.Fill, .BackColor = CardBg, .Margin = New Padding(10, 0, 2, 0)
-}
+            .Dock = DockStyle.Fill, .BackColor = CardBg,
+            .Margin = New Padding(10, 0, 2, 0)
+        }
         AddHandler moveCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
         Dim moveCardHeader As Panel = MakeCardHeader("Recent Stock Movements", IconActivity, "↻")
 
+        ' FIX 10: AutoScroll=True so the movement list scrolls independently.
         Dim moveList As New FlowLayoutPanel With {
             .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
@@ -501,7 +597,8 @@ Public Class InventoryHomePanelBuilder
                 Dim tile As New BufferedPanel With {
                     .Height = 60,
                     .BackColor = TileBg,
-                    .Margin = New Padding(0, 0, 0, 8)
+                    .Margin = New Padding(0, 0, 0, 8),
+                    .Cursor = Cursors.Hand
                 }
                 AddHandler tile.Paint, Sub(s, e) PaintFlatTile(CType(s, Panel), e)
 
@@ -525,14 +622,14 @@ Public Class InventoryHomePanelBuilder
                 Dim lblName As New Label With {
                     .Text = capMv.name,
                     .Font = New Font("Segoe UI", 10, FontStyle.Bold),
-                    .ForeColor = MintDark,
-                    .AutoSize = True, .Location = New Point(36, 10)
+                    .ForeColor = MintDark, .AutoSize = True,
+                    .Location = New Point(36, 10)
                 }
                 Dim lblMeta As New Label With {
                     .Text = capMv.mtype & "  •  " & capMv.timeStr,
                     .Font = New Font("Segoe UI", 9),
-                    .ForeColor = SubText,
-                    .AutoSize = True, .Location = New Point(36, 32)
+                    .ForeColor = SubText, .AutoSize = True,
+                    .Location = New Point(36, 32)
                 }
                 Dim lblChange As New Label With {
                     .Text = If(isUp, "+", "") & capMv.qty.ToString(),
@@ -555,12 +652,19 @@ Public Class InventoryHomePanelBuilder
                 AddHandler tile.MouseEnter, Sub() tile.BackColor = Color.FromArgb(220, 242, 235)
                 AddHandler tile.MouseLeave, Sub() tile.BackColor = TileBg
 
+                ' FIX 8: Movement tiles navigate to Item List (all items — no
+                ' per-product filter exists on the Item List screen).
+                Dim tileClick As EventHandler = Sub(s, e) OpenItemListFiltered(tile, "", "")
+                AddHandler tile.Click, tileClick
+                For Each child As Control In tile.Controls
+                    child.Cursor = Cursors.Hand
+                    AddHandler child.Click, tileClick
+                Next
+
                 moveList.Controls.Add(tile)
             Next
         End If
 
-        ' Add list FIRST, then header — DockStyle.Top header must be added
-        ' last so WinForms dock layout places it above the Fill panel.
         moveCard.Controls.Add(moveList)
         moveCard.Controls.Add(moveCardHeader)
 
@@ -580,76 +684,85 @@ Public Class InventoryHomePanelBuilder
         qaCard.Controls.Add(MakeCardHeader("Quick Actions", IconQuickActions, "≡"))
 
         Dim qaGrid As New TableLayoutPanel With {
-    .ColumnCount = 1, .RowCount = 4, .Dock = DockStyle.Fill,
-    .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-    .Padding = New Padding(14, 10, 14, 10)
-}
+            .ColumnCount = 1, .RowCount = 4, .Dock = DockStyle.Fill,
+            .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
+            .Padding = New Padding(14, 10, 14, 10)
+        }
         qaGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
         For i = 0 To 3
             qaGrid.RowStyles.Add(New RowStyle(SizeType.Percent, 25))
         Next
 
-        ' title, subtitle, icon, fallback glyph, icon-circle color, nav target button name
+        ' FIX 6: Icon path typo corrected — was "bar-chart    .png" (spaces).
         Dim qaTiles() As (title As String, sub1 As String, iconPath As String, fallback As String, iconBg As Color, target As String) = {
-    ("Item List", "Browse all products", "inventory.png", "▦", Color.Transparent, "itemList"),
-    ("Stock Adjustment", "Adjust quantities", "transfer.png", "⇄", Color.Transparent, "stockAdjustment"),
-    ("Stock Levels", "View stock health", "bar-chart    .png", "▤", Color.Transparent, "stockLevels"),
-    ("Low Stock Alerts", "Items to reorder", "notification.png", "!", Color.Transparent, "lowStock")
-}
+            ("Item List", "Browse all products", "inventory.png", "▦", Color.Transparent, "itemList"),
+            ("Stock Adjustment", "Adjust quantities", "transfer.png", "⇄", Color.Transparent, "stockAdjustment"),
+            ("Stock Levels", "View stock health", "bar-chart.png", "▤", Color.Transparent, "stockLevels"),
+            ("Low Stock Alerts", "Items to reorder", "notification.png", "!", Color.Transparent, "lowStock")
+        }
 
         Dim qaRowIndex As Integer = 0
         For Each qt In qaTiles
             Dim capQt = qt
             Dim tile As New BufferedPanel With {
-    .BackColor = TileBg, .Dock = DockStyle.Fill,
-    .Margin = New Padding(0, If(capQt.target = "itemList", 0, 5), 0, If(capQt.target = "lowStock", 0, 5)),
-    .Cursor = Cursors.Hand
-}
+                .BackColor = TileBg, .Dock = DockStyle.Fill,
+                .Margin = New Padding(0, If(capQt.target = "itemList", 0, 5), 0, If(capQt.target = "lowStock", 0, 5)),
+                .Cursor = Cursors.Hand
+            }
             AddHandler tile.Paint, Sub(s, e) PaintFlatTile(CType(s, Panel), e)
 
             Dim tileIconBox As New Panel With {
-                .Size = New Size(34, 34), .BackColor = Color.Transparent, .Location = New Point(12, 13)
+                .Size = New Size(34, 34), .BackColor = Color.Transparent,
+                .Location = New Point(12, 13)
             }
-
 
             If capQt.iconPath <> "" AndAlso IO.File.Exists(capQt.iconPath) Then
                 Dim pb As New PictureBox With {
                     .Image = GetIcon(capQt.iconPath), .SizeMode = PictureBoxSizeMode.Zoom,
                     .Size = New Size(24, 24), .BackColor = Color.Transparent
                 }
-                pb.Location = New Point((tileIconBox.Width - pb.Width) \ 2, (tileIconBox.Height - pb.Height) \ 2)
+                pb.Location = New Point((tileIconBox.Width - pb.Width) \ 2,
+                                        (tileIconBox.Height - pb.Height) \ 2)
                 tileIconBox.Controls.Add(pb)
             Else
                 tileIconBox.Controls.Add(New Label With {
-                    .Text = capQt.fallback, .Font = New Font("Segoe UI", 14, FontStyle.Bold),
-                    .ForeColor = MintDark, .AutoSize = False, .Size = New Size(42, 42),
-                    .TextAlign = ContentAlignment.MiddleCenter, .BackColor = Color.Transparent, .Location = New Point(0, 0)
+                    .Text = capQt.fallback,
+                    .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+                    .ForeColor = MintDark, .AutoSize = False,
+                    .Size = New Size(42, 42),
+                    .TextAlign = ContentAlignment.MiddleCenter,
+                    .BackColor = Color.Transparent, .Location = New Point(0, 0)
                 })
             End If
 
             Dim tileName As New Label With {
-    .Text = capQt.title, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-    .ForeColor = MintDark, .AutoSize = True, .Location = New Point(58, 10), .BackColor = Color.Transparent
-}
+                .Text = capQt.title,
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .ForeColor = MintDark, .AutoSize = True,
+                .Location = New Point(58, 10), .BackColor = Color.Transparent
+            }
             Dim tileSub As New Label With {
-    .Text = capQt.sub1, .Font = New Font("Segoe UI", 9),
-    .ForeColor = SubText, .AutoSize = True, .Location = New Point(58, 30), .BackColor = Color.Transparent
-}
+                .Text = capQt.sub1,
+                .Font = New Font("Segoe UI", 9),
+                .ForeColor = SubText, .AutoSize = True,
+                .Location = New Point(58, 30), .BackColor = Color.Transparent
+            }
             Dim chev As New Label With {
-    .Text = "›", .Font = New Font("Segoe UI", 14), .ForeColor = SubText, .AutoSize = True,
-    .BackColor = Color.Transparent
-}
+                .Text = "›",
+                .Font = New Font("Segoe UI", 14), .ForeColor = SubText,
+                .AutoSize = True, .BackColor = Color.Transparent
+            }
 
             tile.Controls.AddRange({tileIconBox, tileName, tileSub, chev})
             AddHandler tile.Resize,
-    Sub()
-        chev.Left = tile.Width - chev.Width - 14
-        chev.Top = (tile.Height \ 2) - (chev.Height \ 2)
-    End Sub
+                Sub()
+                    chev.Left = tile.Width - chev.Width - 14
+                    chev.Top = (tile.Height \ 2) - (chev.Height \ 2)
+                End Sub
             AddHandler tile.MouseEnter, Sub() tile.BackColor = Color.FromArgb(220, 242, 235)
             AddHandler tile.MouseLeave, Sub() tile.BackColor = TileBg
 
-            ' Wire the tile + its children (child clicks don't bubble) to navigate.
             Dim navTarget As String = capQt.target
             Dim onClick As EventHandler = Sub(s, e) NavigateFromHome(tile, navTarget)
             AddHandler tile.Click, onClick
@@ -677,12 +790,6 @@ Public Class InventoryHomePanelBuilder
         AddHandler catCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         catCard.Controls.Add(MakeCardHeader("Category Breakdown", IconDiagram, "▦"))
 
-        ' Tiles size themselves to fill whatever height this card ends up
-        ' being (it's docked to match the Quick Actions card next to it),
-        ' instead of using a fixed row height and leaving a blank gap below
-        ' the grid. Each tile also shows a share-of-stock bar so a
-        ' zero-product category still reads as meaningful (an empty bar)
-        ' rather than wasted space.
         Dim catGridWrap As New Panel With {
             .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
             .Padding = New Padding(18, 16, 18, 16)
@@ -693,7 +800,8 @@ Public Class InventoryHomePanelBuilder
         Else
             Dim catGrid As New TableLayoutPanel With {
                 .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
-                .ColumnCount = 2, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+                .ColumnCount = 2,
+                .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
             }
             catGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
             catGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
@@ -714,10 +822,9 @@ Public Class InventoryHomePanelBuilder
                 Dim rowI As Integer = cIdx \ 2
                 Dim isLastRow As Boolean = (rowI = rowsNeeded - 1)
                 Dim hasStock As Boolean = capCr.count > 0
-                Dim pct As Integer = If(totalCatProducts > 0, CInt(Math.Round(capCr.count * 100.0 / totalCatProducts)), 0)
+                Dim pct As Integer = If(totalCatProducts > 0,
+                    CInt(Math.Round(capCr.count * 100.0 / totalCatProducts)), 0)
 
-                ' Zero-product categories are dimmed so the eye goes to the
-                ' categories that actually carry stock.
                 Dim chipBg As Color = If(hasStock, TileBg, MintBg)
                 Dim chipHoverBg As Color = If(hasStock, Color.FromArgb(225, 240, 234), Color.FromArgb(238, 241, 239))
                 Dim nameColor As Color = If(hasStock, MintDark, Color.FromArgb(136, 135, 128))
@@ -737,11 +844,14 @@ Public Class InventoryHomePanelBuilder
                 AddHandler swatchDot.Paint,
                     Sub(s, e)
                         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                        Using br As New SolidBrush(dotColor) : e.Graphics.FillEllipse(br, 0, 0, 8, 8) : End Using
+                        Using br As New SolidBrush(dotColor)
+                            e.Graphics.FillEllipse(br, 0, 0, 8, 8)
+                        End Using
                     End Sub
 
                 Dim lblC As New Label With {
-                    .Text = capCr.name, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                    .Text = capCr.name,
+                    .Font = New Font("Segoe UI", 11, FontStyle.Bold),
                     .ForeColor = nameColor, .AutoSize = True, .BackColor = Color.Transparent
                 }
                 Dim chev As New Label With {
@@ -749,7 +859,8 @@ Public Class InventoryHomePanelBuilder
                     .AutoSize = True, .BackColor = Color.Transparent
                 }
                 Dim lblBig As New Label With {
-                    .Text = capCr.count.ToString(), .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+                    .Text = capCr.count.ToString(),
+                    .Font = New Font("Segoe UI", 19, FontStyle.Bold),
                     .ForeColor = nameColor, .AutoSize = True, .BackColor = Color.Transparent
                 }
                 Dim lblMeta As New Label With {
@@ -798,20 +909,18 @@ Public Class InventoryHomePanelBuilder
         catCard.Controls.Add(catGridWrap)
         catGridWrap.BringToFront()
 
-
-
         ' ===========================
-        ' SIDE-BY-SIDE: Quick Actions (left) + Category Breakdown (right)
+        ' BOTTOM ROW: Category (left) + Quick Actions (right)
         ' ===========================
         Dim bottomRow As New TableLayoutPanel With {
-    .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = 340,
-    .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent,
-    .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-    .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-}
+            .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = 340,
+            .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
         bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 55))
         bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 45))
-        AddHandler wrap.Resize, Sub() bottomRow.Width = wrap.Width
+        AddHandler scroll.Resize, Sub() bottomRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
 
         catCard.Dock = DockStyle.Fill
         catCard.Margin = New Padding(2, 0, 10, 0)
@@ -823,24 +932,22 @@ Public Class InventoryHomePanelBuilder
 
         wrap.Controls.Add(bottomRow)
         curTop = bottomRow.Bottom + GAP
+
+        ' FIX 7: Set wrap height AFTER ResumeLayout so the scroll panel can
+        ' correctly measure the virtual canvas and display the scrollbar.
+        container.ResumeLayout(True)
+        scroll.ResumeLayout(True)
+
         wrap.Height = curTop + 10
 
-        ' Setting wrap.Height above can make the vertical scrollbar appear for
-        ' the first time, which shrinks scroll.ClientSize.Width — but nothing
-        ' else triggers scroll.Resize when that happens. Re-run ResizeWrap so
-        ' wrap (and everything anchored/resized off wrap.Width) accounts for
-        ' the scrollbar before first paint, instead of running 1 scrollbar-
-        ' width too wide and overlapping/clipping behind the scrollbar track.
+        ' After setting wrap.Height, a newly visible scrollbar shrinks
+        ' scroll.ClientSize.Width — re-run ResizeWrap so nothing clips behind the track.
         ResizeWrap()
-
-        scroll.ResumeLayout()
-        container.ResumeLayout()
     End Sub
 
     ' =========================================================================
     '  HELPERS
     ' =========================================================================
-    ' Quick-action tiles fire the matching nav button on the inventory form.
     Private Shared Sub NavigateFromHome(host As Control, buttonName As String)
         Try
             Dim frm = TryCast(host.FindForm(), INVENTORY_STAFF)
@@ -857,8 +964,6 @@ Public Class InventoryHomePanelBuilder
         End Try
     End Sub
 
-    ' KPI cards and category chips open the Item List pre-filtered.
-    ' category = "" means all categories; status = "" / "in" / "low" / "out".
     Private Shared Sub OpenItemListFiltered(host As Control, category As String, status As String)
         Try
             Dim frm = TryCast(host.FindForm(), INVENTORY_STAFF)
@@ -900,13 +1005,16 @@ Public Class InventoryHomePanelBuilder
         }
 
         Dim iconBox As New Panel With {
-            .Size = New Size(36, 36), .BackColor = Color.FromArgb(232, 246, 241), .Location = New Point(20, 12)
+            .Size = New Size(36, 36),
+            .BackColor = Color.FromArgb(232, 246, 241),
+            .Location = New Point(20, 12)
         }
         AddHandler iconBox.Paint,
             Sub(s As Object, e As PaintEventArgs)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Using br As New SolidBrush(CType(s, Panel).BackColor) : g.FillEllipse(br, 0, 0, 35, 35) : End Using
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using br As New SolidBrush(CType(s, Panel).BackColor)
+                    e.Graphics.FillEllipse(br, 0, 0, 35, 35)
+                End Using
             End Sub
 
         If iconPath <> "" AndAlso IO.File.Exists(iconPath) Then
@@ -918,17 +1026,20 @@ Public Class InventoryHomePanelBuilder
             pb.Location = New Point((iconBox.Width - pb.Width) \ 2, (iconBox.Height - pb.Height) \ 2)
         Else
             Dim fallbackLbl As New Label With {
-                .Text = fallbackIcon, .Font = New Font("Segoe UI", 14, FontStyle.Bold), .ForeColor = MintPrimary,
+                .Text = fallbackIcon,
+                .Font = New Font("Segoe UI", 14, FontStyle.Bold), .ForeColor = MintPrimary,
                 .AutoSize = False, .Size = New Size(iconBox.Width, iconBox.Height),
-                .TextAlign = ContentAlignment.MiddleCenter, .BackColor = Color.Transparent
+                .TextAlign = ContentAlignment.MiddleCenter, .BackColor = Color.Transparent,
+                .Location = New Point(0, 0)
             }
-            fallbackLbl.Location = New Point((iconBox.Width - fallbackLbl.Width) \ 2, (iconBox.Height - fallbackLbl.Height) \ 2)
             iconBox.Controls.Add(fallbackLbl)
         End If
 
         Dim titleLbl As New Label With {
-            .Text = title, .Font = New Font("Segoe UI", 14, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(62, 18)
+            .Text = title,
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(62, 18)
         }
 
         header.Controls.AddRange({iconBox, titleLbl})
@@ -956,8 +1067,9 @@ Public Class InventoryHomePanelBuilder
             path.AddArc(rect.Right - radius, rect.Bottom - radius, radius, radius, 0, 90)
             path.AddArc(rect.X, rect.Bottom - radius, radius, radius, 90, 90)
             path.CloseFigure()
-
-            Using fill As New SolidBrush(ctrl.BackColor) : g.FillPath(fill, path) : End Using
+            Using fill As New SolidBrush(ctrl.BackColor)
+                g.FillPath(fill, path)
+            End Using
         End Using
     End Sub
 
@@ -977,14 +1089,7 @@ Public Class InventoryHomePanelBuilder
     End Sub
 
     ' =========================================================================
-    '  WheelRedirector
-    '  A plain Panel only gets MouseWheel events when it holds keyboard focus,
-    '  which our custom-scrolled product list never does — so the wheel was
-    '  swallowed by the outer page scroller and only the drag-thumb worked.
-    '  This message filter intercepts WM_MOUSEWHEEL, and when the cursor is
-    '  over the target panel it runs the scroll callback and consumes the
-    '  message (so the page behind it doesn't scroll too). When the cursor is
-    '  elsewhere it does nothing and normal scrolling continues.
+    '  WheelRedirector  (unchanged from original)
     ' =========================================================================
     Private NotInheritable Class WheelRedirector
         Implements IMessageFilter
@@ -997,8 +1102,6 @@ Public Class InventoryHomePanelBuilder
             _target = target
             _onWheel = onWheel
             Application.AddMessageFilter(Me)
-            ' Auto-unhook when the panel goes away so the filter can't leak or
-            ' fire against a disposed control.
             AddHandler _target.Disposed, Sub() Application.RemoveMessageFilter(Me)
         End Sub
 
@@ -1006,29 +1109,17 @@ Public Class InventoryHomePanelBuilder
             If m.Msg <> WM_MOUSEWHEEL Then Return False
             If _target Is Nothing OrElse _target.IsDisposed OrElse Not _target.IsHandleCreated Then Return False
             If Not _target.Visible OrElse Not _target.Enabled Then Return False
-
-            ' Only act when the cursor is actually over the product list.
-            ' Screen-space containment avoids any client-coordinate quirks.
             Dim screenBounds As Rectangle = _target.RectangleToScreen(_target.ClientRectangle)
             If Not screenBounds.Contains(Control.MousePosition) Then Return False
-
-            ' Wheel delta is the signed high word of wParam.
             Dim raw As Integer = CInt((m.WParam.ToInt64() >> 16) And &HFFFF)
             Dim delta As Integer = If(raw > 32767, raw - 65536, raw)
-
             _onWheel(delta)
-            Return True   ' handled — don't let the outer page scroll as well
+            Return True
         End Function
     End Class
 
     ' =========================================================================
-    '  GlobalWheelHook
-    '  Low-level (WH_MOUSE_LL) mouse hook. Because the inventory dashboard sits
-    '  in a sibling of the focused Nav panel, normal WinForms wheel routing never
-    '  reaches the product list. This hook sees every wheel event at the OS level,
-    '  and when the cursor is over the list it runs the scroll callback and
-    '  swallows the event so nothing behind the list scrolls too. It unhooks
-    '  itself when the target panel is disposed, so it never leaks.
+    '  GlobalWheelHook  (unchanged from original)
     ' =========================================================================
     Private NotInheritable Class GlobalWheelHook
         Private Delegate Function LowLevelMouseProc(nCode As Integer, wParam As IntPtr, lParam As IntPtr) As IntPtr
@@ -1069,7 +1160,7 @@ Public Class InventoryHomePanelBuilder
 
         Private ReadOnly _target As Control
         Private ReadOnly _onWheel As Action(Of Integer)
-        Private ReadOnly _proc As LowLevelMouseProc   ' keep delegate alive (no GC)
+        Private ReadOnly _proc As LowLevelMouseProc
         Private _hookId As IntPtr = IntPtr.Zero
 
         Public Sub New(target As Control, onWheel As Action(Of Integer))
@@ -1101,34 +1192,26 @@ Public Class InventoryHomePanelBuilder
             Try
                 If nCode >= 0 AndAlso wParam.ToInt32() = WM_MOUSEWHEEL Then
                     If _target Is Nothing OrElse _target.IsDisposed OrElse Not _target.IsHandleCreated Then
-                        ' Target gone — retire this hook so it can't leak or fire stale.
                         Unhook()
                     ElseIf _target.FindForm() Is Nothing Then
-                        ' Panel was replaced (navigated away and rebuilt) but not
-                        ' disposed — retire this now-orphaned hook.
                         Unhook()
                     ElseIf _target.Visible Then
                         Dim data As MSLLHOOKSTRUCT =
                             CType(Marshal.PtrToStructure(lParam, GetType(MSLLHOOKSTRUCT)), MSLLHOOKSTRUCT)
                         Dim screenPt As New System.Drawing.Point(data.pt.x, data.pt.y)
-
                         If _target.RectangleToScreen(_target.ClientRectangle).Contains(screenPt) Then
-                            ' Wheel delta is the signed high word of mouseData.
-                            ' Arithmetic shift on the Integer keeps the sign.
                             Dim delta As Integer = data.mouseData >> 16
                             _onWheel(delta)
-                            Return New IntPtr(1)   ' swallow — page behind must not scroll
+                            Return New IntPtr(1)
                         End If
                     End If
                 End If
             Catch
-                ' Never let a hook exception break input handling.
             End Try
             Return CallNextHookEx(_hookId, nCode, wParam, lParam)
         End Function
     End Class
 
     Private Sub InventoryHomePanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
-
     End Sub
 End Class

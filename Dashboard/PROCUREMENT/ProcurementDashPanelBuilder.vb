@@ -227,7 +227,48 @@ Public Class ProcurementDashPanelBuilder
             .Text = SubtitleText(), .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 58)
         }
-        region.Controls.AddRange({lblTitle, lblSubtitle})
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() LoadDash(containerRef)
+        AddHandler region.Resize,
+            Sub()
+                btnRefresh.Left = region.Width - btnRefresh.Width - 24
+                btnRefresh.Top = 22
+            End Sub
+
+        region.Controls.AddRange({lblTitle, lblSubtitle, btnRefresh})
 
         ' ---- KPI row: 4 cards ----
         Dim kpiRow As New TableLayoutPanel With {
@@ -358,7 +399,12 @@ Public Class ProcurementDashPanelBuilder
                 rowsHost.Controls.Add(row)
                 y += 52
             Next
-            AddHandler rowsHost.Resize, Sub() ReflowRows(rowsHost)
+            Dim onPendingResize As EventHandler = Sub(s, e) ReflowRows(rowsHost)
+            AddHandler rowsHost.Resize, onPendingResize
+            AddHandler rowsHost.VisibleChanged,
+                Sub()
+                    If rowsHost.Visible Then ReflowRows(rowsHost)
+                End Sub
         End If
 
         Return card
@@ -500,7 +546,12 @@ Public Class ProcurementDashPanelBuilder
                 rowsHost.Controls.Add(row)
                 y += 52
             Next
-            AddHandler rowsHost.Resize, Sub() ReflowRows(rowsHost)
+            Dim onDueSoonResize As EventHandler = Sub(s, e) ReflowRows(rowsHost)
+            AddHandler rowsHost.Resize, onDueSoonResize
+            AddHandler rowsHost.VisibleChanged,
+                Sub()
+                    If rowsHost.Visible Then ReflowRows(rowsHost)
+                End Sub
         End If
 
         Return card
@@ -638,14 +689,7 @@ Public Class ProcurementDashPanelBuilder
         Return dt.ToString("MMM d, yyyy")
     End Function
 
-    Private Shared Function DueText(po As DuePO) As String
-        If Not po.HasExpected Then Return "no date"
-        Dim days As Integer = CInt(Math.Floor((po.ExpectedDate.Date - DateTime.Today).TotalDays))
-        If days < 0 Then Return "overdue " & Math.Abs(days) & "d"
-        If days = 0 Then Return "due today"
-        If days = 1 Then Return "due tomorrow"
-        Return "due in " & days & "d"
-    End Function
+
 
     Private Shared Function DueBadge(po As DuePO) As (text As String, fore As Color, back As Color)
         If Not po.HasExpected Then
@@ -701,15 +745,6 @@ Public Class ProcurementDashPanelBuilder
         Return 0
     End Function
 
-    Private Shared Function HexToColor(hex As String, fallback As Color) As Color
-        Try
-            If Not String.IsNullOrEmpty(hex) AndAlso hex.StartsWith("#") AndAlso hex.Length = 7 Then
-                Return ColorTranslator.FromHtml(hex)
-            End If
-        Catch
-        End Try
-        Return fallback
-    End Function
 
     Private Shared Function RoundRect(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim r As Integer = radius
@@ -746,16 +781,6 @@ Public Class ProcurementDashPanelBuilder
         row.Invalidate()
     End Sub
 
-    Private Shared Sub RoundControl(ctrl As Control, radius As Integer)
-        Dim path As New GraphicsPath()
-        Dim r As Integer = radius
-        path.AddArc(0, 0, r, r, 180, 90)
-        path.AddArc(ctrl.Width - r, 0, r, r, 270, 90)
-        path.AddArc(ctrl.Width - r, ctrl.Height - r, r, r, 0, 90)
-        path.AddArc(0, ctrl.Height - r, r, r, 90, 90)
-        path.CloseFigure()
-        ctrl.Region = New Region(path)
-    End Sub
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
         AddHandler lbl.Resize,

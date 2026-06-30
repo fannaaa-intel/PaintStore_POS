@@ -185,9 +185,71 @@ Public Class ReturnsPanelBuilder
             End Sub
         timer.Start()
 
-        bar.Controls.AddRange({lblTitle, lblSub, lblDateTime})
+        AddHandler bar.Disposed,
+            Sub()
+                timer.Stop()
+                timer.Dispose()
+            End Sub
+
+        ' ── Refresh button ──────────────────────────────────────────────────
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 34),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(0, 110, 92),
+            .ForeColor = Color.FromArgb(200, 240, 225),
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+
+        AddHandler btnRefresh.Paint,
+            Sub(s As Object, e As PaintEventArgs)
+                Dim b = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = b.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As New GraphicsPath()
+                    Dim r = 8
+                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
+                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
+                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
+                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
+                    path.CloseFigure()
+                    Using br As New SolidBrush(b.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(0, 90, 75)
+                btnRefresh.ForeColor = Color.White
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(0, 110, 92)
+                btnRefresh.ForeColor = Color.FromArgb(200, 240, 225)
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                If _mainContainer IsNot Nothing Then LoadReturns(_mainContainer)
+            End Sub
+
+        bar.Controls.AddRange({lblTitle, lblSub, lblDateTime, btnRefresh})
+
+
         AddHandler bar.Resize,
-            Sub() lblDateTime.Location = New Point(bar.Width - lblDateTime.Width - 18, (bar.Height - lblDateTime.Height) \ 2)
+               Sub()
+                   lblDateTime.Location = New Point(bar.Width - lblDateTime.Width - 18, (bar.Height - lblDateTime.Height) \ 2)
+                   btnRefresh.Left = lblDateTime.Left - btnRefresh.Width - 12
+                   btnRefresh.Top = (bar.Height - btnRefresh.Height) \ 2
+               End Sub
 
         Return bar
     End Function
@@ -682,9 +744,45 @@ Public Class ReturnsPanelBuilder
                 Return v
             End Function
 
-        _lblItems = AddStat(2, "ITEMS TO RETURN")
-        _lblSubtotal = AddStat(3, "REFUND SUBTOTAL")
-        _lblFee = AddStat(4, "RESTOCKING FEE")
+        ' ── Restocking fee % spinner ──────────────────────────────────────
+        Dim lblFeePct As New Label With {
+            .Text = "RESTOCKING FEE %", .Dock = DockStyle.Fill,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .Font = New Font("Segoe UI Semibold", 9), .ForeColor = SubText, .BackColor = Color.Transparent
+        }
+        Dim nudFee As New NumericUpDown With {
+            .Minimum = 0, .Maximum = 50, .Value = 0, .DecimalPlaces = 0,
+            .Font = New Font("Segoe UI", 10), .BackColor = TileBg, .ForeColor = TextDark,
+            .Dock = DockStyle.Fill, .Margin = New Padding(0, 2, 0, 4),
+            .TextAlign = HorizontalAlignment.Center
+        }
+        AddHandler nudFee.ValueChanged,
+            Sub()
+                _restockPct = nudFee.Value
+                Recalc()
+            End Sub
+
+        ' Insert fee spinner into stats grid before the stat rows.
+        ' We need to shift row indices — replace AddStat calls below.
+        stats.RowCount = 8
+        stats.RowStyles.Clear()
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 30))   ' row 0 — reason label
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 38))   ' row 1 — reason combo
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 26))   ' row 2 — fee % label
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 34))   ' row 3 — fee % spinner
+        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 33.0F)) ' row 4 — items
+        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 33.0F)) ' row 5 — subtotal
+        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 33.0F)) ' row 6 — fee amount
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 16))   ' row 7 — divider
+
+        stats.SetColumnSpan(lblFeePct, 2)
+        stats.Controls.Add(lblFeePct, 0, 2)
+        stats.SetColumnSpan(nudFee, 2)
+        stats.Controls.Add(nudFee, 0, 3)
+
+        _lblItems = AddStat(4, "ITEMS TO RETURN")
+        _lblSubtotal = AddStat(5, "REFUND SUBTOTAL")
+        _lblFee = AddStat(6, "RESTOCKING FEE")
 
         Dim div As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         AddHandler div.Paint,
@@ -694,7 +792,7 @@ Public Class ReturnsPanelBuilder
                 End Using
             End Sub
         stats.SetColumnSpan(div, 2)
-        stats.Controls.Add(div, 0, 5)
+        stats.Controls.Add(div, 0, 7)
 
         ' Total block
         Dim totalBlock As New BufferedPanel With {
@@ -1348,7 +1446,5 @@ Public Class ReturnsPanelBuilder
         Return btn
     End Function
 
-    Private Sub ReturnsPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
-    End Sub
 End Class

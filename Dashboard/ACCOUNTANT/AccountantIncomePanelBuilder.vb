@@ -1,16 +1,20 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
+Imports System.Linq
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
 '  AccountantIncomePanelBuilder  —  Screen 2: Income & Expenses
 '
-'  LAYOUT
-'  ------
-'    Top region  (Dock = Top, 124px) : title bar (72px) + pill/tab bar (52px)
-'    KPI bar     (Dock = Top, 140px) : Total Income | Total Expenses | Net  (3 cards)
-'    List area   (Dock = Fill)        : col header + scrollable rows
+'  FIXES APPLIED:
+'    1. Row click → AppModal.Show with sale/PO details
+'    2. Visible DB error panel instead of silent Debug.WriteLine
+'    3. Refresh button added to title bar
+'    4. Tab hover state fixed — uses shared _activeTab check, not captured bool
+'    5. AddHandler _rowsHost.Resize stacking fixed — RemoveHandler before Add
+'    6. Cancelled POs excluded from Expense total and rows
+'    7. Pagination added (PAGE_SIZE = 50) for both income and expense lists
 ' =============================================================================
 Public Class AccountantIncomePanelBuilder
 
@@ -27,6 +31,13 @@ Public Class AccountantIncomePanelBuilder
     Private Shared ReadOnly AccentOrange As Color = Color.FromArgb(232, 120, 30)
     Private Shared ReadOnly AccentRed As Color = Color.FromArgb(210, 60, 60)
     Private Shared ReadOnly Peso As String = ChrW(8369)
+
+    ' ── PAGING ───────────────────────────────────────────────────────────────
+    Private Const PAGE_SIZE As Integer = 50
+    Private Shared _currentPage As Integer = 0
+    Private Shared _lblPageInfo As Label
+    Private Shared _btnPrev As Button
+    Private Shared _btnNext As Button
 
     ' ── DATA MODELS ──────────────────────────────────────────────────────────
     Private Class IncomeRow
@@ -49,6 +60,7 @@ Public Class AccountantIncomePanelBuilder
     Private Shared _container As Panel
     Private Shared _filter As String = "month"
     Private Shared _activeTab As String = "income"
+    Private Shared _loadError As String = ""   ' FIX 2
 
     Private Shared _incomeRows As New List(Of IncomeRow)
     Private Shared _expenseRows As New List(Of ExpenseRow)
@@ -57,13 +69,15 @@ Public Class AccountantIncomePanelBuilder
 
     Private Shared _rowsHost As Panel
 
-    ' Filter keys — must match order of buttons
+    ' FIX 5: keep a reference to the reflow handler so we can remove it
+    Private Shared _reflowHandler As EventHandler = Nothing
+
+    ' Filter keys
     Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
     Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
     Private Shared _filterBtns() As Button
     Private Shared _activeFilterIdx As Integer = 2
 
-    ' Tab buttons
     Private Shared _tabIncome As Button
     Private Shared _tabExpenses As Button
 
@@ -76,6 +90,7 @@ Public Class AccountantIncomePanelBuilder
         _container = container
         _filter = filter
         _activeTab = tab
+        _currentPage = 0
         Dim idx As Integer = Array.IndexOf(FilterKeys, filter)
         _activeFilterIdx = If(idx >= 0, idx, 2)
         LoadData()
@@ -90,6 +105,7 @@ Public Class AccountantIncomePanelBuilder
         _expenseRows.Clear()
         _totalIncome = 0
         _totalExpenses = 0
+        _loadError = ""   ' FIX 2: reset each load
 
         Dim dateWhere As String = BuildDateWhere()
         Dim poDateWhere As String = BuildPoDateWhere()
@@ -120,13 +136,13 @@ Public Class AccountantIncomePanelBuilder
                     End Using
                 End Using
 
-                ' ── Expense rows ──
+                ' ── Expense rows — FIX 6: exclude Cancelled ──
                 Using cmd As New MySqlCommand(
                     "SELECT po.po_no, po.order_date, s.name AS sname, " &
                     "po.status, po.total_cost " &
                     "FROM purchase_orders po " &
                     "JOIN suppliers s ON po.supplier_id = s.supplier_id " &
-                    "WHERE 1=1" & poDateWhere &
+                    "WHERE po.status <> 'Cancelled'" & poDateWhere &
                     " ORDER BY po.order_date DESC", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
@@ -148,14 +164,17 @@ Public Class AccountantIncomePanelBuilder
                     _totalIncome = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
+                ' FIX 6: exclude Cancelled from expense total
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
-                    "WHERE 1=1" & poDateWhere, conn)
+                    "WHERE status <> 'Cancelled'" & poDateWhere, conn)
                     _totalExpenses = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
             End Using
         Catch ex As Exception
+            ' FIX 2: store error for visible display
+            _loadError = "Could not load data: " & ex.Message
             Debug.WriteLine("AccountantIncome LoadData error: " & ex.Message)
         End Try
     End Sub
@@ -186,21 +205,17 @@ Public Class AccountantIncomePanelBuilder
         _container.Controls.Clear()
         _container.BackColor = MintBg
 
-        ' ── Wrapper gives the white list card breathing room from the side nav.
-        '    Dock=Fill + Padding is the correct WinForms way — Margin is ignored
-        '    on docked controls.
         Dim tableWrapper As New Panel With {
             .Dock = DockStyle.Fill,
             .BackColor = MintBg,
             .Padding = New Padding(0)
         }
 
-        ' ── List area (Fill inside wrapper) — white card
         Dim listArea As New BufferedPanel With {
-    .Dock = DockStyle.Fill,
-    .BackColor = CardBg,
-    .Padding = New Padding(1)
-}
+            .Dock = DockStyle.Fill,
+            .BackColor = CardBg,
+            .Padding = New Padding(1)
+        }
         AddHandler listArea.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
         _rowsHost = New Panel With {
@@ -213,12 +228,15 @@ Public Class AccountantIncomePanelBuilder
         Dim colHdr As Panel = BuildColHeader()
         colHdr.Dock = DockStyle.Top
 
+        ' FIX 7: pager bar
+        Dim pagerBar As Panel = BuildPagerBar()
+        pagerBar.Dock = DockStyle.Bottom
 
-        listArea.Controls.Add(_rowsHost)
+        listArea.Controls.Add(pagerBar)
         listArea.Controls.Add(colHdr)
+        listArea.Controls.Add(_rowsHost)
         colHdr.BringToFront()
         _rowsHost.BringToFront()
-
 
         Dim spacerBottom As New Panel With {.Dock = DockStyle.Bottom, .Height = 16, .BackColor = MintBg}
         Dim spacerTop As New Panel With {.Dock = DockStyle.Top, .Height = 16, .BackColor = MintBg}
@@ -231,11 +249,9 @@ Public Class AccountantIncomePanelBuilder
         tableWrapper.Controls.Add(spacerLeft)
         tableWrapper.Controls.Add(spacerRight)
 
-        ' ── Top region: title bar + filter/tab bar + KPI cards stacked
         Dim topRegion As Panel = BuildTopRegion()
         topRegion.Dock = DockStyle.Top
 
-        ' Add Fill first, then stack Top controls (last added = topmost)
         _container.Controls.Add(tableWrapper)
         _container.Controls.Add(topRegion)
 
@@ -244,11 +260,7 @@ Public Class AccountantIncomePanelBuilder
     End Sub
 
     ' =========================================================================
-    '  TOP REGION  — title bar (72px) + filter/tab bar (52px) + KPI bar (165px) = 289px total
-    '  Mirrors AccountantDashPanelBuilder.BuildTopRegion exactly:
-    '    plain MintBg background, bold title, rounded pill filter buttons,
-    '    with Income/Expenses tab buttons added flush-right in the pill bar,
-    '    and 3 KPI cards (Total Income | Total Expenses | Net) below.
+    '  TOP REGION
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
         Const SIDE_PAD As Integer = 24
@@ -258,7 +270,7 @@ Public Class AccountantIncomePanelBuilder
             .AutoSize = False
         }
 
-        ' ── Row 1: Title bar (Dock=Top, Height=72) — same as DashPanel ───────
+        ' ── Row 1: Title bar (72px) — FIX 3: includes Refresh button ────────
         Dim titleBar As New Panel With {
             .Height = 72,
             .Dock = DockStyle.Top,
@@ -271,29 +283,71 @@ Public Class AccountantIncomePanelBuilder
             .AutoSize = True,
             .Location = New Point(SIDE_PAD, 16)
         }
-        titleBar.Controls.Add(lblTitle)
 
-        ' ── Row 2: Filter pills + Tab buttons (Dock=Top, Height=52) ──────────
+        ' FIX 3: Refresh button
+        Dim btnRefresh As New Button With {
+            .Text = "⟳  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = MintDark,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+
+        AddHandler titleBar.Resize,
+            Sub()
+                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
+                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
+            End Sub
+
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                Dim g = e.Graphics
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    g.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        AddHandler btnRefresh.MouseEnter,
+    Sub()
+        btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+        btnRefresh.ForeColor = MintDark
+        btnRefresh.Invalidate()
+    End Sub
+        AddHandler btnRefresh.MouseLeave,
+    Sub()
+        btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+        btnRefresh.ForeColor = SubText
+        btnRefresh.Invalidate()
+    End Sub
+        AddHandler btnRefresh.Click, Sub() LoadIncome(_container, _filter, _activeTab)
+
+        titleBar.Controls.Add(lblTitle)
+        titleBar.Controls.Add(btnRefresh)
+
+        ' ── Row 2: Filter pills + Tab buttons (52px) ─────────────────────────
         Dim pillBar As New Panel With {
             .Height = 52,
             .Dock = DockStyle.Top,
             .BackColor = Color.Transparent
         }
 
-        ' Tab buttons — Income | Expenses (flush right, same pill style)
-        _tabIncome = MakeTabButton("Income", _activeTab = "income", False)
-        _tabExpenses = MakeTabButton("Expenses", _activeTab = "expenses", True)
+        ' FIX 4: tabs created WITHOUT capturing isActive as a bool —
+        '         hover handlers check _activeTab at call time instead
+        _tabIncome = MakeTabButton("Income", "income")
+        _tabExpenses = MakeTabButton("Expenses", "expenses")
 
-        AddHandler _tabIncome.Click,
-            Sub()
-                LoadIncome(_container, _filter, "income")
-            End Sub
-        AddHandler _tabExpenses.Click,
-            Sub()
-                LoadIncome(_container, _filter, "expenses")
-            End Sub
+        AddHandler _tabIncome.Click, Sub() LoadIncome(_container, _filter, "income")
+        AddHandler _tabExpenses.Click, Sub() LoadIncome(_container, _filter, "expenses")
 
-        ' Filter pills (flush left) — matches DashPanel exactly
         ReDim _filterBtns(FilterLabels.Length - 1)
         Dim filterHost As New FlowLayoutPanel With {
             .FlowDirection = FlowDirection.LeftToRight,
@@ -367,7 +421,6 @@ Public Class AccountantIncomePanelBuilder
 
         pillBar.Controls.AddRange({filterHost, _tabIncome, _tabExpenses})
 
-        ' Position tab buttons flush-right in the pill bar
         Dim PositionTabs As Action =
             Sub()
                 _tabExpenses.Left = pillBar.Width - _tabExpenses.Width - SIDE_PAD
@@ -378,28 +431,25 @@ Public Class AccountantIncomePanelBuilder
 
         AddHandler pillBar.Resize, Sub() PositionTabs()
 
-        ' ── Row 3: KPI cards (Dock=Top, Height=165) ─────────────────────────
+        ' ── Row 3: KPI cards (165px) ─────────────────────────────────────────
         Dim kpiBar As Panel = BuildKpiBar()
         kpiBar.Dock = DockStyle.Top
 
-        ' WinForms Dock=Top: last added = topmost.
-        ' Add kpiBar first (bottom), pillBar second (middle), titleBar last (top).
         region.Controls.Add(kpiBar)
         region.Controls.Add(pillBar)
         region.Controls.Add(titleBar)
 
-        ' Total region height = titleBar(72) + pillBar(52) + kpiBar(165) = 289
         region.Height = 72 + 52 + 165
-
         Return region
     End Function
 
     ' =========================================================================
-    '  TAB BUTTON FACTORY  — styled like dashboard filter buttons but wider
+    '  TAB BUTTON FACTORY — FIX 4: no captured isActive bool
     ' =========================================================================
-    Private Shared Function MakeTabButton(text As String, isActive As Boolean,
-                                           isExpenses As Boolean) As Button
-        Dim activeColor As Color = If(isExpenses, AccentOrange, MintPrimary)
+    Private Shared Function MakeTabButton(text As String, tabKey As String) As Button
+        Dim isIncome As Boolean = (tabKey = "income")
+        Dim activeColor As Color = If(isIncome, MintPrimary, AccentOrange)
+
         Dim b As New Button With {
             .Text = text,
             .FlatStyle = FlatStyle.Flat,
@@ -409,9 +459,10 @@ Public Class AccountantIncomePanelBuilder
         }
         b.FlatAppearance.BorderSize = 0
 
-        Dim applyStyle As Action(Of Boolean) =
-            Sub(active As Boolean)
-                If active Then
+        Dim applyStyle As Action =
+            Sub()
+                Dim isActive As Boolean = (_activeTab = tabKey)
+                If isActive Then
                     b.BackColor = activeColor
                     b.ForeColor = Color.White
                     b.Font = New Font("Segoe UI Semibold", 9.5F)
@@ -423,7 +474,7 @@ Public Class AccountantIncomePanelBuilder
                 b.Invalidate()
             End Sub
 
-        applyStyle(isActive)
+        applyStyle()
 
         AddHandler b.Paint,
             Sub(s, e)
@@ -440,9 +491,10 @@ Public Class AccountantIncomePanelBuilder
                     TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
 
+        ' FIX 4: hover checks _activeTab live instead of captured bool
         AddHandler b.MouseEnter,
             Sub()
-                If Not isActive Then
+                If _activeTab <> tabKey Then
                     b.BackColor = Color.FromArgb(210, 240, 235)
                     b.ForeColor = MintDark
                     b.Invalidate()
@@ -450,7 +502,7 @@ Public Class AccountantIncomePanelBuilder
             End Sub
         AddHandler b.MouseLeave,
             Sub()
-                If Not isActive Then
+                If _activeTab <> tabKey Then
                     b.BackColor = Color.FromArgb(220, 235, 232)
                     b.ForeColor = SubText
                     b.Invalidate()
@@ -506,11 +558,11 @@ Public Class AccountantIncomePanelBuilder
         End If
 
         AddHandler hdr.Paint,
-    Sub(s, e)
-        Using pen As New Pen(RowDivider, 1)
-            e.Graphics.DrawLine(pen, 20, hdr.Height - 1, hdr.Width - 20, hdr.Height - 1)
-        End Using
-    End Sub
+            Sub(s, e)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, hdr.Height - 1, hdr.Width - 20, hdr.Height - 1)
+                End Using
+            End Sub
 
         Return hdr
     End Function
@@ -529,8 +581,7 @@ Public Class AccountantIncomePanelBuilder
     End Function
 
     ' =========================================================================
-    '  KPI BAR  — 3 cards: Total Income | Total Expenses | Net
-    '  Mirrors DashPanel MakeKpiCard style exactly. Docked Top, height 165px.
+    '  KPI BAR
     ' =========================================================================
     Private Shared Function BuildKpiBar() As Panel
         Const SIDE_PAD As Integer = 24
@@ -573,7 +624,7 @@ Public Class AccountantIncomePanelBuilder
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim c1 = MakeKpiCard("Total Income", Peso & _totalIncome.ToString("N2"), MintPrimary, "From completed sales")
-        Dim c2 = MakeKpiCard("Total Expenses", Peso & _totalExpenses.ToString("N2"), AccentOrange, "From purchase orders")
+        Dim c2 = MakeKpiCard("Total Expenses", Peso & _totalExpenses.ToString("N2"), AccentOrange, "From purchase orders (excl. cancelled)")
         Dim c3 = MakeKpiCard("Net Profit", netSign & Peso & Math.Abs(net).ToString("N2"), netColor, netSub)
 
         c1.Margin = New Padding(0, 0, 6, 0)
@@ -616,17 +667,156 @@ Public Class AccountantIncomePanelBuilder
     End Function
 
     ' =========================================================================
-    '  POPULATE ROWS
+    '  FIX 7: PAGER BAR
+    ' =========================================================================
+    Private Shared Function BuildPagerBar() As Panel
+        Dim wrapper As New Panel With {
+            .Height = 52,
+            .BackColor = Color.Transparent
+        }
+
+        AddHandler wrapper.Paint,
+            Sub(s, e)
+                Using dp As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(dp, 0, 0, wrapper.Width, 0)
+                End Using
+            End Sub
+
+        Dim bar As New Panel With {
+            .BackColor = Color.Transparent,
+            .Height = 44,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
+        }
+
+        AddHandler wrapper.Resize,
+            Sub()
+                bar.Left = 0
+                bar.Width = wrapper.Width
+                bar.Top = 0
+                bar.Height = wrapper.Height
+            End Sub
+
+        _btnPrev = New Button With {
+            .Text = "‹",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(32, 32),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = MintDark,
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .TextAlign = ContentAlignment.MiddleCenter
+        }
+        _btnPrev.FlatAppearance.BorderSize = 0
+
+        _btnNext = New Button With {
+            .Text = "›",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(32, 32),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = MintDark,
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .TextAlign = ContentAlignment.MiddleCenter
+        }
+        _btnNext.FlatAppearance.BorderSize = 0
+
+        _lblPageInfo = New Label With {
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .BackColor = Color.Transparent
+        }
+
+        AddHandler bar.Resize,
+            Sub()
+                Dim cx As Integer = bar.Width \ 2
+                _btnPrev.Left = cx - _btnPrev.Width - _lblPageInfo.Width \ 2 - 8
+                _btnPrev.Top = (bar.Height - _btnPrev.Height) \ 2
+                _lblPageInfo.Left = cx - _lblPageInfo.Width \ 2
+                _lblPageInfo.Top = (bar.Height - _lblPageInfo.Height) \ 2
+                _btnNext.Left = cx + _lblPageInfo.Width \ 2 + 8
+                _btnNext.Top = (bar.Height - _btnNext.Height) \ 2
+                bar.Invalidate()
+            End Sub
+
+        AddHandler _btnPrev.Click,
+            Sub()
+                If _currentPage > 0 Then
+                    _currentPage -= 1
+                    PopulateRows()
+                End If
+            End Sub
+        AddHandler _btnNext.Click,
+            Sub()
+                Dim total As Integer = If(_activeTab = "income", _incomeRows.Count, _expenseRows.Count)
+                Dim totalPages As Integer = Math.Max(1, CInt(Math.Ceiling(total / PAGE_SIZE)))
+                If _currentPage < totalPages - 1 Then
+                    _currentPage += 1
+                    PopulateRows()
+                End If
+            End Sub
+
+        bar.Controls.AddRange({_btnPrev, _lblPageInfo, _btnNext})
+        wrapper.Controls.Add(bar)
+        Return wrapper
+    End Function
+
+    Private Shared Sub UpdatePager(totalRows As Integer)
+        If _lblPageInfo Is Nothing Then Return
+        Dim totalPages As Integer = Math.Max(1, CInt(Math.Ceiling(totalRows / PAGE_SIZE)))
+        _lblPageInfo.Text = $"Page {_currentPage + 1} of {totalPages}  ({totalRows} total)"
+        _btnPrev.Enabled = (_currentPage > 0)
+        _btnNext.Enabled = (_currentPage < totalPages - 1)
+        ' Re-layout so button positions recalculate around new label width
+        If _lblPageInfo.Parent IsNot Nothing Then
+            _lblPageInfo.Parent.PerformLayout()
+        End If
+    End Sub
+
+    ' =========================================================================
+    '  POPULATE ROWS — FIX 2, 5, 7
     ' =========================================================================
     Private Shared Sub PopulateRows()
         _rowsHost.Controls.Clear()
 
+        ' FIX 5: remove previous Resize handler before adding new one
+        If _reflowHandler IsNot Nothing Then
+            RemoveHandler _rowsHost.Resize, _reflowHandler
+            _reflowHandler = Nothing
+        End If
+
+        ' FIX 2: show DB error visibly
+        If _loadError <> "" Then
+            Dim errPanel As New Panel With {
+                .Height = 80, .Dock = DockStyle.Top,
+                .BackColor = Color.FromArgb(255, 240, 240)
+            }
+            Dim errIcon As New Label With {
+                .Text = "⚠",
+                .Font = New Font("Segoe UI", 14),
+                .ForeColor = AccentRed, .AutoSize = True,
+                .Location = New Point(24, 22), .BackColor = Color.Transparent
+            }
+            Dim errLbl As New Label With {
+                .Text = _loadError,
+                .Font = New Font("Segoe UI", 10),
+                .ForeColor = AccentRed, .AutoSize = True,
+                .Location = New Point(50, 26), .BackColor = Color.Transparent
+            }
+            errPanel.Controls.AddRange({errIcon, errLbl})
+            _rowsHost.Controls.Add(errPanel)
+            UpdatePager(0)
+            Return
+        End If
+
         If _activeTab = "income" Then
             If _incomeRows.Count = 0 Then
                 _rowsHost.Controls.Add(BuildEmptyRow("No income records found for this period."))
+                UpdatePager(0)
             Else
+                Dim pageRows = _incomeRows.Skip(_currentPage * PAGE_SIZE).Take(PAGE_SIZE).ToList()
                 Dim y As Integer = 4
-                For Each row In _incomeRows
+                For Each row In pageRows
                     Dim r As Panel = BuildIncomeRow(row, 64)
                     r.Location = New Point(0, y)
                     r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
@@ -634,14 +824,18 @@ Public Class AccountantIncomePanelBuilder
                     r.Width = _rowsHost.ClientSize.Width - 4
                     y += 64
                 Next
-                AddHandler _rowsHost.Resize, Sub() ReflowRows(_rowsHost)
+                _reflowHandler = Sub(s, e) ReflowRows(_rowsHost)
+                AddHandler _rowsHost.Resize, _reflowHandler
+                UpdatePager(_incomeRows.Count)
             End If
         Else
             If _expenseRows.Count = 0 Then
                 _rowsHost.Controls.Add(BuildEmptyRow("No expense records found for this period."))
+                UpdatePager(0)
             Else
+                Dim pageRows = _expenseRows.Skip(_currentPage * PAGE_SIZE).Take(PAGE_SIZE).ToList()
                 Dim y As Integer = 4
-                For Each row In _expenseRows
+                For Each row In pageRows
                     Dim r As Panel = BuildExpenseRow(row, 64)
                     r.Location = New Point(0, y)
                     r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
@@ -649,16 +843,20 @@ Public Class AccountantIncomePanelBuilder
                     r.Width = _rowsHost.ClientSize.Width - 4
                     y += 64
                 Next
-                AddHandler _rowsHost.Resize, Sub() ReflowRows(_rowsHost)
+                _reflowHandler = Sub(s, e) ReflowRows(_rowsHost)
+                AddHandler _rowsHost.Resize, _reflowHandler
+                UpdatePager(_expenseRows.Count)
             End If
         End If
     End Sub
 
     ' =========================================================================
-    '  INCOME ROW
+    '  INCOME ROW — FIX 1: row click uses AppModal
     ' =========================================================================
     Private Shared Function BuildIncomeRow(row As IncomeRow, height As Integer) As Panel
-        Dim p As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+        Dim p As New BufferedPanel With {
+            .Height = height, .BackColor = Color.Transparent, .Cursor = Cursors.Hand
+        }
         AddHandler p.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
@@ -679,9 +877,9 @@ Public Class AccountantIncomePanelBuilder
             End Sub
 
         Dim lblNo As New Label With {
-            .Text = row.SaleNo, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
-        }
+    .Text = row.SaleNo, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+    .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
+}
         Dim lblDate As New Label With {
             .Text = row.SaleDate.ToString("MMM dd, yyyy"),
             .Font = New Font("Segoe UI", 11),
@@ -715,15 +913,37 @@ Public Class AccountantIncomePanelBuilder
                 lblTotal.Left = w - lblTotal.Width - 24 : lblTotal.Top = (height - lblTotal.Height) \ 2
             End Sub
 
+        ' FIX 1: click opens AppModal
+        Dim openDetail As Action =
+            Sub()
+                Dim sb As New System.Text.StringBuilder()
+                sb.AppendLine($"Sale No  : {row.SaleNo}")
+                sb.AppendLine($"Date     : {row.SaleDate:MMM dd, yyyy  hh:mm tt}")
+                sb.AppendLine($"Cashier  : {row.Cashier}")
+                sb.AppendLine($"Method   : {row.PayMethod}")
+                sb.AppendLine($"Total    : {Peso}{row.Total:N2}")
+                AppModal.Show(sb.ToString(),
+                              caption:=$"Sale Details — {row.SaleNo}",
+                              buttons:=MessageBoxButtons.OK,
+                              icon:=MessageBoxIcon.Information)
+            End Sub
+
+        AddHandler p.Click, Sub() openDetail()
+        For Each ctrl As Control In p.Controls
+            AddHandler ctrl.Click, Sub() openDetail()
+        Next
+
         PropagateHover(p)
         Return p
     End Function
 
     ' =========================================================================
-    '  EXPENSE ROW
+    '  EXPENSE ROW — FIX 1: row click uses AppModal
     ' =========================================================================
     Private Shared Function BuildExpenseRow(row As ExpenseRow, height As Integer) As Panel
-        Dim p As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
+        Dim p As New BufferedPanel With {
+            .Height = height, .BackColor = Color.Transparent, .Cursor = Cursors.Hand
+        }
         AddHandler p.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
@@ -787,6 +1007,26 @@ Public Class AccountantIncomePanelBuilder
                 badge.Left = CInt(w * 0.62) : badge.Top = (height - badge.Height) \ 2
                 lblAmount.Left = w - lblAmount.Width - 24 : lblAmount.Top = (height - lblAmount.Height) \ 2
             End Sub
+
+        ' FIX 1: click opens AppModal
+        Dim openDetail As Action =
+            Sub()
+                Dim sb As New System.Text.StringBuilder()
+                sb.AppendLine($"PO No    : {row.PoNo}")
+                sb.AppendLine($"Date     : {row.OrderDate:MMM dd, yyyy}")
+                sb.AppendLine($"Supplier : {row.Supplier}")
+                sb.AppendLine($"Status   : {row.Status}")
+                sb.AppendLine($"Amount   : {Peso}{row.TotalCost:N2}")
+                AppModal.Show(sb.ToString(),
+                              caption:=$"PO Details — {row.PoNo}",
+                              buttons:=MessageBoxButtons.OK,
+                              icon:=MessageBoxIcon.Information)
+            End Sub
+
+        AddHandler p.Click, Sub() openDetail()
+        For Each ctrl As Control In p.Controls
+            AddHandler ctrl.Click, Sub() openDetail()
+        Next
 
         PropagateHover(p)
         Return p

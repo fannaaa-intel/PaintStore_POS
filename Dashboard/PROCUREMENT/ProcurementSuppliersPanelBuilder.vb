@@ -171,15 +171,55 @@ Public Class ProcurementSuppliersPanelBuilder
                 btnAdd.Invalidate()
             End Sub
 
-        region.Controls.AddRange({lblTitle, lblSub, btnAdd})
+        Dim btnRefresh As New Button With {
+    .Text = "↻  Refresh",
+    .FlatStyle = FlatStyle.Flat,
+    .Cursor = Cursors.Hand,
+    .Size = New Size(100, 34),
+    .Font = New Font("Segoe UI", 9.5F),
+    .BackColor = Color.FromArgb(220, 235, 232),
+    .ForeColor = SubText,
+    .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+}
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+    Sub(s, e)
+        Dim bb = CType(s, Button)
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+        Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+        Using br As New SolidBrush(bb.BackColor)
+            e.Graphics.FillRoundedRectangle(br, rect, 8)
+        End Using
+        TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+            TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+    End Sub
+        AddHandler btnRefresh.MouseEnter,
+    Sub()
+        btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+        btnRefresh.ForeColor = MintDark
+        btnRefresh.Invalidate()
+    End Sub
+        AddHandler btnRefresh.MouseLeave,
+    Sub()
+        btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+        btnRefresh.ForeColor = SubText
+        btnRefresh.Invalidate()
+    End Sub
+        AddHandler btnRefresh.Click, Sub() RenderList()
+
+        region.Controls.AddRange({lblTitle, lblSub, btnAdd, btnRefresh})
 
         AddHandler region.Resize,
-            Sub()
-                btnAdd.Top = 22
-                btnAdd.Left = region.Width - 24 - btnAdd.Width
-            End Sub
+    Sub()
+        btnAdd.Top = 22
+        btnAdd.Left = region.Width - 24 - btnAdd.Width
+        btnRefresh.Top = 22
+        btnRefresh.Left = btnAdd.Left - 8 - btnRefresh.Width
+    End Sub
         btnAdd.Top = 22
         btnAdd.Left = 700
+        btnRefresh.Top = 22
+        btnRefresh.Left = 584
 
         Return region
     End Function
@@ -798,12 +838,14 @@ Public Class ProcurementSuppliersPanelBuilder
         }
 
         ' ── PO history card ───────────────────────────────────────────────────
-
-        Dim histHeight As Integer = 68 + Math.Max(1, history.Count) * 58 + 12
+        Dim histHeight As Integer = 68 + Math.Max(1, history.Count) * 62 + 12
         Dim histCard As New BufferedPanel With {
             .Height = histHeight, .BackColor = CardBg, .Dock = DockStyle.Top
         }
-        AddHandler histCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        AddHandler histCard.Paint,
+             Sub(s, e)
+                 PanelRenderer.Draw(CType(s, Panel), e, False)
+             End Sub
 
         ' Header: title + count badge
         Dim lblHist As New Label With {
@@ -855,9 +897,14 @@ Public Class ProcurementSuppliersPanelBuilder
                     histBadge.Left = histCard.Width - histBadge.Width - 16
                     histBadge.Top = 14
                 End If
+                Dim w As Integer = histCard.ClientSize.Width - 28
+                For Each c As Control In histCard.Controls
+                    If TypeOf c Is Panel Then
+                        c.Left = 14
+                        c.Width = w
+                    End If
+                Next
             End Sub
-
-
 
         If history.Count = 0 Then
             histCard.Controls.Add(New Label With {
@@ -869,28 +916,26 @@ Public Class ProcurementSuppliersPanelBuilder
             Dim yh As Integer = 52
             For Each h In history
                 Dim r As Panel = BuildHistoryRow(h, 54)
-                r.Location = New Point(0, yh)
-                r.Width = histCard.ClientSize.Width - 4
+                r.Location = New Point(14, yh)
+                r.Width = histCard.ClientSize.Width - 28
                 r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 histCard.Controls.Add(r)
-                yh += 54
+                yh += 58
             Next
-            AddHandler histCard.Resize,
-                Sub()
-                    Dim w As Integer = histCard.ClientSize.Width - 4
-                    For Each c As Control In histCard.Controls
-                        If TypeOf c Is Panel Then c.Width = w
-                    Next
-                End Sub
+
         End If
 
         Dim spacer2 As New Panel With {.Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
 
         ' ── Products chips card ──────────────────────────────────────────────────
+        Dim chipsCardH As Integer = If(products.Count = 0, 100, 54 + Math.Min(3, CInt(Math.Ceiling(products.Count / 4.0))) * 38 + 16)
         Dim chipsCard As New BufferedPanel With {
-            .Height = 130, .BackColor = CardBg, .Dock = DockStyle.Top
+            .Height = chipsCardH, .BackColor = CardBg, .Dock = DockStyle.Top
         }
-        AddHandler chipsCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        AddHandler chipsCard.Paint,
+             Sub(s, e)
+                 PanelRenderer.Draw(CType(s, Panel), e, False)
+             End Sub
 
         ' Header: title + count badge
         Dim lblChipsTitle As New Label With {
@@ -915,7 +960,7 @@ Public Class ProcurementSuppliersPanelBuilder
     End Sub
 
         Dim chipFlow As New FlowLayoutPanel With {
-            .Location = New Point(18, 50), .AutoSize = False, .Height = 64,
+            .Location = New Point(18, 50), .AutoSize = False, .Height = chipsCardH - 58,
             .BackColor = Color.Transparent, .WrapContents = True,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top,
             .AutoScroll = True
@@ -1305,12 +1350,7 @@ Public Class ProcurementSuppliersPanelBuilder
                         e.Graphics.DrawPath(pen, path)
                     End Using
                 End Using
-                ' Left accent bar — full tile height
-                Using br As New SolidBrush(accentClr)
-                    Using path As GraphicsPath = RoundRect(New Rectangle(0, 3, 5, row.Height - 6), 3)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
+
             End Sub
 
         Dim lblPo As New Label With {
@@ -1420,6 +1460,8 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
+            AppModal.Show("Could not load supplier products:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
     End Function
@@ -1449,6 +1491,8 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
+            AppModal.Show("Could not load supplier purchase orders:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
     End Function
@@ -1557,10 +1601,6 @@ Public Class ProcurementSuppliersPanelBuilder
             End Sub
     End Sub
 
-    <System.Runtime.InteropServices.DllImport("user32.dll", CharSet:=System.Runtime.InteropServices.CharSet.Unicode)>
-    Private Shared Function SendMessage(hWnd As IntPtr, msg As Integer, wParam As IntPtr, lParam As String) As IntPtr
-    End Function
-    Private Const EM_SETCUEBANNER As Integer = &H1501
 
     Private Sub ProcurementSuppliersPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 

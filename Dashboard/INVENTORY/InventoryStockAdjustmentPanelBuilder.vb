@@ -142,13 +142,12 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' ---- Scrollable body so the form + history fit any window ----
         Dim scroller As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = True, .Padding = New Padding(24, 16, 24, 24)
+            .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = True, .Padding = New Padding(0)
         }
-
-        Dim body As New Panel With {.Location = New Point(24, 16), .BackColor = Color.Transparent, .AutoSize = False}
+        Dim body As New Panel With {.Location = New Point(0, 0), .BackColor = Color.Transparent, .AutoSize = False, .AutoScroll = False}
         body.Width = Math.Max(720, container.ClientSize.Width - 48)
+        body.Location = New Point(24, 16)
         AddHandler scroller.Resize, Sub() body.Width = Math.Max(720, scroller.ClientSize.Width - 48)
-
         ' ---- Left column: target + form. Right column: history. ----
         Dim columns As New TableLayoutPanel With {
             .Location = New Point(0, 8), .ColumnCount = 2, .RowCount = 1,
@@ -181,8 +180,15 @@ Public Class InventoryStockAdjustmentPanelBuilder
         columns.Controls.Add(leftCol, 0, 0)
         columns.Controls.Add(rightCol, 1, 0)
         body.Controls.Add(columns)
-        body.Height = 660
+        body.Height = Math.Max(660, 140 + 12 + 500 + 24)  ' targetHost + spacer + formHost + padding
         scroller.Controls.Add(body)
+
+        ' Grow body height whenever columns auto-size taller than the fixed estimate
+        AddHandler columns.Resize,
+            Sub()
+                Dim needed As Integer = columns.Top + columns.Height + 24
+                If needed > body.Height Then body.Height = needed
+            End Sub
 
         Dim header As Panel = BuildHeader()
         header.Dock = DockStyle.Top
@@ -208,7 +214,62 @@ Public Class InventoryStockAdjustmentPanelBuilder
             .Text = "Reconcile stock counts and record losses " & ChrW(8226) & " every change is logged",
             .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 62)
         }
-        region.Controls.AddRange({lblTitle, lblSub})
+
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 34),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = bb.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path = RoundRect(rect, 8)
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                If containerRef IsNot Nothing Then
+                    Dim capId As Integer = If(selected IsNot Nothing, selected.Id, 0)
+                    LoadStockAdjustment(containerRef, capId)
+                End If
+            End Sub
+
+        region.Controls.AddRange({lblTitle, lblSub, btnRefresh})
+
+        Dim PositionRefresh As Action =
+            Sub()
+                btnRefresh.Top = (region.Height - btnRefresh.Height) \ 2
+                btnRefresh.Left = region.Width - btnRefresh.Width - 24
+            End Sub
+        AddHandler region.Resize, Sub() PositionRefresh()
+        PositionRefresh()
+
         Return region
     End Function
 

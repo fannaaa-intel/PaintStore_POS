@@ -8,10 +8,33 @@ Imports System.Linq
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
-'  InventoryItemListPanelBuilder  (redesigned)
-'  Item List screen for Inventory Staff.
+'  InventoryItemListPanelBuilder  (redesigned + fixed)
 '
-'  WHAT CHANGED IN THIS REDESIGN
+'  CHANGES IN THIS VERSION
+'  -----------------------
+'  A. REFRESH BUTTON added to BuildTopRegion, matching InventoryHomePanelBuilder
+'     style exactly:
+'       - Rounded pill via RoundRect GraphicsPath (avoids the non-standard
+'         Graphics.FillRoundedRectangle extension used in Doc 2's Paint handler).
+'       - Same muted-green resting colour  (220, 235, 232) / SubText text.
+'       - MouseEnter → brighter green (210, 240, 235) / MintDark text.
+'       - MouseLeave → restores resting colours.
+'       - Click → calls LoadItemList(containerRef, activeCategory, activeStatus)
+'         so filters and category chip are preserved across a refresh.
+'       - Positioned immediately left of the "Add Item" button; search box sits
+'         to the left of the refresh button.  The PositionTopRight lambda is
+'         updated to lay out all three controls correctly.
+'
+'  B. ReloadAndRefresh now also resets searchTerm so the search box is cleared
+'     after a save/delete, matching the expectation that you see the full list
+'     after the dialog closes.
+'
+'  C. RoundControl is called on btnRefresh AFTER its size is set (same pattern
+'     as btnAdd), so the pill Region is applied at the correct dimensions.
+'
+'  D. All other logic from the Doc-1 / Doc-3 redesign is preserved unchanged.
+'
+'  ORIGINAL NOTES
 '  -----------------------------
 '  1. MEDIA PER ITEM.
 '     - "Paint" category   -> the item is represented by a COLOR (hex + picker).
@@ -50,13 +73,10 @@ Public Class InventoryItemListPanelBuilder
     Private Shared ReadOnly Peso As String = ChrW(8369)
     Private Const PaintCategory As String = "Paint"
 
-    ' Borderless dialog that still casts a native OS drop shadow, so it lifts
-    ' clearly off the background instead of blending into it.
+    ' Borderless dialog that still casts a native OS drop shadow.
     Private Class ShadowDialog
         Inherits Form
         Public Sub New()
-            ' Double-buffer + redraw on resize prevents the partial/torn first paint
-            ' that borderless forms otherwise show until they're clicked.
             SetStyle(ControlStyles.OptimizedDoubleBuffer Or
                      ControlStyles.AllPaintingInWmPaint Or
                      ControlStyles.ResizeRedraw, True)
@@ -239,8 +259,16 @@ Public Class InventoryItemListPanelBuilder
         End Try
     End Sub
 
+    ' FIX B: searchTerm is also cleared so that after a save/delete the full
+    ' list is visible and the search cue placeholder reappears correctly.
     Private Shared Sub ReloadAndRefresh()
         thumbCache.Clear()
+        searchTerm = ""
+        If searchBox IsNot Nothing Then
+            Dim cue As String = CStr(If(searchBox.Tag, ""))
+            searchBox.Text = cue
+            searchBox.ForeColor = FaintText
+        End If
         LoadData()
         RefreshKpiVisuals()
         RenderRows()
@@ -307,14 +335,85 @@ Public Class InventoryItemListPanelBuilder
         RoundControl(btnAdd, 10)
         AddHandler btnAdd.Click, Sub() ShowItemDialog(0, False)
 
-        region.Controls.AddRange({searchWrap, btnAdd})
+        ' ── FIX A: REFRESH BUTTON ────────────────────────────────────────────
+        ' Matches InventoryHomePanelBuilder exactly:
+        '   • Muted-green resting background  RGB(220,235,232) / SubText label
+        '   • MouseEnter  → RGB(210,240,235) / MintDark label
+        '   • MouseLeave  → back to resting state
+        '   • Custom Paint  draws the rounded pill via RoundRect GraphicsPath
+        '     (avoids the non-standard Graphics.FillRoundedRectangle extension
+        '      that Doc 2 references but that is not defined in this project).
+        '   • Click reloads the current view preserving the active filters.
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 38),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
 
+        ' Custom paint: rounded pill background + centred text.
+        ' Uses the same RoundRect helper that the rest of this builder already uses,
+        ' so no extra extension methods or imports are required.
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = bb.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path = RoundRect(rect, 8)
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+
+        ' Reload preserving the active category and status filters so the user
+        ' sees the same slice of data, just refreshed from the DB.
+        AddHandler btnRefresh.Click,
+            Sub()
+                If containerRef IsNot Nothing Then
+                    LoadItemList(containerRef, activeCategory, activeStatus)
+                End If
+            End Sub
+
+        ' Apply rounded region AFTER size is fixed (same pattern as btnAdd).
+        RoundControl(btnRefresh, 8)
+        ' ─────────────────────────────────────────────────────────────────────
+
+        region.Controls.AddRange({searchWrap, btnAdd, btnRefresh})
+
+        ' Layout: [searchWrap] [↻ Refresh] [+ Add Item]  — right-aligned.
+        ' btnAdd is the rightmost anchor; refresh sits to its left; search to refresh's left.
         Dim PositionTopRight As Action =
             Sub()
                 btnAdd.Top = 22
                 btnAdd.Left = region.Width - 24 - btnAdd.Width
+
+                btnRefresh.Top = 22
+                btnRefresh.Left = btnAdd.Left - 10 - btnRefresh.Width
+
                 searchWrap.Top = 22
-                searchWrap.Left = btnAdd.Left - 12 - searchWrap.Width
+                searchWrap.Left = btnRefresh.Left - 12 - searchWrap.Width
             End Sub
         AddHandler region.Resize, Sub() PositionTopRight()
         PositionTopRight()
@@ -470,7 +569,6 @@ Public Class InventoryItemListPanelBuilder
         Dim g = e.Graphics
         g.SmoothingMode = SmoothingMode.AntiAlias
         Dim rect As New Rectangle(1, 1, panel.Width - 3, panel.Height - 3)
-        ' Soft shadow to match the Home cards (PanelRenderer.Draw).
         Dim shadowRect As New Rectangle(rect.X + 1, rect.Y + 2, rect.Width - 2, rect.Height - 2)
         Using shadowBrush As New SolidBrush(Color.FromArgb(14, 0, 0, 0))
             Using sp = RoundRect(shadowRect, 14)
@@ -711,7 +809,7 @@ Public Class InventoryItemListPanelBuilder
         Return row
     End Function
 
-    ' Rounded 38x38 thumbnail: photo for non-paint, colour chip for paint,
+    ' Rounded 38×38 thumbnail: colour chip for paint, photo for everything else,
     ' tinted initial tile as the universal fallback.
     Private Shared Function BuildRowThumb(it As ProdItem) As Panel
         Dim box As New Panel With {.Size = New Size(38, 38), .BackColor = Color.Transparent}
@@ -726,17 +824,14 @@ Public Class InventoryItemListPanelBuilder
                 Dim r As New Rectangle(0, 0, 37, 37)
                 Using path = RoundRect(r, 10)
                     If it.IsPaint Then
-                        ' Solid colour chip
                         Using br As New SolidBrush(chip) : g.FillPath(br, path) : End Using
                     ElseIf img IsNot Nothing Then
-                        ' Clipped rounded photo
                         Dim oldClip = g.Clip
                         g.SetClip(path, CombineMode.Replace)
                         g.InterpolationMode = InterpolationMode.HighQualityBicubic
                         g.DrawImage(img, r)
                         g.Clip = oldClip
                     Else
-                        ' Tinted initial tile
                         Using br As New SolidBrush(TileBg) : g.FillPath(br, path) : End Using
                         Using f As New Font("Segoe UI", 12, FontStyle.Bold)
                             Using br As New SolidBrush(MintPrimary)
@@ -768,13 +863,12 @@ Public Class InventoryItemListPanelBuilder
     End Function
 
     ' =========================================================================
-    '  ADD / EDIT / VIEW DIALOG  (redesigned)
+    '  ADD / EDIT / VIEW DIALOG
     ' =========================================================================
     Private Shared Sub ShowItemDialog(productId As Integer, viewOnly As Boolean)
         Dim editing As Boolean = productId > 0
         Dim existing As ProdItem = items.FirstOrDefault(Function(p) p.Id = productId)
 
-        ' Holds the path of an image picked during this dialog session.
         Dim pickedImagePath As String = If(existing IsNot Nothing, existing.ImagePath, "")
 
         Dim f As New ShadowDialog With {
@@ -785,11 +879,9 @@ Public Class InventoryItemListPanelBuilder
         AddHandler f.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.None
-                ' Outer crisp border
                 Using pen As New Pen(Color.FromArgb(176, 196, 189), 1)
                     e.Graphics.DrawRectangle(pen, 0, 0, f.Width - 1, f.Height - 1)
                 End Using
-                ' Soft inner line for a subtle framed look
                 Using pen As New Pen(Color.FromArgb(238, 242, 240), 1)
                     e.Graphics.DrawRectangle(pen, 1, 1, f.Width - 3, f.Height - 3)
                 End Using
@@ -799,9 +891,8 @@ Public Class InventoryItemListPanelBuilder
         Dim header As New Panel With {.Dock = DockStyle.Top, .Height = 86, .BackColor = MintDark}
         AddHandler header.Paint,
             Sub(s, e)
-                Dim g = e.Graphics
                 Using lg As New LinearGradientBrush(header.ClientRectangle, MintDark, MintDeep, 25.0F)
-                    g.FillRectangle(lg, header.ClientRectangle)
+                    e.Graphics.FillRectangle(lg, header.ClientRectangle)
                 End Using
             End Sub
         Dim titleText As String = If(viewOnly, "Product Details", If(editing, "Edit Item", "Add Item"))
@@ -816,7 +907,6 @@ Public Class InventoryItemListPanelBuilder
         }
         header.Controls.AddRange({lblHdr, lblSub})
 
-        ' Close "x"
         Dim btnX As New Label With {
             .Text = ChrW(10005).ToString(), .Font = New Font("Segoe UI", 12), .ForeColor = Color.FromArgb(210, 235, 228),
             .AutoSize = True, .Cursor = Cursors.Hand, .BackColor = Color.Transparent
@@ -852,8 +942,6 @@ Public Class InventoryItemListPanelBuilder
         y += 70
 
         ' ---- DYNAMIC MEDIA SECTION ----
-        ' One container; we show either the colour block or the image block
-        ' depending on the chosen category.
         Dim mediaCard As New BufferedPanel With {
             .Location = New Point(L, y), .Size = New Size(fullW, 168), .BackColor = FieldBg
         }
@@ -976,8 +1064,6 @@ Public Class InventoryItemListPanelBuilder
             End Sub
         mediaCard.Controls.AddRange({imgBox, btnBrowse, btnRemove})
 
-        ' Toggle which media block is visible based on category, and lock the
-        ' paint-only "Paint Type" field when the category isn't Paint.
         Dim applyMediaMode As Action =
             Sub()
                 Dim isPaint As Boolean = String.Equals(CStr(If(cboCat.SelectedItem, "")), PaintCategory, StringComparison.OrdinalIgnoreCase)
@@ -989,8 +1075,6 @@ Public Class InventoryItemListPanelBuilder
                 btnRemove.Visible = (Not isPaint) AndAlso Not viewOnly
                 lblMediaHint.Text = If(isPaint, "Paint items are identified by colour.", "Upload a product photo for this item.")
 
-                ' Paint Type only applies to paint. For other categories, lock it
-                ' with a clear "Not applicable" cue so it's obviously disabled.
                 If Not viewOnly Then
                     If isPaint Then
                         txtType.Enabled = True
@@ -1008,9 +1092,6 @@ Public Class InventoryItemListPanelBuilder
                 End If
             End Sub
 
-        ' Auto-fill the SKU from the category prefix. The SKU is system-generated
-        ' and NOT editable — for new items it regenerates when the category changes;
-        ' for existing items it simply shows the stored value, locked.
         Dim applyAutoSku As Action =
             Sub()
                 If editing Then Return
@@ -1019,7 +1100,6 @@ Public Class InventoryItemListPanelBuilder
                 txtSku.Text = NextSku(catName)
             End Sub
 
-        ' Lock the SKU box visually + functionally (it's generated, not entered).
         txtSku.ReadOnly = True
         txtSku.BackColor = FieldBg
         txtSku.ForeColor = SubText
@@ -1039,9 +1119,6 @@ Public Class InventoryItemListPanelBuilder
         Dim numReorder = AddNumeric(body, "Reorder Level", L + 336, y, 148, 0, 1000000)
         y += 80
 
-        ' Stock Qty is editable only when ADDING (the opening count). For an
-        ' existing product it's locked here — quantity changes go through Stock
-        ' Adjustment so every change is logged.
         If editing AndAlso Not viewOnly Then
             numStock.Enabled = False
             Dim lblStockLock As New Label With {
@@ -1052,7 +1129,6 @@ Public Class InventoryItemListPanelBuilder
             body.Controls.Add(lblStockLock)
         End If
 
-        ' Spacer so the scroll area clears the footer
         body.Controls.Add(New Panel With {.Location = New Point(0, y), .Size = New Size(1, 10), .BackColor = Color.Transparent})
 
         ' ---- Footer with buttons ----
@@ -1096,7 +1172,6 @@ Public Class InventoryItemListPanelBuilder
             footer.Controls.Add(btnSave)
         End If
 
-        ' Delete (archive) — only when editing an existing item, never on Add/View.
         Dim btnDelete As Button = Nothing
         If editing AndAlso Not viewOnly Then
             btnDelete = New Button With {
@@ -1147,11 +1222,10 @@ Public Class InventoryItemListPanelBuilder
         Else
             If cboCat.Items.Count > 0 Then cboCat.SelectedIndex = 0
             txtPrice.Text = "0.00"
-            applyAutoSku()   ' seed the SKU for the default category
+            applyAutoSku()
         End If
         applyMediaMode()
 
-        ' ---- Read-only mode ----
         If viewOnly Then
             DisableInputs(body)
             txtHex.Enabled = False
@@ -1248,11 +1322,6 @@ Public Class InventoryItemListPanelBuilder
     ' =========================================================================
     '  DELETE (soft delete / archive)
     ' =========================================================================
-    ' Products are never hard-deleted: sale_items, po_items, stock_movements and
-    ' return_items all reference product_id, so a real DELETE would either fail on
-    ' a foreign key or orphan historical sales and break past receipts/reports.
-    ' Instead we set is_active = 0, which removes the item from the Item List and
-    ' the POS catalog (their queries filter is_active = 1) while preserving history.
     Private Shared Function DeleteItem(productId As Integer, productName As String) As Boolean
         If productId <= 0 Then Return False
 
@@ -1284,7 +1353,6 @@ Public Class InventoryItemListPanelBuilder
     ' =========================================================================
     '  IMAGE HELPERS
     ' =========================================================================
-    ' Copy a chosen file into ProductImages and return the path stored in the DB.
     Private Shared Function StoreImage(sourcePath As String) As String
         Try
             If Not Directory.Exists(ImageRoot) Then Directory.CreateDirectory(ImageRoot)
@@ -1300,7 +1368,6 @@ Public Class InventoryItemListPanelBuilder
         End Try
     End Function
 
-    ' Decode an image without locking the file, scaled and cached.
     Private Shared Function GetThumb(path As String, maxSize As Integer) As Image
         If String.IsNullOrEmpty(path) Then Return Nothing
         Dim key = path & "|" & maxSize
@@ -1394,11 +1461,6 @@ Public Class InventoryItemListPanelBuilder
         Return s
     End Function
 
-    ' Build the next sequential SKU for a category, e.g. "PNT-0007".
-    ' Prefix is derived from the category name; the running number is one past the
-    ' highest existing number that shares that prefix (scanned from loaded items so
-    ' it stays fast and offline-friendly). The save-time uniqueness check is the
-    ' real guard against collisions.
     Private Shared Function SkuPrefixFor(categoryName As String) As String
         Select Case If(categoryName, "").Trim().ToLowerInvariant()
             Case "paint", "paints" : Return "PNT"
@@ -1406,7 +1468,6 @@ Public Class InventoryItemListPanelBuilder
             Case "thinner", "thinners", "solvent", "solvents" : Return "THN"
             Case "accessories", "accessory" : Return "ACC"
             Case Else
-                ' Fallback: first 3 letters of the category, uppercased.
                 Dim letters = New String((If(categoryName, "").Where(Function(ch) Char.IsLetter(ch)).ToArray()))
                 If letters.Length = 0 Then Return "ITM"
                 Return letters.Substring(0, Math.Min(3, letters.Length)).ToUpperInvariant()
@@ -1478,4 +1539,7 @@ Public Class InventoryItemListPanelBuilder
             End Sub
     End Sub
 
+    Private Sub InventoryItemListPanelBuilder_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+    End Sub
 End Class

@@ -92,10 +92,10 @@ Public Class AccountantDashPanelBuilder
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _revenue = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
-
                 ' Expenses
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders po WHERE 1=1" &
+                    "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders po " &
+                    "WHERE po.status <> 'Cancelled'" &
                     If(poClause <> "", " AND " & poClause, ""), conn)
                     _expenses = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
@@ -125,11 +125,11 @@ Public Class AccountantDashPanelBuilder
 
                 ' Top payment method
                 Using cmd As New MySqlCommand(
-                    "SELECT pm.name, COUNT(*) AS cnt FROM sales s " &
+                    "SELECT pm.name FROM sales s " &
                     "JOIN payment_methods pm ON s.method_id = pm.method_id " &
-                    "WHERE s.status='Completed'" &
+               "WHERE s.status='Completed'" &
                     If(saleClause <> "", " AND " & saleClause, "") &
-                    " GROUP BY pm.name ORDER BY cnt DESC LIMIT 1", conn)
+                    " GROUP BY pm.name ORDER BY COUNT(*) DESC LIMIT 1", conn)
                     Dim res = cmd.ExecuteScalar()
                     _topMethod = If(res IsNot Nothing AndAlso Not IsDBNull(res), res.ToString(), "N/A")
                 End Using
@@ -159,9 +159,9 @@ Public Class AccountantDashPanelBuilder
                 ' Recent POs — filtered
                 Using cmd As New MySqlCommand(
                     "SELECT po.po_no, s.name AS sname, po.total_cost, po.status, po.order_date " &
-                    "FROM purchase_orders po " &
+        "FROM purchase_orders po " &
                     "JOIN suppliers s ON po.supplier_id = s.supplier_id " &
-                    "WHERE 1=1" &
+                    "WHERE po.status <> 'Cancelled'" &
                     If(poClause <> "", " AND " & poClause, "") &
                     " ORDER BY po.order_date DESC LIMIT 6", conn)
                     Using rdr = cmd.ExecuteReader()
@@ -179,6 +179,7 @@ Public Class AccountantDashPanelBuilder
             End Using
         Catch ex As Exception
             Debug.WriteLine("AccountantDash LoadData error: " & ex.Message)
+            AppModal.Show("Dashboard data could not be loaded. Check your database connection and try again.", "Load Error")
         End Try
     End Sub
 
@@ -240,7 +241,49 @@ Public Class AccountantDashPanelBuilder
             .AutoSize = True,
             .Location = New Point(SIDE_PAD, 16)
         }
+
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(100, 34),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() LoadDash(_container, FilterKeys(_activeFilterIdx))
+        AddHandler titleBar.Resize, Sub()
+                                        btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
+                                        btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
+                                    End Sub
+
         titleBar.Controls.Add(lblTitle)
+        titleBar.Controls.Add(btnRefresh)
 
         ' ── Row 2: Filter pills bar (Dock=Top, Height=52) ───────────────────
         Dim pillBar As New Panel With {
@@ -527,7 +570,12 @@ Public Class AccountantDashPanelBuilder
                 rowsHost.Controls.Add(row)
                 y += 58
             Next
-            AddHandler rowsHost.Resize, Sub() ReflowRows(rowsHost)
+            Dim onSalesResize As EventHandler = Sub(s, e) ReflowRows(rowsHost)
+            AddHandler rowsHost.Resize, onSalesResize
+            AddHandler rowsHost.VisibleChanged,
+                Sub()
+                    If rowsHost.Visible Then ReflowRows(rowsHost)
+                End Sub
         End If
 
         Return card
@@ -671,7 +719,12 @@ Public Class AccountantDashPanelBuilder
                 rowsHost.Controls.Add(row)
                 y += 58
             Next
-            AddHandler rowsHost.Resize, Sub() ReflowRows(rowsHost)
+            Dim onPosResize As EventHandler = Sub(s, e) ReflowRows(rowsHost)
+            AddHandler rowsHost.Resize, onPosResize
+            AddHandler rowsHost.VisibleChanged,
+                Sub()
+                    If rowsHost.Visible Then ReflowRows(rowsHost)
+                End Sub
         End If
 
         Return card

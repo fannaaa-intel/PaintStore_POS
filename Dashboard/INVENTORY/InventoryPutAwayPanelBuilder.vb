@@ -37,6 +37,15 @@ Imports MySql.Data.MySqlClient
 '  2. Form  — open one PO: each line shows product, pending qty, and
 '             an editable "shelve now" input capped at pending.
 '             Confirm Put Away commits the transaction.
+'
+'  CHANGES
+'  -------
+'  - Header now shows previous.png chevron on the left for back navigation.
+'  - "Back" button removed from the actions card.
+'  - Actions card moved BELOW the items card (bottom of the scrolling body).
+'  - "Confirm Stock In" button sits on the RIGHT side of the actions card.
+'  - Added "↻ Refresh" button (muted-green pill, matches LowStock pattern).
+'  - "N pending" badge on each line row renamed to "N remaining".
 ' =============================================================================
 Public Class InventoryPutAwayPanelBuilder
 
@@ -115,10 +124,12 @@ Public Class InventoryPutAwayPanelBuilder
         container.BackColor = MintBg
 
         Dim listHost As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 4, 24, 20)
+            .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(24, 4, 24, 20),
+            .AutoScroll = False
         }
         Dim rowsHost As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True
+            .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True,
+            .Padding = New Padding(0)
         }
         listHost.Controls.Add(rowsHost)
 
@@ -174,7 +185,55 @@ Public Class InventoryPutAwayPanelBuilder
             .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(30, 56)
         }
-        region.Controls.AddRange({lblTitle, lblSub})
+
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .Size = New Size(100, 34),
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F),
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect As Rectangle = bb.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path = RoundRect(rect, 8)
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click, Sub() RenderList()
+        region.Controls.AddRange({lblTitle, lblSub, btnRefresh})
+
+        Dim PositionRefresh As Action =
+            Sub()
+                btnRefresh.Top = (region.Height - btnRefresh.Height) \ 2
+                btnRefresh.Left = region.Width - btnRefresh.Width - 24
+            End Sub
+        AddHandler region.Resize, Sub() PositionRefresh()
+        PositionRefresh()
+
         Return region
     End Function
 
@@ -352,6 +411,15 @@ Public Class InventoryPutAwayPanelBuilder
 
     ' =========================================================================
     '  VIEW 2 — PUT AWAY FORM  (shelve one PO's pending lines)
+    '
+    '  LAYOUT (top → bottom, all Dock = Top so they stack naturally):
+    '    1. Header panel  — previous.png chevron + PO title + meta
+    '    2. Spacer
+    '    3. Info banner card
+    '    4. Spacer
+    '    5. Lines card    — Items to Stock In
+    '    6. Spacer
+    '    7. Actions card  — Refresh (left) | Confirm Stock In (right)
     ' =========================================================================
     Private Shared Sub LoadPutAwayForm(poId As Integer)
         Dim container As Panel = containerRef
@@ -404,12 +472,103 @@ Public Class InventoryPutAwayPanelBuilder
         container.Controls.Clear()
         container.BackColor = MintBg
 
+        ' ── Scrolling body ────────────────────────────────────────────────────
         Dim body As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg,
-            .Padding = New Padding(24, 4, 24, 20), .AutoScroll = True
+            .Dock = DockStyle.Fill,
+            .BackColor = MintBg,
+            .Padding = New Padding(24, 4, 24, 20),
+            .AutoScroll = True
         }
 
-        ' ---- Info banner ----
+
+
+        Dim linesHeight As Integer = 64 + putAwayLines.Count * 88 + 72 + 16  ' +72 for confirm bar
+        Dim linesCard As New BufferedPanel With {
+            .Height = linesHeight, .BackColor = CardBg, .Dock = DockStyle.Top
+        }
+        AddHandler linesCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        Dim lblHead As New Label With {
+            .Text = "Items to Stock In",
+            .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(20, 14), .BackColor = Color.Transparent
+        }
+        Dim lblHint As New Label With {
+            .Text = "Defaults to stocking in everything pending. Reduce a quantity to only partially stock a product.",
+            .Font = New Font("Segoe UI", 8.5F), .ForeColor = FaintText,
+            .AutoSize = True, .Location = New Point(22, 40), .BackColor = Color.Transparent
+        }
+        linesCard.Controls.AddRange({lblHead, lblHint})
+
+        Dim y As Integer = 64
+        For Each ln In putAwayLines
+            Dim row As Panel = BuildPutAwayLineRow(ln, 88)
+            row.Location = New Point(0, y)
+            row.Width = linesCard.ClientSize.Width - 4
+            row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            linesCard.Controls.Add(row)
+            y += 88
+        Next
+
+        ' ── Confirm Stock In button — inside the lines card, below all rows ──
+        Dim confirmBarY As Integer = 64 + putAwayLines.Count * 88
+        Dim confirmBar As New Panel With {
+            .BackColor = Color.Transparent,
+            .Location = New Point(0, confirmBarY),
+            .Height = 64,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        AddHandler confirmBar.Paint,
+            Sub(s, e)
+                Using pen As New Pen(CardBorder, 1)
+                    e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
+                End Using
+            End Sub
+
+        Dim btnConfirm As New Button With {
+            .Text = "Confirm Stock In",
+            .Size = New Size(180, 42),
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+            .ForeColor = Color.White,
+            .BackColor = MintPrimary,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnConfirm.FlatAppearance.BorderSize = 0
+        RoundControl(btnConfirm, 10)
+        AddHandler btnConfirm.Click, Sub() CommitPutAway()
+        confirmBar.Controls.Add(btnConfirm)
+
+        Dim PositionConfirm As Action =
+            Sub()
+                btnConfirm.Top = (confirmBar.Height - btnConfirm.Height) \ 2
+                btnConfirm.Left = confirmBar.Width - btnConfirm.Width - 20
+            End Sub
+        AddHandler confirmBar.Resize, Sub() PositionConfirm()
+        PositionConfirm()
+
+        linesCard.Controls.Add(confirmBar)
+
+        AddHandler linesCard.Resize,
+            Sub()
+                Dim w As Integer = linesCard.ClientSize.Width - 4
+                For Each c As Control In linesCard.Controls
+                    If TypeOf c Is Panel Then
+                        c.Left = 0
+                        c.Width = w
+                    End If
+                Next
+            End Sub
+        body.Controls.Add(linesCard)
+
+        ' ── 4. Spacer before lines card ───────────────────────────────────────
+        body.Controls.Add(New Panel With {
+            .Height = 12, .BackColor = Color.Transparent, .Dock = DockStyle.Top
+        })
+
+        ' ── 3. INFO BANNER ────────────────────────────────────────────────────
         Dim bannerCard As New BufferedPanel With {.Height = 52, .BackColor = TileBg, .Dock = DockStyle.Top}
         AddHandler bannerCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
         Dim lblBanner As New Label With {
@@ -422,102 +581,104 @@ Public Class InventoryPutAwayPanelBuilder
         bannerCard.Controls.Add(lblBanner)
         body.Controls.Add(bannerCard)
 
+        ' ── 2. Spacer below header ────────────────────────────────────────────
         body.Controls.Add(New Panel With {
             .Height = 12, .BackColor = Color.Transparent, .Dock = DockStyle.Top
         })
 
-        ' ---- Lines card ----
-        Dim linesHeight As Integer = 64 + putAwayLines.Count * 72 + 16
-        Dim linesCard As New BufferedPanel With {
-            .Height = linesHeight, .BackColor = CardBg, .Dock = DockStyle.Top
-        }
-        AddHandler linesCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-
-        Dim lblHead As New Label With {
-            .Text = "Items to Stock In", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14),
-            .BackColor = Color.Transparent
-        }
-        Dim lblHint As New Label With {
-            .Text = "Defaults to stocking in everything pending. Reduce a quantity to only partially stock a product.",
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = FaintText,
-            .AutoSize = True, .Location = New Point(22, 40), .BackColor = Color.Transparent
-        }
-        linesCard.Controls.AddRange({lblHead, lblHint})
-
-        Dim y As Integer = 64
-        For Each ln In putAwayLines
-            Dim row As Panel = BuildPutAwayLineRow(ln, 72)
-            row.Location = New Point(0, y)
-            row.Width = linesCard.ClientSize.Width - 4
-            row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-            linesCard.Controls.Add(row)
-            y += 72
-        Next
-        AddHandler linesCard.Resize,
-            Sub()
-                Dim w As Integer = linesCard.ClientSize.Width - 4
-                For Each c As Control In linesCard.Controls
-                    If TypeOf c Is Panel Then c.Width = w
-                Next
-            End Sub
-        body.Controls.Add(linesCard)
-
-        ' ---- Actions card ----
-        body.Controls.Add(New Panel With {
-            .Height = 12, .BackColor = Color.Transparent, .Dock = DockStyle.Top
-        })
-        Dim actCard As New BufferedPanel With {.Height = 72, .BackColor = CardBg, .Dock = DockStyle.Top}
-        AddHandler actCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-
-        Dim btnConfirm As New Button With {
-            .Text = "Confirm Stock In", .Size = New Size(180, 42),
-            .Location = New Point(20, 15),
-            .FlatStyle = FlatStyle.Flat, .Cursor = Cursors.Hand,
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = Color.White, .BackColor = MintPrimary
-        }
-        btnConfirm.FlatAppearance.BorderSize = 0
-        RoundControl(btnConfirm, 10)
-        AddHandler btnConfirm.Click, Sub() CommitPutAway()
-        actCard.Controls.Add(btnConfirm)
-
-        Dim btnBack As New Button With {
-            .Text = "Back", .Size = New Size(90, 42),
-            .Location = New Point(210, 15),
-            .FlatStyle = FlatStyle.Flat, .Cursor = Cursors.Hand,
-            .Font = New Font("Segoe UI", 10, FontStyle.Bold),
-            .ForeColor = SubText, .BackColor = TileBg
-        }
-        btnBack.FlatAppearance.BorderSize = 0
-        RoundControl(btnBack, 10)
-        AddHandler btnBack.Click, Sub() RenderList()
-        actCard.Controls.Add(btnBack)
-
-        body.Controls.Add(actCard)
-
-        ' ---- Header ----
         Dim header As New Panel With {
-            .Height = 110, .BackColor = MintBg,
-            .Padding = New Padding(24, 18, 24, 0), .Dock = DockStyle.Top
+            .Height = 80,
+            .BackColor = MintBg,
+            .Padding = New Padding(24, 18, 24, 0),
+            .Dock = DockStyle.Top
         }
+
+        ' Load previous.png for the back chevron
+        Dim prevImg As Image = Nothing
+        Dim prevPath As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        If IO.File.Exists(prevPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(prevPath)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(10 / 255.0F), CSng(79 / 255.0F), CSng(66 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                                0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                prevImg = bmp
+                raw.Dispose()
+            Catch
+            End Try
+        End If
+
+        Dim picBack As New PictureBox With {
+            .Size = New Size(22, 22),
+            .Location = New Point(24, 16),
+            .BackColor = Color.Transparent,
+            .SizeMode = PictureBoxSizeMode.Zoom,
+            .Cursor = Cursors.Hand
+        }
+        If prevImg IsNot Nothing Then picBack.Image = prevImg
+        AddHandler picBack.Click, Sub() RenderList()
+        AddHandler picBack.MouseEnter, Sub() picBack.BackColor = Color.FromArgb(30, 0, 130, 109)
+        AddHandler picBack.MouseLeave, Sub() picBack.BackColor = Color.Transparent
+        header.Controls.Add(picBack)
+
+
+
         Dim lblTitle As New Label With {
-            .Text = "Incoming Stock: " & poNo, .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 14)
+            .Text = "Incoming Stock: " & poNo,
+            .Font = New Font("Segoe UI", 20, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(picBack.Right + 10, 10),
+            .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
             .Text = supplierName & "   " & ChrW(8226) & "   " &
                     putAwayLines.Count & If(putAwayLines.Count = 1, " product pending", " products pending"),
             .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(26, 54)
+            .AutoSize = True, .Location = New Point(picBack.Right + 12, 44),
+            .BackColor = Color.Transparent
         }
+
+        ' Position everything once immediately, then again on resize
+        Dim LayoutHeader As Action =
+            Sub()
+                Dim titleH As Integer = 30   ' approx pixel height of font size 20 bold
+                Dim metaH As Integer = 20   ' approx pixel height of font size 10
+                Dim gap As Integer = 8    ' gap between title and subtitle
+                Dim totalH As Integer = titleH + gap + metaH
+
+                ' Center the title+meta block vertically in the header
+                Dim blockTop As Integer = (header.Height - totalH) \ 2
+
+                lblTitle.Top = blockTop
+                lblMeta.Top = blockTop + titleH + gap
+
+                ' Align chevron to the vertical center of the title line
+                picBack.Top = blockTop + (titleH - picBack.Height) \ 2 + 6
+            End Sub
+
+        AddHandler header.Resize, Sub() LayoutHeader()
         header.Controls.AddRange({lblTitle, lblMeta})
+        LayoutHeader()
 
         container.Controls.Add(body)
         container.Controls.Add(header)
         container.ResumeLayout()
     End Sub
 
+    ' =========================================================================
+    '  LINE ROW  — "N remaining" badge instead of "N pending"
+    ' =========================================================================
     Private Shared Function BuildPutAwayLineRow(ln As PutAwayLine, height As Integer) As Panel
         Dim row As New Panel With {.Height = height, .BackColor = Color.Transparent}
         AddHandler row.Paint,
@@ -532,9 +693,10 @@ Public Class InventoryPutAwayPanelBuilder
         row.Controls.Add(thumb)
 
         Dim lblName As New Label With {
-            .Text = ln.ProductName, .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(72, 14),
-            .BackColor = Color.Transparent
+            .Text = ln.ProductName,
+            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True,
+            .Location = New Point(72, 14), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
             .Text = ln.Sku & "   " & ChrW(8226) & "   Current stock: " & ln.CurrentStock,
@@ -544,12 +706,14 @@ Public Class InventoryPutAwayPanelBuilder
         row.Controls.Add(lblName)
         row.Controls.Add(lblMeta)
 
-        ' Pending badge
+        ' ── "N remaining" badge (was "N pending") ─────────────────────────────
         Dim pendBadge As New Label With {
-            .Text = ln.PendingQty & " pending",
+            .Text = ln.PendingQty & " remaining",
             .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = WarningClr, .BackColor = Color.FromArgb(252, 240, 228),
-            .AutoSize = True, .Padding = New Padding(8, 3, 8, 3),
+            .ForeColor = WarningClr,
+            .BackColor = Color.FromArgb(252, 240, 228),
+            .AutoSize = True,
+            .Padding = New Padding(8, 3, 8, 3),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         RoundLabel(pendBadge, 10)
@@ -558,14 +722,18 @@ Public Class InventoryPutAwayPanelBuilder
         ' Shelve-now input
         Dim capLn As PutAwayLine = ln
         Dim lblCap As New Label With {
-            .Text = "STOCK IN", .Font = New Font("Segoe UI", 7.5F, FontStyle.Bold),
+            .Text = "STOCK IN",
+            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
             .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         Dim txtQty As New TextBox With {
-            .Width = 72, .Height = 28, .BorderStyle = BorderStyle.FixedSingle,
-            .Font = New Font("Segoe UI", 12, FontStyle.Bold), .ForeColor = MintDark,
-            .TextAlign = HorizontalAlignment.Center, .Text = ln.ShelveNow.ToString(),
+            .Width = 72, .Height = 28,
+            .BorderStyle = BorderStyle.FixedSingle,
+            .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+            .ForeColor = MintDark,
+            .TextAlign = HorizontalAlignment.Center,
+            .Text = ln.ShelveNow.ToString(),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         AddHandler txtQty.TextChanged,
@@ -585,11 +753,11 @@ Public Class InventoryPutAwayPanelBuilder
         AddHandler row.Resize,
             Sub()
                 txtQty.Left = row.Width - txtQty.Width - 24
-                txtQty.Top = (height - txtQty.Height) \ 2 + 4
+                txtQty.Top = (height - txtQty.Height) \ 2 + 8
                 lblCap.Left = txtQty.Left
-                lblCap.Top = txtQty.Top - 16
+                lblCap.Top = txtQty.Top - 20
                 pendBadge.Left = txtQty.Left - pendBadge.Width - 18
-                pendBadge.Top = (height - pendBadge.Height) \ 2
+                pendBadge.Top = txtQty.Top + (txtQty.Height - pendBadge.Height) \ 2
             End Sub
 
         Return row

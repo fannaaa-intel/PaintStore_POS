@@ -5,45 +5,25 @@ Imports MySql.Data.MySqlClient
 
 ' =============================================================================
 '  AccountantReportsPanelBuilder  —  Screen 5: Financial Reports
-'
-'  LAYOUT  (Dock stacking — added reverse so Top bars stack correctly)
-'  ------
-'    TopBar       (Dock = Top,    64px)  : dark gradient — title + subtitle
-'    TabRow       (Dock = Top,    44px)  : Income Statement | Trial Balance | Balance Sheet
-'    DateRow      (Dock = Top,    52px)  : From date | To date | Apply pill
-'    PrintBar     (Dock = Bottom, 52px)  : Print button pinned right
-'    ContentHost  (Dock = Fill)          : swapped per active tab
-'
-'  Tab switching:
-'    Active tab   → bold label, MintPrimary 3px underline drawn in Paint
-'    Inactive tab → normal weight, no underline, SubText colour
-'    Click        → swap ContentHost, no full re-render
-'
-'  DB queries (parameterised @from / @to):
-'    Revenue   : SELECT SUM(total)        FROM sales            WHERE sale_datetime BETWEEN @from AND @to
-'    Returns   : SELECT SUM(total_refund) FROM returns          WHERE return_datetime BETWEEN @from AND @to
-'    PO Costs  : SELECT SUM(total_cost)   FROM purchase_orders  WHERE status='Received' AND order_date BETWEEN @from AND @to
-'    Unpaid POs: SELECT SUM(total_cost)   FROM purchase_orders  WHERE status NOT IN ('Received','Cancelled')
-'    Stock Val : SELECT SUM(stock_qty*unit_price) FROM products WHERE is_active=1
 ' =============================================================================
 Public Class AccountantReportsPanelBuilder
 
-    ' ── PALETTE  (exact match — all Accountant panels) ────────────────────────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(0, 80, 72)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    ' ── PALETTE ───────────────────────────────────────────────────────────────
+    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
+    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
     Private Shared ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
     Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
-    Private Shared ReadOnly HeaderBg As Color = Color.FromArgb(0, 60, 54)
     Private Shared ReadOnly CardBg As Color = Color.White
     Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
     Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
-    Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
-    Private Shared ReadOnly RowHover As Color = Color.FromArgb(224, 242, 235)
+    Private Shared ReadOnly RowDivider As Color = Color.FromArgb(220, 230, 226)
+    Private Shared ReadOnly CardBorder As Color = Color.FromArgb(180, 210, 200)
     Private Shared ReadOnly AccentRed As Color = Color.FromArgb(220, 80, 80)
-    Private Shared ReadOnly HighlightBg As Color = Color.FromArgb(236, 252, 248)
+    Private Shared ReadOnly HighlightBg As Color = Color.FromArgb(210, 245, 238)
+    Private Shared ReadOnly SectionBg As Color = Color.FromArgb(240, 248, 245)
+    Private Shared ReadOnly TotalBg As Color = Color.FromArgb(245, 250, 248)
     Private Shared ReadOnly Peso As String = ChrW(8369)
 
-    ' Tab identifiers
     Private Const TAB_INCOME As String = "income"
     Private Const TAB_TRIAL As String = "trial"
     Private Const TAB_BALANCE As String = "balance"
@@ -54,20 +34,13 @@ Public Class AccountantReportsPanelBuilder
     Private Shared _dateFrom As DateTime = DateTime.Today.AddDays(-30)
     Private Shared _dateTo As DateTime = DateTime.Today
 
-    ' DB figures — loaded once per Apply
     Private Shared _revenue As Decimal
     Private Shared _returns As Decimal
     Private Shared _poCost As Decimal
     Private Shared _unpaidPos As Decimal
     Private Shared _stockValue As Decimal
 
-    ' Live-swap content host
     Private Shared _contentHost As Panel
-
-    ' Tab label references (for underline repaint)
-    Private Shared _tabLabels As New Dictionary(Of String, Label)
-
-    ' Date pickers (kept for Apply handler)
     Private Shared _dtFrom As DateTimePicker
     Private Shared _dtTo As DateTimePicker
 
@@ -78,23 +51,17 @@ Public Class AccountantReportsPanelBuilder
                                   Optional tab As String = TAB_INCOME)
         _container = container
         _activeTab = tab
-        _tabLabels.Clear()
-
         LoadData()
         Render()
     End Sub
 
     ' =========================================================================
-    '  DATA  — runs on first load and every Apply click
+    '  DATA
     ' =========================================================================
     Private Shared Sub LoadData()
-        _revenue = 0
-        _returns = 0
-        _poCost = 0
-        _unpaidPos = 0
-        _stockValue = 0
+        _revenue = 0 : _returns = 0 : _poCost = 0
+        _unpaidPos = 0 : _stockValue = 0
 
-        ' Widen @to to end-of-day so rows from the To date are included
         Dim fromVal As DateTime = _dateFrom.Date
         Dim toVal As DateTime = _dateTo.Date.AddDays(1).AddSeconds(-1)
 
@@ -102,7 +69,6 @@ Public Class AccountantReportsPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
 
-                ' ── Revenue (completed sales in range) ────────────────────────
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
                     "WHERE sale_datetime BETWEEN @from AND @to", conn)
@@ -111,7 +77,6 @@ Public Class AccountantReportsPanelBuilder
                     _revenue = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' ── Returns in range ─────────────────────────────────────────
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_refund),0) FROM returns " &
                     "WHERE return_datetime BETWEEN @from AND @to", conn)
@@ -120,7 +85,6 @@ Public Class AccountantReportsPanelBuilder
                     _returns = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' ── Cost of received POs in range ────────────────────────────
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
                     "WHERE status = 'Received' AND order_date BETWEEN @from AND @to", conn)
@@ -129,14 +93,12 @@ Public Class AccountantReportsPanelBuilder
                     _poCost = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' ── Unpaid POs (no date filter — current liability) ───────────
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
                     "WHERE status NOT IN ('Received','Cancelled')", conn)
                     _unpaidPos = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' ── Active stock value (no date filter — current asset) ───────
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(stock_qty * unit_price),0) " &
                     "FROM products WHERE is_active = 1", conn)
@@ -144,124 +106,176 @@ Public Class AccountantReportsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("AccountantReports LoadData error: " & ex.Message)
+            AppModal.Show("Failed to load report data." & vbCrLf & ex.Message,
+                          "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
     ' =========================================================================
-    '  RENDER  — builds chrome; swaps content separately
+    '  RENDER
     ' =========================================================================
     Private Shared Sub Render()
         _container.SuspendLayout()
         _container.Controls.Clear()
         _container.BackColor = MintBg
 
-        ' ── Print bar (Bottom — add first) ────────────────────────────────────
-        Dim printBar As Panel = BuildPrintBar()
-        printBar.Dock = DockStyle.Bottom
-        printBar.Height = 52
-
-        ' ── Content host (Fill — add before Top panels) ───────────────────────
         _contentHost = New Panel With {
             .Dock = DockStyle.Fill,
             .BackColor = MintBg,
             .AutoScroll = True,
-            .Padding = New Padding(24, 18, 24, 18)
+            .Padding = New Padding(28, 24, 28, 24)
         }
 
-        ' ── Date range row (Top) ─────────────────────────────────────────────
         Dim dateRow As Panel = BuildDateRow()
         dateRow.Dock = DockStyle.Top
-        dateRow.Height = 52
+        dateRow.Height = 88
 
-        ' ── Tab row (Top) ────────────────────────────────────────────────────
         Dim tabRow As Panel = BuildTabRow()
         tabRow.Dock = DockStyle.Top
-        tabRow.Height = 44
+        tabRow.Height = 56
 
-        ' ── Top bar (Top — outermost) ─────────────────────────────────────────
-        Dim topBar As Panel = BuildTopBar()
-        topBar.Dock = DockStyle.Top
-        topBar.Height = 64
+        Dim titleBar As Panel = BuildTitleBar()
+        titleBar.Dock = DockStyle.Top
+        titleBar.Height = 88
 
-        ' Add in Dock resolution order (Fill/Bottom first, then Top last-added = topmost)
         _container.Controls.Add(_contentHost)
-        _container.Controls.Add(printBar)
         _container.Controls.Add(dateRow)
         _container.Controls.Add(tabRow)
-        _container.Controls.Add(topBar)
+        _container.Controls.Add(titleBar)
 
         _container.ResumeLayout()
+
+        Dim onVisible As EventHandler = Nothing
+        onVisible = Sub(s, e)
+                        If _container.Visible Then
+                            SwapContent()
+                            RemoveHandler _container.VisibleChanged, onVisible
+                        End If
+                    End Sub
+        AddHandler _container.VisibleChanged, onVisible
 
         SwapContent()
     End Sub
 
     ' =========================================================================
-    '  1. TOP BAR  — 64 px dark gradient
+    '  1. TITLE BAR
     ' =========================================================================
-    Private Shared Function BuildTopBar() As Panel
-        Dim bar As New BufferedPanel With {.BackColor = MintDark}
+    Private Shared Function BuildTitleBar() As Panel
+        Const SIDE_PAD As Integer = 28
 
-        AddHandler bar.Paint,
-            Sub(s, e)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Using br As New LinearGradientBrush(
-                        bar.ClientRectangle, MintDark, HeaderBg, 0.0F)
-                    g.FillRectangle(br, bar.ClientRectangle)
-                End Using
-            End Sub
+        Dim bar As New Panel With {
+    .BackColor = Color.FromArgb(250, 252, 251),
+    .Height = 88,
+    .Padding = New Padding(0, 14, 0, 0)
+}
+
 
         Dim lblTitle As New Label With {
             .Text = "Reports",
-            .Font = New Font("Segoe UI Semibold", 13, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 28, FontStyle.Bold),
+            .ForeColor = MintDark,
+            .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .Location = New Point(SIDE_PAD, 22)
+        }
+
+        Dim btnPrint As New Button With {
+            .Text = "⎙  Print Report",
+            .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI Semibold", 9.5F),
             .ForeColor = Color.White,
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
-            .Location = New Point(22, 10)
-        }
-        Dim lblSub As New Label With {
-            .Text = "Financial Statements",
-            .Font = New Font("Segoe UI", 9),
-            .ForeColor = Color.FromArgb(160, 215, 200),
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
-            .Location = New Point(24, 36)
-        }
-        Dim lblDate As New Label With {
-            .Text = DateTime.Now.ToString("MMMM dd, yyyy").ToUpper(),
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = Color.FromArgb(200, 240, 225),
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
+            .BackColor = MintDark,
+            .Size = New Size(148, 38),
+            .Cursor = Cursors.Hand,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        bar.Controls.AddRange({lblTitle, lblSub, lblDate})
+        btnPrint.FlatAppearance.BorderSize = 0
+        AddHandler btnPrint.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle,
+                    bb.ForeColor, TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnPrint.MouseEnter,
+            Sub()
+                btnPrint.BackColor = MintDeep
+                btnPrint.Invalidate()
+            End Sub
+        AddHandler btnPrint.MouseLeave,
+            Sub()
+                btnPrint.BackColor = MintDark
+                btnPrint.Invalidate()
+            End Sub
+        AddHandler btnPrint.Click, Sub() PrintActiveTab()
+
+        Dim btnRefresh As New Button With {
+            .Text = "↻  Refresh",
+            .FlatStyle = FlatStyle.Flat,
+            .Cursor = Cursors.Hand,
+            .Size = New Size(110, 38),
+            .Font = New Font("Segoe UI", 9.5F),
+            .BackColor = Color.FromArgb(220, 235, 232),
+            .ForeColor = SubText,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnRefresh.FlatAppearance.BorderSize = 0
+        AddHandler btnRefresh.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle,
+                    bb.ForeColor, TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler btnRefresh.MouseEnter,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
+                btnRefresh.ForeColor = MintDark
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.MouseLeave,
+            Sub()
+                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
+                btnRefresh.ForeColor = SubText
+                btnRefresh.Invalidate()
+            End Sub
+        AddHandler btnRefresh.Click,
+            Sub()
+                LoadData()
+                SwapContent()
+            End Sub
+
         AddHandler bar.Resize,
             Sub()
-                lblDate.Left = bar.Width - lblDate.Width - 22
-                lblDate.Top = (bar.Height - lblDate.Height) \ 2
+                btnPrint.Left = bar.Width - btnPrint.Width - SIDE_PAD
+                btnPrint.Top = (bar.Height - btnPrint.Height) \ 2
+                btnRefresh.Left = btnPrint.Left - btnRefresh.Width - 10
+                btnRefresh.Top = (bar.Height - btnRefresh.Height) \ 2
             End Sub
+
+        bar.Controls.AddRange({lblTitle, btnRefresh, btnPrint})
         Return bar
     End Function
 
     ' =========================================================================
-    '  2. TAB ROW  — Income Statement | Trial Balance | Balance Sheet
-    '     Active tab: MintDark bold label + 3 px MintPrimary underline
-    '     Inactive  : SubText normal, no underline
+    '  2. TAB ROW
     ' =========================================================================
     Private Shared Function BuildTabRow() As Panel
+        Const SIDE_PAD As Integer = 28
+
         Dim bar As New Panel With {
-            .BackColor = Color.FromArgb(250, 252, 251)
+            .BackColor = MintBg,
+            .Height = 56
         }
 
-        AddHandler bar.Paint,
-            Sub(s, e)
-                ' Bottom separator
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, bar.Height - 1, bar.Width, bar.Height - 1)
-                End Using
-            End Sub
 
         Dim tabs() As (key As String, label As String) = {
             (TAB_INCOME, "Income Statement"),
@@ -269,243 +283,220 @@ Public Class AccountantReportsPanelBuilder
             (TAB_BALANCE, "Balance Sheet")
         }
 
-        Dim x As Integer = 24
+        Dim host As New FlowLayoutPanel With {
+            .FlowDirection = FlowDirection.LeftToRight,
+            .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .WrapContents = False,
+            .Location = New Point(SIDE_PAD, 11)
+        }
 
         For Each t In tabs
             Dim capKey As String = t.key
             Dim capLabel As String = t.label
             Dim isActive As Boolean = (_activeTab = capKey)
 
-            Dim lbl As New Label With {
+            Dim b As New Button With {
                 .Text = capLabel,
-                .Font = New Font("Segoe UI", 10.5F,
-                                      If(isActive, FontStyle.Bold, FontStyle.Regular)),
-                .ForeColor = If(isActive, MintDark, SubText),
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
+                .FlatStyle = FlatStyle.Flat,
                 .Cursor = Cursors.Hand,
-                .Location = New Point(x, 10),
+                .Size = New Size(148, 36),
+                .Margin = New Padding(0, 0, 8, 0),
                 .Tag = capKey
             }
+            b.FlatAppearance.BorderSize = 0
 
-            ' Underline painted per label
-            AddHandler lbl.Paint,
+            Dim applyTabStyle As Action(Of Boolean) =
+                Sub(active As Boolean)
+                    If active Then
+                        b.BackColor = MintPrimary
+                        b.ForeColor = Color.White
+                        b.Font = New Font("Segoe UI Semibold", 9.5F)
+                    Else
+                        b.BackColor = Color.FromArgb(220, 235, 232)
+                        b.ForeColor = SubText
+                        b.Font = New Font("Segoe UI", 9.5F)
+                    End If
+                    b.Invalidate()
+                End Sub
+            applyTabStyle(isActive)
+
+            AddHandler b.Paint,
                 Sub(s, e)
-                    Dim l = CType(s, Label)
-                    If CStr(l.Tag) = _activeTab Then
-                        Using br As New SolidBrush(MintPrimary)
-                            e.Graphics.FillRectangle(br,
-                                New Rectangle(0, l.Height - 3, l.Width, 3))
-                        End Using
+                    Dim bb = CType(s, Button)
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                    Using br As New SolidBrush(bb.BackColor)
+                        e.Graphics.FillRoundedRectangle(br, rect, 8)
+                    End Using
+                    TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font,
+                        bb.ClientRectangle, bb.ForeColor,
+                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+                End Sub
+
+            AddHandler b.MouseEnter,
+                Sub()
+                    If capKey <> _activeTab Then
+                        b.BackColor = Color.FromArgb(210, 240, 235)
+                        b.ForeColor = MintDark
+                        b.Invalidate()
+                    End If
+                End Sub
+            AddHandler b.MouseLeave,
+                Sub()
+                    If capKey <> _activeTab Then
+                        b.BackColor = Color.FromArgb(220, 235, 232)
+                        b.ForeColor = SubText
+                        b.Invalidate()
                     End If
                 End Sub
 
-            AddHandler lbl.Click,
+            AddHandler b.Click,
                 Sub()
                     If _activeTab = capKey Then Return
                     _activeTab = capKey
-                    RefreshTabStyles()
+                    For Each ctrl As Control In host.Controls
+                        If TypeOf ctrl Is Button Then
+                            Dim btn = CType(ctrl, Button)
+                            Dim isNowActive As Boolean = (CStr(btn.Tag) = _activeTab)
+                            If isNowActive Then
+                                btn.BackColor = MintPrimary
+                                btn.ForeColor = Color.White
+                                btn.Font = New Font("Segoe UI Semibold", 9.5F)
+                            Else
+                                btn.BackColor = Color.FromArgb(220, 235, 232)
+                                btn.ForeColor = SubText
+                                btn.Font = New Font("Segoe UI", 9.5F)
+                            End If
+                            btn.Invalidate()
+                        End If
+                    Next
                     SwapContent()
                 End Sub
 
-            AddHandler lbl.MouseEnter,
-    Sub()
-        If capKey <> _activeTab Then
-            For Each c As Control In bar.Controls
-                If TypeOf c Is Label AndAlso CStr(CType(c, Label).Tag) = capKey Then
-                    CType(c, Label).ForeColor = MintDeep
-                    CType(c, Label).Invalidate()
-                End If
-            Next
-        End If
-    End Sub
-            AddHandler lbl.MouseLeave,
-    Sub()
-        If capKey <> _activeTab Then
-            For Each c As Control In bar.Controls
-                If TypeOf c Is Label AndAlso CStr(CType(c, Label).Tag) = capKey Then
-                    CType(c, Label).ForeColor = SubText
-                    CType(c, Label).Invalidate()
-                End If
-            Next
-        End If
-    End Sub
-
-            _tabLabels(capKey) = lbl
-            bar.Controls.Add(lbl)
-            x += lbl.PreferredWidth + 36
+            host.Controls.Add(b)
         Next
 
+        bar.Controls.Add(host)
         Return bar
     End Function
 
-    ' Restyle all tab labels after a switch (no full re-render)
-    Private Shared Sub RefreshTabStyles()
-        For Each kvp In _tabLabels
-            Dim isActive As Boolean = (kvp.Key = _activeTab)
-            kvp.Value.Font = New Font("Segoe UI", 10.5F,
-                                          If(isActive, FontStyle.Bold, FontStyle.Regular))
-            kvp.Value.ForeColor = If(isActive, MintDark, SubText)
-            kvp.Value.Invalidate()
-        Next
-    End Sub
-
     ' =========================================================================
-    '  3. DATE RANGE ROW  — From/To DateTimePickers + Apply pill
+    '  3. DATE RANGE ROW
     ' =========================================================================
     Private Shared Function BuildDateRow() As Panel
+        Const SIDE_PAD As Integer = 28
+
         Dim bar As New Panel With {
-            .BackColor = Color.FromArgb(247, 250, 249),
-            .Padding = New Padding(24, 10, 24, 10)
+            .BackColor = Color.FromArgb(250, 252, 251),
+            .Height = 72
         }
 
-        AddHandler bar.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, bar.Height - 1, bar.Width, bar.Height - 1)
-                End Using
-            End Sub
 
-        ' "From" label
-        Dim lblFrom As New Label With {
-            .Text = "From:",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText,
+        Dim flow As New FlowLayoutPanel With {
+            .FlowDirection = FlowDirection.LeftToRight,
             .AutoSize = True,
             .BackColor = Color.Transparent,
-            .Location = New Point(24, 16)
+            .WrapContents = False
         }
 
-        ' From date picker
+        Dim mkLbl = Function(txt As String, w As Integer) As Label
+                        Return New Label With {
+                            .Text = txt,
+                            .Font = New Font("Segoe UI", 10.5F),
+                            .ForeColor = SubText,
+                            .AutoSize = False,
+                            .Width = w,
+                            .Height = 36,
+                            .BackColor = Color.Transparent,
+                            .TextAlign = ContentAlignment.MiddleLeft,
+                            .Margin = New Padding(0, 0, 4, 0)
+                        }
+                    End Function
+
+        Dim lblFrom As Label = mkLbl("From:", 56)
         _dtFrom = New DateTimePicker With {
             .Format = DateTimePickerFormat.Short,
             .Value = _dateFrom,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Width = 110,
-            .Location = New Point(68, 12)
+            .Font = New Font("Segoe UI", 10.5F),
+            .Width = 130,
+            .Height = 36,
+            .Margin = New Padding(0, 0, 20, 0)
         }
 
-        ' "To" label
-        Dim lblTo As New Label With {
-            .Text = "To:",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Location = New Point(192, 16)
-        }
-
-        ' To date picker
+        Dim lblTo As Label = mkLbl("To:", 34)
         _dtTo = New DateTimePicker With {
             .Format = DateTimePickerFormat.Short,
             .Value = _dateTo,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Width = 110,
-            .Location = New Point(214, 12)
+            .Font = New Font("Segoe UI", 10.5F),
+            .Width = 130,
+            .Height = 36,
+            .Margin = New Padding(0, 0, 20, 0)
         }
 
-        ' Apply pill button
         Dim btnApply As New Button With {
-            .Text = "Apply",
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = Color.White,
-            .BackColor = MintPrimary,
-            .Size = New Size(78, 30),
-            .Cursor = Cursors.Hand,
-            .Location = New Point(338, 10)
-        }
+    .Text = "Apply",
+    .FlatStyle = FlatStyle.Flat,
+    .Font = New Font("Segoe UI Semibold", 9.5F),
+    .ForeColor = Color.White,
+    .BackColor = MintPrimary,
+    .Size = New Size(78, 30),
+    .Cursor = Cursors.Hand,
+    .Margin = New Padding(0)
+}
         btnApply.FlatAppearance.BorderSize = 0
-        RoundBtn(btnApply, 12)
-
+        RoundBtn(btnApply, 10)
         AddHandler btnApply.MouseEnter, Sub() btnApply.BackColor = MintDeep
         AddHandler btnApply.MouseLeave, Sub() btnApply.BackColor = MintPrimary
-        AddHandler btnApply.Click,
-            Sub()
-                ' Validate date range
+
+        Dim lblRange As New Label With {
+    .Text = FormatRange(),
+    .Font = New Font("Segoe UI", 10.0F),
+    .ForeColor = SubText,
+    .AutoSize = True,
+    .BackColor = Color.Transparent,
+    .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+}
+
+        Dim applyHandler As EventHandler =
+            Sub(s, e)
                 If _dtFrom.Value.Date > _dtTo.Value.Date Then
-                    MessageBox.Show("'From' date cannot be after 'To' date.",
-                                    "Invalid Range",
-                                    MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    AppModal.Show("'From' date cannot be after 'To' date.",
+                                  "Invalid Range", MessageBoxButtons.OK, MessageBoxIcon.Warning)
                     Return
                 End If
                 _dateFrom = _dtFrom.Value.Date
                 _dateTo = _dtTo.Value.Date
+                lblRange.Text = FormatRange()
+                PositionRangeLabel(bar, lblRange)
                 LoadData()
                 SwapContent()
             End Sub
+        AddHandler btnApply.Click, applyHandler
 
-        ' Range summary label (updates after Apply)
-        Dim lblRange As New Label With {
-            .Text = FormatRange(),
-            .Font = New Font("Segoe UI", 9),
-            .ForeColor = FaintText,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        AddHandler btnApply.Click,
+        AddHandler bar.Resize,
             Sub()
-                lblRange.Text = FormatRange()
-                AddHandler bar.Resize, Sub() PositionRangeLabel(bar, lblRange)
+                flow.Left = SIDE_PAD
+                flow.Top = (bar.Height - flow.PreferredSize.Height) \ 2
                 PositionRangeLabel(bar, lblRange)
             End Sub
-        AddHandler bar.Resize, Sub() PositionRangeLabel(bar, lblRange)
 
-        bar.Controls.AddRange({lblFrom, _dtFrom, lblTo, _dtTo, btnApply, lblRange})
+        flow.Controls.AddRange({lblFrom, _dtFrom, lblTo, _dtTo, btnApply})
+        bar.Controls.Add(flow)
+        bar.Controls.Add(lblRange)
         Return bar
     End Function
 
     Private Shared Function FormatRange() As String
         Return _dateFrom.ToString("MMM d, yyyy") & "  —  " & _dateTo.ToString("MMM d, yyyy")
     End Function
+
     Private Shared Sub PositionRangeLabel(bar As Panel, lbl As Label)
-        lbl.Location = New Point(bar.Width - lbl.Width - 24, (bar.Height - lbl.Height) \ 2)
+        lbl.Location = New Point(bar.Width - lbl.Width - 28, (bar.Height - lbl.Height) \ 2)
     End Sub
 
     ' =========================================================================
-    '  4. PRINT BAR  — pinned bottom, Print button right
-    ' =========================================================================
-    Private Shared Function BuildPrintBar() As Panel
-        Dim bar As New Panel With {
-            .BackColor = Color.FromArgb(247, 250, 249)
-        }
-        AddHandler bar.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, 0, bar.Width, 0)
-                End Using
-            End Sub
-
-        Dim btnPrint As New Button With {
-            .Text = "⎙  Print Report",
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI Semibold", 10),
-            .ForeColor = Color.White,
-            .BackColor = MintDark,
-            .Size = New Size(148, 34),
-            .Cursor = Cursors.Hand,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnPrint.FlatAppearance.BorderSize = 0
-        RoundBtn(btnPrint, 10)
-
-        AddHandler btnPrint.MouseEnter, Sub() btnPrint.BackColor = HeaderBg
-        AddHandler btnPrint.MouseLeave, Sub() btnPrint.BackColor = MintDark
-        AddHandler btnPrint.Click, Sub() PrintActiveTab()
-
-        bar.Controls.Add(btnPrint)
-        AddHandler bar.Resize,
-            Sub()
-                btnPrint.Location = New Point(bar.Width - btnPrint.Width - 22,
-                                               (bar.Height - btnPrint.Height) \ 2)
-            End Sub
-
-        Return bar
-    End Function
-
-    ' =========================================================================
-    '  CONTENT SWAP  — clears _contentHost and rebuilds for the active tab
+    '  CONTENT SWAP
     ' =========================================================================
     Private Shared Sub SwapContent()
         If _contentHost Is Nothing Then Return
@@ -521,107 +512,144 @@ Public Class AccountantReportsPanelBuilder
         End Select
 
         content.Dock = DockStyle.Top
+        If _contentHost.ClientSize.Width > 0 Then
+            content.Width = _contentHost.ClientSize.Width
+        End If
+
         _contentHost.Controls.Add(content)
         _contentHost.ResumeLayout()
         _contentHost.Invalidate(True)
     End Sub
 
     ' =========================================================================
-    '  TAB 1 — INCOME STATEMENT
+    '  CARD WRAPPER
+    '  Draws the card border + rounded corners. All inner rows just use solid
+    '  backgrounds; all divider lines are drawn here from a stored Y-list.
     ' =========================================================================
-    Private Shared Function BuildIncomeStatement() As Panel
-        Dim card As New BufferedPanel With {
-            .BackColor = CardBg,
-            .Padding = New Padding(0, 0, 0, 18)
-        }
-        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+    Private Shared Function MakeCard(dividerYs As List(Of Integer),
+                              sectionYs As List(Of Integer)) As Panel
+        Dim card As New BufferedPanel With {.BackColor = Color.Transparent}
 
-        ' Header
-        card.Controls.Add(MakeSectionHeading("Income Statement",
-            _dateFrom.ToString("MMM d, yyyy") & " — " & _dateTo.ToString("MMM d, yyyy")))
+        AddHandler card.Paint,
+    Sub(s, e)
+        ' Let PanelRenderer draw shadow + white fill + border
+        PanelRenderer.Draw(card, e, drawBackground:=True)
 
-        ' Computed figures
-        Dim netRevenue As Decimal = _revenue - _returns
-        Dim netIncome As Decimal = netRevenue - _poCost
+        Dim g = e.Graphics
+        g.SmoothingMode = SmoothingMode.AntiAlias
 
-        ' Row data  (label, value, isBold, isSeparator, isHighlight, isSubtracted)
-        Dim rows() As (lbl As String, val As Decimal, bold As Boolean,
-                       sep As Boolean, highlight As Boolean, sub_ As Boolean) = {
-            ("Gross Revenue", _revenue, False, False, False, False),
-            ("Less: Returns", _returns, False, False, False, True),
-            ("Net Revenue", netRevenue, True, True, False, False),
-            ("Less: Cost of Purchases", _poCost, False, False, False, True),
-            ("Net Income", netIncome, True, True, True, False)
-        }
+        ' Row dividers
+        Using pen As New Pen(RowDivider, 1)
+            For Each y In dividerYs
+                g.DrawLine(pen, 24, y, card.Width - 24, y)
+            Next
+        End Using
 
-        Dim y As Integer = 68
-        For Each r In rows
-            Dim row As Panel = MakeStatementRow(r.lbl, r.val, r.bold,
-                                                r.sep, r.highlight, r.sub_)
-            row.Top = y
-            row.Left = 0
-            row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-            card.Controls.Add(row)
-            y += row.Height
+        ' Section header bottom borders
+        Using pen As New Pen(Color.FromArgb(200, 230, 222), 1)
+            For Each y In sectionYs
+                g.DrawLine(pen, 0, y, card.Width, y)
+            Next
+        End Using
+    End Sub
+
+        AddHandler card.ControlAdded,
+    Sub()
+        card.Invalidate()
+    End Sub
+
+        AddHandler card.Resize,
+    Sub()
+        For Each child As Control In card.Controls
+            child.Left = 2
+            child.Width = card.Width - 4
         Next
+        card.Invalidate()
+    End Sub
 
-        card.Height = y + 18
-        AddHandler card.ParentChanged,
-      Sub()
-          If card.Parent IsNot Nothing Then
-              AddHandler card.Parent.Resize,
-                  Sub() card.Width = card.Parent.ClientSize.Width
-          End If
-      End Sub
         Return card
     End Function
 
-    Private Shared Function MakeStatementRow(
-            label As String, value As Decimal,
-            bold As Boolean, topSep As Boolean,
-            highlight As Boolean, subtracted As Boolean) As Panel
+    ' =========================================================================
+    '  TAB 1 — INCOME STATEMENT
+    ' =========================================================================
+    Private Shared Function BuildIncomeStatement() As Panel
+        Dim dividers As New List(Of Integer)
+        Dim sections As New List(Of Integer)
 
-        Dim h As Integer = If(highlight, 56, 42)
+        Dim netRevenue As Decimal = _revenue - _returns
+        Dim netIncome As Decimal = netRevenue - _poCost
 
-        Dim row As New Panel With {
-            .Height = h,
-            .BackColor = If(highlight, HighlightBg, Color.Transparent),
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        }
+        Dim rows() As (lbl As String, val As Decimal, bold As Boolean,
+                   sep As Boolean, highlight As Boolean, sub_ As Boolean) = {
+        ("Gross Revenue", _revenue, False, False, False, False),
+        ("Less: Returns", _returns, False, False, False, True),
+        ("Net Revenue", netRevenue, True, True, False, False),
+        ("Less: Cost of Purchases", _poCost, False, False, False, True),
+        ("Net Income", netIncome, True, True, True, False)
+    }
 
-        AddHandler row.Paint,
-            Sub(s, e)
-                ' Top separator line (for sub-total rows)
-                If topSep Then
-                    Using p As New Pen(RowDivider, 1)
-                        e.Graphics.DrawLine(p, 24, 0, row.Width - 24, 0)
-                    End Using
-                End If
-                ' Bottom divider for normal rows
-                If Not highlight Then
-                    Using p As New Pen(RowDivider, 1)
-                        e.Graphics.DrawLine(p, 24, h - 1, row.Width - 24, h - 1)
-                    End Using
-                End If
-                ' MintPrimary left accent line
-                Using br As New SolidBrush(MintPrimary)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 10, 3, h - 20))
-                End Using
-                ' Highlight border (bottom)
-                If highlight Then
-                    Using p As New Pen(Color.FromArgb(180, 230, 218), 1)
-                        e.Graphics.DrawLine(p, 0, h - 1, row.Width, h - 1)
-                    End Using
-                End If
-            End Sub
+        Const HEADING_H As Integer = 62
+        Const ROW_H As Integer = 48
+        Const HIGHLIGHT_H As Integer = 72
+
+        Dim card As Panel = MakeCard(dividers, sections)
+
+        Dim hdrPanel As Panel = MakeSectionHeading("Income Statement",
+        _dateFrom.ToString("MMM d, yyyy") & " — " & _dateTo.ToString("MMM d, yyyy"), HEADING_H)
+        hdrPanel.Top = 2 : hdrPanel.Left = 2
+        hdrPanel.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(hdrPanel)
+        sections.Add(HEADING_H + 3)
+
+        Dim y As Integer = HEADING_H + 4
+
+        For Each r In rows
+            Dim rowH As Integer = If(r.highlight, HIGHLIGHT_H, ROW_H)
+            Dim rowBg As Color = If(r.highlight, HighlightBg, CardBg)
+
+            Dim row As Panel = MakeStatRow(r.lbl, r.val, r.bold, r.highlight,
+                                        r.sub_, rowH, rowBg)
+            row.Top = y : row.Left = 2
+            row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            card.Controls.Add(row)
+
+            If Not r.highlight Then
+                dividers.Add(y + rowH - 1)
+            End If
+            If r.sep Then
+                dividers.Add(y)
+            End If
+
+            y += rowH
+        Next
+
+        card.Height = y + 20
+
+        AddHandler card.ParentChanged,
+        Sub()
+            If card.Parent IsNot Nothing Then
+                card.Width = card.Parent.ClientSize.Width
+                AddHandler card.Parent.Resize,
+                    Sub() card.Width = card.Parent.ClientSize.Width
+            End If
+        End Sub
+
+        Return card
+    End Function
+
+    Private Shared Function MakeStatRow(label As String, value As Decimal,
+                                         bold As Boolean, highlight As Boolean,
+                                         subtracted As Boolean, h As Integer,
+                                         bg As Color) As Panel
+        Dim row As New Panel With {.Height = h, .BackColor = bg}
 
         Dim labelFont As Font = If(bold,
-            New Font("Segoe UI Semibold", If(highlight, 12.0F, 10.5F), FontStyle.Bold),
+            New Font("Segoe UI Semibold", If(highlight, 12.5F, 10.5F), FontStyle.Bold),
             New Font("Segoe UI", 10.5F))
-
         Dim valueFont As Font = If(bold,
-            New Font("Segoe UI", If(highlight, 13.0F, 11.0F), FontStyle.Bold),
-            New Font("Segoe UI", 10.5F))
+    New Font("Segoe UI", If(highlight, 16.0F, 11.0F), FontStyle.Bold),
+    New Font("Segoe UI", 10.5F))
 
         Dim labelColor As Color = If(highlight, MintDark,
                                      If(bold, Color.FromArgb(45, 45, 45), SubText))
@@ -639,32 +667,21 @@ Public Class AccountantReportsPanelBuilder
                                     Peso & value.ToString("N2"))
 
         Dim lblLabel As New Label With {
-            .Text = label,
-            .Font = labelFont,
-            .ForeColor = labelColor,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Top
+            .Text = label, .Font = labelFont, .ForeColor = labelColor,
+            .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblValue As New Label With {
-            .Text = valueStr,
-            .Font = valueFont,
-            .ForeColor = valueColor,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Right Or AnchorStyles.Top
+            .Text = valueStr, .Font = valueFont, .ForeColor = valueColor,
+            .AutoSize = True, .BackColor = Color.Transparent
         }
 
-        row.Controls.Add(lblLabel)
-        row.Controls.Add(lblValue)
-
+        row.Controls.AddRange({lblLabel, lblValue})
         AddHandler row.Resize,
             Sub()
-                lblLabel.Location = New Point(24, (h - lblLabel.Height) \ 2)
-                lblValue.Location = New Point(row.Width - lblValue.Width - 24,
+                lblLabel.Location = New Point(28, (h - lblLabel.Height) \ 2)
+                lblValue.Location = New Point(row.Width - lblValue.Width - 28,
                                                (h - lblValue.Height) \ 2)
             End Sub
-
         Return row
     End Function
 
@@ -672,23 +689,30 @@ Public Class AccountantReportsPanelBuilder
     '  TAB 2 — TRIAL BALANCE
     ' =========================================================================
     Private Shared Function BuildTrialBalance() As Panel
-        Dim card As New BufferedPanel With {
-            .BackColor = CardBg,
-            .Padding = New Padding(0, 0, 0, 18)
-        }
-        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+        Dim dividers As New List(Of Integer)
+        Dim sections As New List(Of Integer)
 
-        card.Controls.Add(MakeSectionHeading("Trial Balance",
-            _dateFrom.ToString("MMM d, yyyy") & " — " & _dateTo.ToString("MMM d, yyyy")))
+        Const HEADING_H As Integer = 62
+        Const COL_HDR_H As Integer = 38
+        Const ROW_H As Integer = 48
+        Const TOTAL_H As Integer = 54
+
+        Dim card As Panel = MakeCard(dividers, sections)
+
+        Dim hdrPanel As Panel = MakeSectionHeading("Trial Balance",
+            _dateFrom.ToString("MMM d, yyyy") & " — " & _dateTo.ToString("MMM d, yyyy"), HEADING_H)
+        hdrPanel.Top = 2 : hdrPanel.Left = 2
+        hdrPanel.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(hdrPanel)
+        sections.Add(HEADING_H + 3)
 
         ' Column header
-        Dim colHdr As Panel = MakeTrialColumnHeader()
-        colHdr.Top = 68
-        colHdr.Left = 0
+        Dim colHdr As Panel = MakeTrialColHeader(COL_HDR_H)
+        colHdr.Top = HEADING_H + 4 : colHdr.Left = 2
         colHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         card.Controls.Add(colHdr)
+        sections.Add(HEADING_H + COL_HDR_H + 1)
 
-        ' Data rows  (account, debit, credit)
         Dim rows() As (account As String, debit As Decimal, credit As Decimal) = {
             ("Sales Revenue", 0D, _revenue),
             ("Purchase Expenses", _poCost, 0D),
@@ -697,58 +721,58 @@ Public Class AccountantReportsPanelBuilder
 
         Dim totalDebit As Decimal = 0
         Dim totalCredit As Decimal = 0
-        Dim y As Integer = 68 + colHdr.Height
+        Dim y As Integer = HEADING_H + COL_HDR_H + 2
 
         For Each r In rows
-            Dim row As Panel = MakeTrialRow(r.account, r.debit, r.credit, False)
-            row.Top = y
-            row.Left = 0
+            Dim row As Panel = MakeTrialDataRow(r.account, r.debit, r.credit, False, ROW_H, CardBg)
+            row.Top = y : row.Left = 0
             row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             card.Controls.Add(row)
-            y += row.Height
+            dividers.Add(y + ROW_H - 1)
+            y += ROW_H
             totalDebit += r.debit
             totalCredit += r.credit
         Next
 
         ' Totals row
-        Dim totalsRow As Panel = MakeTrialRow("Totals", totalDebit, totalCredit, True)
-        totalsRow.Top = y
-        totalsRow.Left = 0
-        totalsRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        card.Controls.Add(totalsRow)
-        y += totalsRow.Height
+        Const TOTALS_H As Integer = TOTAL_H + 10
+        Dim totRow As Panel = MakeTrialDataRow("Totals", totalDebit, totalCredit, True, TOTALS_H, HighlightBg)
+        totRow.Top = y : totRow.Left = 0
+        totRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(totRow)
+        dividers.Add(y)                      ' line above totals
+        dividers.Add(y + TOTALS_H - 1)      ' line below totals
+        y += TOTALS_H
 
-        ' Balance / Out-of-balance badge
+        ' Badge
         Dim isBalanced As Boolean = (totalDebit = totalCredit)
-        Dim badgeRow As Panel = MakeBalanceBadge(isBalanced)
-        badgeRow.Top = y + 12
-        badgeRow.Left = 0
+        Dim badgeRow As Panel = MakeBalanceBadge(isBalanced, 48)
+        badgeRow.Top = y + 8 : badgeRow.Left = 0
         badgeRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         card.Controls.Add(badgeRow)
-        y += badgeRow.Height + 24
+        y += 8 + badgeRow.Height + 20
 
-        card.Height = y + 18
+        card.Height = y + 8
+
+        AddHandler card.ParentChanged,
+            Sub()
+                If card.Parent IsNot Nothing Then
+                    card.Width = card.Parent.ClientSize.Width
+                    AddHandler card.Parent.Resize,
+                        Sub() card.Width = card.Parent.ClientSize.Width
+                End If
+            End Sub
         Return card
     End Function
 
-    Private Shared Function MakeTrialColumnHeader() As Panel
-        Dim hdr As New Panel With {
-            .Height = 34,
-            .BackColor = Color.FromArgb(247, 250, 249)
-        }
-        AddHandler hdr.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, 0, hdr.Width, 0)
-                    e.Graphics.DrawLine(p, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1)
-                End Using
-            End Sub
+    Private Shared Function MakeTrialColHeader(h As Integer) As Panel
+        Dim hdr As New Panel With {.Height = h, .BackColor = SectionBg}
 
         Dim mk = Function(txt As String) As Label
                      Return New Label With {
                          .Text = txt,
-                         .Font = New Font("Segoe UI Semibold", 9),
-                         .ForeColor = Color.FromArgb(122, 152, 144),
+                         .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                         .ForeColor = Color.FromArgb(100, 140, 130),
                          .AutoSize = True,
                          .BackColor = Color.Transparent
                      }
@@ -761,103 +785,67 @@ Public Class AccountantReportsPanelBuilder
         hdr.Controls.AddRange({chAccount, chDebit, chCredit})
         AddHandler hdr.Resize,
             Sub()
-                chAccount.Location = New Point(24, (hdr.Height - chAccount.Height) \ 2)
-                chDebit.Location = New Point(CInt(hdr.Width * 0.55),
-                                               (hdr.Height - chDebit.Height) \ 2)
-                chCredit.Location = New Point(hdr.Width - chCredit.Width - 24,
-                                               (hdr.Height - chCredit.Height) \ 2)
+                chAccount.Location = New Point(28, (h - chAccount.Height) \ 2)
+                chDebit.Location = New Point(CInt(hdr.Width * 0.55), (h - chDebit.Height) \ 2)
+                chCredit.Location = New Point(hdr.Width - chCredit.Width - 28, (h - chCredit.Height) \ 2)
             End Sub
         Return hdr
     End Function
 
-    Private Shared Function MakeTrialRow(account As String,
-                                          debit As Decimal, credit As Decimal,
-                                          isTotals As Boolean) As Panel
-        Dim h As Integer = If(isTotals, 46, 42)
-
-        Dim row As New Panel With {
-            .Height = h,
-            .BackColor = If(isTotals, Color.FromArgb(247, 250, 249), Color.Transparent)
-        }
-
-        AddHandler row.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, If(isTotals, 1.5F, 1.0F))
-                    e.Graphics.DrawLine(p, 0, 0, row.Width, 0)
-                    e.Graphics.DrawLine(p, 0, h - 1, row.Width, h - 1)
-                End Using
-                If Not isTotals Then
-                    Using br As New SolidBrush(MintPrimary)
-                        e.Graphics.FillRectangle(br, New Rectangle(0, 10, 3, h - 20))
-                    End Using
-                End If
-            End Sub
-
+    Private Shared Function MakeTrialDataRow(account As String,
+                                              debit As Decimal, credit As Decimal,
+                                              isTotals As Boolean,
+                                              h As Integer, bg As Color) As Panel
+        Dim row As New Panel With {.Height = h, .BackColor = bg}
         Dim fnt As Font = If(isTotals,
-            New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-            New Font("Segoe UI", 10.5F))
+    New Font("Segoe UI Semibold", 12.0F, FontStyle.Bold),
+    New Font("Segoe UI", 10.5F))
 
         Dim lblAccount As New Label With {
-            .Text = account,
-            .Font = fnt,
+            .Text = account, .Font = fnt,
             .ForeColor = If(isTotals, MintDark, Color.FromArgb(45, 45, 45)),
-            .AutoSize = True,
-            .BackColor = Color.Transparent
+            .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblDebit As New Label With {
             .Text = If(debit = 0, "—", Peso & debit.ToString("N2")),
             .Font = fnt,
-            .ForeColor = If(isTotals, MintDark,
-                            If(debit > 0, Color.FromArgb(45, 45, 45), FaintText)),
-            .AutoSize = True,
-            .BackColor = Color.Transparent
+            .ForeColor = If(isTotals, MintDark, If(debit > 0, Color.FromArgb(45, 45, 45), FaintText)),
+            .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblCredit As New Label With {
             .Text = If(credit = 0, "—", Peso & credit.ToString("N2")),
             .Font = fnt,
-            .ForeColor = If(isTotals, MintDark,
-                            If(credit > 0, MintDeep, FaintText)),
-            .AutoSize = True,
-            .BackColor = Color.Transparent
+            .ForeColor = If(isTotals, MintDeep, If(credit > 0, MintDeep, FaintText)),
+            .AutoSize = True, .BackColor = Color.Transparent
         }
 
         row.Controls.AddRange({lblAccount, lblDebit, lblCredit})
         AddHandler row.Resize,
             Sub()
                 Dim midY As Integer = (h - lblAccount.Height) \ 2
-                lblAccount.Location = New Point(24, midY)
+                lblAccount.Location = New Point(28, midY)
                 lblDebit.Location = New Point(CInt(row.Width * 0.55), midY)
-                lblCredit.Location = New Point(row.Width - lblCredit.Width - 24, midY)
+                lblCredit.Location = New Point(row.Width - lblCredit.Width - 28, midY)
             End Sub
-
         Return row
     End Function
 
-    Private Shared Function MakeBalanceBadge(balanced As Boolean) As Panel
-        Dim row As New Panel With {
-            .Height = 38,
-            .BackColor = Color.Transparent
-        }
-
-        Dim badgeFore As Color = If(balanced, Color.White, Color.White)
-        Dim badgeBack As Color = If(balanced, MintPrimary, AccentRed)
-        Dim badgeText As String = If(balanced, "✓  Balanced", "⚠  Out of Balance")
+    Private Shared Function MakeBalanceBadge(balanced As Boolean, h As Integer) As Panel
+        Dim row As New Panel With {.Height = h, .BackColor = CardBg}
 
         Dim badge As New Label With {
-            .Text = badgeText,
+            .Text = If(balanced, "✓  Balanced", "⚠  Out of Balance"),
             .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
-            .ForeColor = badgeFore,
-            .BackColor = badgeBack,
+            .ForeColor = Color.White,
+            .BackColor = If(balanced, MintPrimary, AccentRed),
             .AutoSize = True,
-            .Padding = New Padding(14, 5, 14, 5),
+            .Padding = New Padding(14, 6, 14, 6),
             .Cursor = Cursors.Default
         }
         RoundLabel(badge, 12)
 
         row.Controls.Add(badge)
-        AddHandler row.Resize,
-            Sub() badge.Location = New Point(24, (row.Height - badge.Height) \ 2)
-
+        AddHandler row.Resize, Sub() badge.Location = New Point(28, (h - badge.Height) \ 2)
         Return row
     End Function
 
@@ -865,14 +853,15 @@ Public Class AccountantReportsPanelBuilder
     '  TAB 3 — BALANCE SHEET
     ' =========================================================================
     Private Shared Function BuildBalanceSheet() As Panel
-        Dim card As New BufferedPanel With {
-            .BackColor = CardBg,
-            .Padding = New Padding(0, 0, 0, 18)
-        }
-        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+        Dim dividers As New List(Of Integer)
+        Dim sections As New List(Of Integer)
 
-        card.Controls.Add(MakeSectionHeading("Balance Sheet",
-            "As of " & _dateTo.ToString("MMMM d, yyyy")))
+        Const HEADING_H As Integer = 62
+        Const SECTION_H As Integer = 40
+        Const ROW_H As Integer = 48
+        Const TOTAL_H As Integer = 54
+        Const EQUITY_H As Integer = 76
+        Const GAP As Integer = 12
 
         Dim netRevenue As Decimal = _revenue - _returns
         Dim cashFromSales As Decimal = netRevenue
@@ -880,84 +869,110 @@ Public Class AccountantReportsPanelBuilder
         Dim totalLiab As Decimal = _unpaidPos
         Dim netEquity As Decimal = totalAssets - totalLiab
 
-        Dim y As Integer = 68
+        Dim card As Panel = MakeCard(dividers, sections)
+
+        ' Heading
+        Dim hdrPanel As Panel = MakeSectionHeading("Balance Sheet",
+            "As of " & _dateTo.ToString("MMMM d, yyyy"), HEADING_H)
+        hdrPanel.Top = 2 : hdrPanel.Left = 2
+        hdrPanel.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(hdrPanel)
+        sections.Add(HEADING_H + 1)
+
+        Dim y As Integer = HEADING_H + 2
 
         ' ── ASSETS ───────────────────────────────────────────────────────────
-        Dim assetsHdr As Panel = MakeSheetSectionHeader("Assets")
-        assetsHdr.Top = y : assetsHdr.Left = 0
-        assetsHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        card.Controls.Add(assetsHdr)
-        y += assetsHdr.Height
+        Dim aHdr As Panel = MakeSheetSectionRow("Assets", SECTION_H)
+        aHdr.Top = y : aHdr.Left = 0
+        aHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(aHdr)
+        sections.Add(y + SECTION_H - 1)
+        y += SECTION_H
 
-        Dim assetRows() As (String, Decimal, Boolean, Boolean) = {
-            ("Cash from Sales (Net Revenue)", cashFromSales, False, False),
-            ("Stock Value (Active Products)", _stockValue, False, False),
-            ("Total Assets", totalAssets, True, True)
+        Dim assetData() As (String, Decimal, Boolean) = {
+            ("Cash from Sales (Net Revenue)", cashFromSales, False),
+            ("Stock Value (Active Products)", _stockValue, False),
+            ("Total Assets", totalAssets, True)
         }
-        For Each r In assetRows
-            Dim row = MakeSheetRow(r.Item1, r.Item2, r.Item3, r.Item4, False)
+        For Each r In assetData
+            Dim isTot As Boolean = r.Item3
+            Dim rH As Integer = If(isTot, TOTAL_H, ROW_H)
+            Dim rBg As Color = If(isTot, TotalBg, CardBg)
+            Dim valClr As Color = If(isTot, MintDeep, Color.FromArgb(45, 45, 45))
+            Dim row As Panel = MakeSheetDataRow(r.Item1, r.Item2, isTot, rH, rBg, valClr)
             row.Top = y : row.Left = 0
             row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             card.Controls.Add(row)
-            y += row.Height
+            If isTot Then
+                dividers.Add(y)
+            End If
+            dividers.Add(y + rH - 1)
+            y += rH
         Next
 
-        y += 12  ' gap between sections
+        y += GAP
 
         ' ── LIABILITIES ──────────────────────────────────────────────────────
-        Dim liabHdr As Panel = MakeSheetSectionHeader("Liabilities")
-        liabHdr.Top = y : liabHdr.Left = 0
-        liabHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        card.Controls.Add(liabHdr)
-        y += liabHdr.Height
+        Dim lHdr As Panel = MakeSheetSectionRow("Liabilities", SECTION_H)
+        lHdr.Top = y : lHdr.Left = 0
+        lHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(lHdr)
+        sections.Add(y + SECTION_H - 1)
+        y += SECTION_H
 
-        Dim liabRows() As (String, Decimal, Boolean, Boolean) = {
-            ("Unpaid Purchase Orders", _unpaidPos, False, False),
-            ("Total Liabilities", totalLiab, True, True)
+        Dim liabData() As (String, Decimal, Boolean) = {
+            ("Unpaid Purchase Orders", _unpaidPos, False),
+            ("Total Liabilities", totalLiab, True)
         }
-        For Each r In liabRows
-            Dim row = MakeSheetRow(r.Item1, r.Item2, r.Item3, r.Item4, False)
+        For Each r In liabData
+            Dim isTot As Boolean = r.Item3
+            Dim rH As Integer = If(isTot, TOTAL_H, ROW_H)
+            Dim rBg As Color = If(isTot, TotalBg, CardBg)
+            Dim valClr As Color = If(isTot, MintDeep, Color.FromArgb(45, 45, 45))
+            Dim row As Panel = MakeSheetDataRow(r.Item1, r.Item2, isTot, rH, rBg, valClr)
             row.Top = y : row.Left = 0
             row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             card.Controls.Add(row)
-            y += row.Height
+            If isTot Then dividers.Add(y)
+            dividers.Add(y + rH - 1)
+            y += rH
         Next
 
-        y += 12
+        y += GAP
 
         ' ── EQUITY ───────────────────────────────────────────────────────────
-        Dim equityHdr As Panel = MakeSheetSectionHeader("Equity")
-        equityHdr.Top = y : equityHdr.Left = 0
-        equityHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        card.Controls.Add(equityHdr)
-        y += equityHdr.Height
+        Dim eHdr As Panel = MakeSheetSectionRow("Equity", SECTION_H)
+        eHdr.Top = y : eHdr.Left = 0
+        eHdr.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(eHdr)
+        sections.Add(y + SECTION_H - 1)
+        y += SECTION_H
 
-        ' Net Equity — highlighted, large, colour by sign
-        Dim equityRow = MakeSheetRow("Net Equity  (Assets − Liabilities)",
-                                     netEquity, True, True, True)
-        equityRow.Top = y : equityRow.Left = 0
-        equityRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        card.Controls.Add(equityRow)
-        y += equityRow.Height
+        Dim equityClr As Color = If(netEquity >= 0, MintPrimary, AccentRed)
+        Dim eqRow As Panel = MakeSheetDataRow("Net Equity  (Assets − Liabilities)",
+                                               netEquity, True, EQUITY_H, HighlightBg, equityClr)
+        eqRow.Top = y : eqRow.Left = 0
+        eqRow.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        card.Controls.Add(eqRow)
+        dividers.Add(y)
+        dividers.Add(y + EQUITY_H - 1)
+        y += EQUITY_H
 
         card.Height = y + 24
+
+        AddHandler card.ParentChanged,
+            Sub()
+                If card.Parent IsNot Nothing Then
+                    card.Width = card.Parent.ClientSize.Width
+                    AddHandler card.Parent.Resize,
+                        Sub() card.Width = card.Parent.ClientSize.Width
+                End If
+            End Sub
         Return card
     End Function
 
-    Private Shared Function MakeSheetSectionHeader(title As String) As Panel
-        Dim hdr As New Panel With {
-            .Height = 36,
-            .BackColor = Color.FromArgb(240, 248, 245)
-        }
-        AddHandler hdr.Paint,
-            Sub(s, e)
-                Using br As New SolidBrush(MintPrimary)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 0, 4, hdr.Height))
-                End Using
-                Using p As New Pen(Color.FromArgb(200, 230, 222), 1)
-                    e.Graphics.DrawLine(p, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1)
-                End Using
-            End Sub
+    Private Shared Function MakeSheetSectionRow(title As String, h As Integer) As Panel
+        Dim hdr As New Panel With {.Height = h, .BackColor = SectionBg}
 
         Dim lbl As New Label With {
             .Text = title.ToUpper(),
@@ -965,191 +980,50 @@ Public Class AccountantReportsPanelBuilder
             .ForeColor = MintDeep,
             .AutoSize = True,
             .BackColor = Color.Transparent,
-            .Location = New Point(16, (36 - 14) \ 2)
+            .Location = New Point(24, (h - 16) \ 2)
         }
         hdr.Controls.Add(lbl)
         Return hdr
     End Function
 
-    Private Shared Function MakeSheetRow(label As String, value As Decimal,
-                                          bold As Boolean, isTotalRow As Boolean,
-                                          isEquity As Boolean) As Panel
-        Dim h As Integer = If(isEquity, 58, If(isTotalRow, 46, 42))
+    Private Shared Function MakeSheetDataRow(label As String, value As Decimal,
+                                              bold As Boolean, h As Integer,
+                                              bg As Color, valClr As Color) As Panel
+        Dim row As New Panel With {.Height = h, .BackColor = bg}
 
-        Dim row As New Panel With {
-            .Height = h,
-            .BackColor = If(isEquity, HighlightBg,
-                            If(isTotalRow, Color.FromArgb(247, 250, 249),
-                               Color.Transparent))
-        }
-
-        Dim equityPositive As Boolean = (isEquity AndAlso value >= 0)
-
-        AddHandler row.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, If(isTotalRow OrElse isEquity, 1.5F, 1.0F))
-                    If isTotalRow OrElse isEquity Then
-                        e.Graphics.DrawLine(p, 0, 0, row.Width, 0)
-                    End If
-                    e.Graphics.DrawLine(p, 0, h - 1, row.Width, h - 1)
-                End Using
-                ' Left accent bar
-                Dim accentClr As Color = If(isEquity,
-                    If(equityPositive, MintPrimary, AccentRed),
-                    MintPrimary)
-                Using br As New SolidBrush(accentClr)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 8, 3, h - 16))
-                End Using
-            End Sub
-
-        Dim fnt As Font = If(bold OrElse isEquity,
-            New Font("Segoe UI Semibold", If(isEquity, 12.0F, 10.5F), FontStyle.Bold),
-            New Font("Segoe UI", 10.5F))
-
-        Dim lblColor As Color = If(isEquity, MintDark,
-                                   If(bold, Color.FromArgb(45, 45, 45), SubText))
-        Dim valColor As Color
-        If isEquity Then
-            valColor = If(equityPositive, MintPrimary, AccentRed)
-        ElseIf bold Then
-            valColor = MintDeep
-        Else
-            valColor = Color.FromArgb(45, 45, 45)
-        End If
+        Dim fnt As Font = If(bold,
+    New Font("Segoe UI Semibold", If(bg.Equals(HighlightBg), 14.0F, 10.5F), FontStyle.Bold),
+    New Font("Segoe UI", 10.5F))
 
         Dim lblLabel As New Label With {
-            .Text = label,
-            .Font = fnt,
-            .ForeColor = lblColor,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
+            .Text = label, .Font = fnt,
+            .ForeColor = If(bg.Equals(HighlightBg), MintDark,
+                            If(bold, Color.FromArgb(45, 45, 45), SubText)),
+            .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = Peso & value.ToString("N2"),
-            .Font = fnt,
-            .ForeColor = valColor,
-            .AutoSize = True,
-            .BackColor = Color.Transparent
+            .Font = fnt, .ForeColor = valClr,
+            .AutoSize = True, .BackColor = Color.Transparent
         }
 
-        row.Controls.Add(lblLabel)
-        row.Controls.Add(lblVal)
-
+        row.Controls.AddRange({lblLabel, lblVal})
         AddHandler row.Resize,
             Sub()
                 Dim midY As Integer = (h - lblLabel.Height) \ 2
-                lblLabel.Location = New Point(24, midY)
-                lblVal.Location = New Point(row.Width - lblVal.Width - 24, midY)
+                lblLabel.Location = New Point(28, midY)
+                lblVal.Location = New Point(row.Width - lblVal.Width - 28, midY)
             End Sub
-
         Return row
     End Function
 
     ' =========================================================================
-    '  PRINT  — builds RLine list for active tab and calls ReceiptPrinter.Preview
+    '  SECTION HEADING  — card title row
     ' =========================================================================
-    Private Shared Sub PrintActiveTab()
-        Dim lines As New List(Of ReceiptPrinter.RLine)
-        Dim docName As String
-        Dim rangeStr As String = FormatRange()
-
-        Select Case _activeTab
-
-            Case TAB_INCOME
-                docName = "Income Statement"
-                lines.Add(ReceiptPrinter.Section("Income Statement"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("Period", rangeStr))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(New ReceiptPrinter.RLine("Gross Revenue",
-                    Peso & _revenue.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Less: Returns",
-                    "(" & Peso & _returns.ToString("N2") & ")"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("Net Revenue",
-                    Peso & (_revenue - _returns).ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Less: Cost of Purchases",
-                    "(" & Peso & _poCost.ToString("N2") & ")"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("NET INCOME",
-                    Peso & (_revenue - _returns - _poCost).ToString("N2")))
-
-            Case TAB_TRIAL
-                docName = "Trial Balance"
-                Dim totalD As Decimal = _poCost + _returns
-                Dim totalC As Decimal = _revenue
-                lines.Add(ReceiptPrinter.Section("Trial Balance"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("Period", rangeStr))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(New ReceiptPrinter.RLine("ACCOUNT", "DEBIT / CREDIT"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("Sales Revenue",
-                    "CR " & Peso & _revenue.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Purchase Expenses",
-                    "DR " & Peso & _poCost.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Returns",
-                    "DR " & Peso & _returns.ToString("N2")))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("Total Debits",
-                    Peso & totalD.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Total Credits",
-                    Peso & totalC.ToString("N2")))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(New ReceiptPrinter.RLine("Status",
-                    If(totalD = totalC, "BALANCED", "OUT OF BALANCE")))
-
-            Case TAB_BALANCE
-                docName = "Balance Sheet"
-                Dim net As Decimal = _revenue - _returns
-                Dim totA As Decimal = net + _stockValue
-                Dim totL As Decimal = _unpaidPos
-                Dim equity As Decimal = totA - totL
-                lines.Add(ReceiptPrinter.Section("Balance Sheet"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("As of", _dateTo.ToString("MMMM d, yyyy")))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(ReceiptPrinter.Section("Assets"))
-                lines.Add(New ReceiptPrinter.RLine("Cash from Sales", Peso & net.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Stock Value", Peso & _stockValue.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Total Assets", Peso & totA.ToString("N2")))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(ReceiptPrinter.Section("Liabilities"))
-                lines.Add(New ReceiptPrinter.RLine("Unpaid POs", Peso & _unpaidPos.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Total Liabilities", Peso & totL.ToString("N2")))
-                lines.Add(ReceiptPrinter.Spacer())
-                lines.Add(ReceiptPrinter.Section("Equity"))
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine("NET EQUITY", Peso & equity.ToString("N2")))
-
-            Case Else
-                docName = "Report"
-        End Select
-
-        ReceiptPrinter.Preview(docName, lines,
-                               receiptNo:="",
-                               storeName:="PAINT STORE",
-                               storeTagline:=docName)
-    End Sub
-
-    ' =========================================================================
-    '  SHARED HELPERS
-    ' =========================================================================
-
-    ' Shared section heading (card header style — title left, date range right)
     Private Shared Function MakeSectionHeading(title As String,
-                                                subtitle As String) As Panel
-        Dim hdr As New Panel With {
-            .Height = 58,
-            .Dock = DockStyle.Top,
-            .BackColor = Color.Transparent
-        }
-        AddHandler hdr.Paint,
-            Sub(s, e)
-                Using p As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(p, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1)
-                End Using
-            End Sub
+                                            subtitle As String,
+                                            h As Integer) As Panel
+        Dim hdr As New Panel With {.Height = h - 2, .BackColor = Color.Transparent}
 
         Dim lblTitle As New Label With {
             .Text = title,
@@ -1157,7 +1031,7 @@ Public Class AccountantReportsPanelBuilder
             .ForeColor = MintDark,
             .AutoSize = True,
             .BackColor = Color.Transparent,
-            .Location = New Point(22, 14)
+            .Location = New Point(24, (h - 20) \ 2)
         }
         Dim lblSub As New Label With {
             .Text = subtitle,
@@ -1170,13 +1044,79 @@ Public Class AccountantReportsPanelBuilder
         hdr.Controls.AddRange({lblTitle, lblSub})
         AddHandler hdr.Resize,
             Sub()
-                lblSub.Location = New Point(hdr.Width - lblSub.Width - 22,
-                                             (hdr.Height - lblSub.Height) \ 2)
+                lblSub.Location = New Point(hdr.Width - lblSub.Width - 24,
+                                             (h - lblSub.Height) \ 2)
             End Sub
         Return hdr
     End Function
 
-    ' Clip a Label to a rounded region
+    ' =========================================================================
+    '  PRINT
+    ' =========================================================================
+    Private Shared Sub PrintActiveTab()
+        Dim doc As New ReportPrinter.ReportDoc()
+        Dim rangeStr As String = FormatRange()
+
+        Select Case _activeTab
+
+            Case TAB_INCOME
+                doc.Title = "Income Statement"
+                doc.PeriodLabel = "Period"
+                doc.PeriodValue = rangeStr
+                doc.Rows.Add(ReportPrinter.Data("Gross Revenue", Peso & _revenue.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Data("Less: Returns",
+                If(_returns > 0, "(" & Peso & _returns.ToString("N2") & ")", Peso & _returns.ToString("N2")), _returns > 0))
+                doc.Rows.Add(ReportPrinter.Total("Net Revenue", Peso & (_revenue - _returns).ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Data("Less: Cost of Purchases",
+                If(_poCost > 0, "(" & Peso & _poCost.ToString("N2") & ")", Peso & _poCost.ToString("N2")), _poCost > 0))
+                Dim netIncome As Decimal = _revenue - _returns - _poCost
+                doc.Rows.Add(ReportPrinter.Highlight("NET INCOME", Peso & netIncome.ToString("N2"), netIncome < 0))
+
+            Case TAB_TRIAL
+                doc.Title = "Trial Balance"
+                doc.PeriodLabel = "Period"
+                doc.PeriodValue = rangeStr
+                doc.Rows.Add(ReportPrinter.TwoColHeader("DEBIT", "CREDIT"))
+                doc.Rows.Add(ReportPrinter.TwoCol("Sales Revenue", "—", Peso & _revenue.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.TwoCol("Purchase Expenses", Peso & _poCost.ToString("N2"), "—"))
+                doc.Rows.Add(ReportPrinter.TwoCol("Returns", Peso & _returns.ToString("N2"), "—"))
+                Dim totalD As Decimal = _poCost + _returns
+                Dim totalC As Decimal = _revenue
+                doc.Rows.Add(ReportPrinter.TwoColTotal("Totals", Peso & totalD.ToString("N2"), Peso & totalC.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Spacer())
+                doc.Rows.Add(ReportPrinter.Status(If(totalD = totalC, "✓  Balanced", "⚠  Out of Balance"), totalD = totalC))
+
+            Case TAB_BALANCE
+                doc.Title = "Balance Sheet"
+                doc.PeriodLabel = "As of"
+                doc.PeriodValue = _dateTo.ToString("MMMM d, yyyy")
+                Dim net As Decimal = _revenue - _returns
+                Dim totA As Decimal = net + _stockValue
+                Dim totL As Decimal = _unpaidPos
+                Dim equity As Decimal = totA - totL
+
+                doc.Rows.Add(ReportPrinter.Section("Assets"))
+                doc.Rows.Add(ReportPrinter.Data("Cash from Sales (Net Revenue)", Peso & net.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Data("Stock Value (Active Products)", Peso & _stockValue.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Total("Total Assets", Peso & totA.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Spacer())
+                doc.Rows.Add(ReportPrinter.Section("Liabilities"))
+                doc.Rows.Add(ReportPrinter.Data("Unpaid Purchase Orders", Peso & _unpaidPos.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Total("Total Liabilities", Peso & totL.ToString("N2")))
+                doc.Rows.Add(ReportPrinter.Spacer())
+                doc.Rows.Add(ReportPrinter.Section("Equity"))
+                doc.Rows.Add(ReportPrinter.Highlight("NET EQUITY  (Assets − Liabilities)", Peso & equity.ToString("N2"), equity < 0))
+
+            Case Else
+                doc.Title = "Report"
+        End Select
+
+        ReportPrinter.Preview(doc, companyName:="PAINT STORE", preparedBy:="Accountant")
+    End Sub
+
+    ' =========================================================================
+    '  HELPERS
+    ' =========================================================================
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
         AddHandler lbl.Resize,
             Sub()
@@ -1191,7 +1131,6 @@ Public Class AccountantReportsPanelBuilder
             End Sub
     End Sub
 
-    ' Clip a Button to a rounded region
     Private Shared Sub RoundBtn(btn As Button, radius As Integer)
         AddHandler btn.Resize,
             Sub()
