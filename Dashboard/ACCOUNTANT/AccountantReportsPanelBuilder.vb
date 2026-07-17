@@ -37,8 +37,10 @@ Public Class AccountantReportsPanelBuilder
     Private Shared _revenue As Decimal
     Private Shared _returns As Decimal
     Private Shared _poCost As Decimal
+    Private Shared _cogs As Decimal
     Private Shared _unpaidPos As Decimal
     Private Shared _stockValue As Decimal
+    Private Shared _trialRows As New List(Of (Account As String, Debit As Decimal, Credit As Decimal))
 
     Private Shared _contentHost As Panel
     Private Shared _dtFrom As DateTimePicker
@@ -60,7 +62,7 @@ Public Class AccountantReportsPanelBuilder
     ' =========================================================================
     Private Shared Sub LoadData()
         _revenue = 0 : _returns = 0 : _poCost = 0
-        _unpaidPos = 0 : _stockValue = 0
+        _cogs = 0 : _unpaidPos = 0 : _stockValue = 0
 
         Dim fromVal As DateTime = _dateFrom.Date
         Dim toVal As DateTime = _dateTo.Date.AddDays(1).AddSeconds(-1)
@@ -93,6 +95,21 @@ Public Class AccountantReportsPanelBuilder
                     _poCost = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
+                ' True Cost of Goods Sold: items actually SOLD in the period,
+                ' valued at each product's average purchase cost.
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(si.qty * ac.avg_cost), 0) " &
+                    "FROM sale_items si " &
+                    "JOIN sales s ON s.sale_id = si.sale_id " &
+                    "JOIN (SELECT product_id, SUM(unit_cost * qty) / NULLIF(SUM(qty),0) AS avg_cost " &
+                    "      FROM po_items GROUP BY product_id) ac ON ac.product_id = si.product_id " &
+                    "WHERE si.product_id IS NOT NULL " &
+                    "AND s.sale_datetime BETWEEN @from AND @to", conn)
+                    cmd.Parameters.AddWithValue("@from", fromVal)
+                    cmd.Parameters.AddWithValue("@to", toVal)
+                    _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
+                End Using
+
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
                     "WHERE status NOT IN ('Received','Cancelled')", conn)
@@ -109,6 +126,9 @@ Public Class AccountantReportsPanelBuilder
             AppModal.Show("Failed to load report data." & vbCrLf & ex.Message,
                           "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
+
+        ' Trial balance posted with the SAME rules as the ledger, so the two reconcile.
+        _trialRows = AccountantLedgerPanelBuilder.GetTrialBalance(_dateFrom, _dateTo)
     End Sub
 
     ' =========================================================================
@@ -578,14 +598,15 @@ Public Class AccountantReportsPanelBuilder
         Dim sections As New List(Of Integer)
 
         Dim netRevenue As Decimal = _revenue - _returns
-        Dim netIncome As Decimal = netRevenue - _poCost
+        Dim netIncome As Decimal = netRevenue - _cogs
+
 
         Dim rows() As (lbl As String, val As Decimal, bold As Boolean,
                    sep As Boolean, highlight As Boolean, sub_ As Boolean) = {
         ("Gross Revenue", _revenue, False, False, False, False),
         ("Less: Returns", _returns, False, False, False, True),
         ("Net Revenue", netRevenue, True, True, False, False),
-        ("Less: Cost of Purchases", _poCost, False, False, False, True),
+("Less: Cost of Goods Sold", _cogs, False, False, False, True),
         ("Net Income", netIncome, True, True, True, False)
     }
 
@@ -713,11 +734,7 @@ Public Class AccountantReportsPanelBuilder
         card.Controls.Add(colHdr)
         sections.Add(HEADING_H + COL_HDR_H + 1)
 
-        Dim rows() As (account As String, debit As Decimal, credit As Decimal) = {
-            ("Sales Revenue", 0D, _revenue),
-            ("Purchase Expenses", _poCost, 0D),
-            ("Returns", _returns, 0D)
-        }
+        Dim rows = _trialRows
 
         Dim totalDebit As Decimal = 0
         Dim totalCredit As Decimal = 0
@@ -1067,9 +1084,9 @@ Public Class AccountantReportsPanelBuilder
                 doc.Rows.Add(ReportPrinter.Data("Less: Returns",
                 If(_returns > 0, "(" & Peso & _returns.ToString("N2") & ")", Peso & _returns.ToString("N2")), _returns > 0))
                 doc.Rows.Add(ReportPrinter.Total("Net Revenue", Peso & (_revenue - _returns).ToString("N2")))
-                doc.Rows.Add(ReportPrinter.Data("Less: Cost of Purchases",
-                If(_poCost > 0, "(" & Peso & _poCost.ToString("N2") & ")", Peso & _poCost.ToString("N2")), _poCost > 0))
-                Dim netIncome As Decimal = _revenue - _returns - _poCost
+                doc.Rows.Add(ReportPrinter.Data("Less: Cost of Goods Sold",
+                If(_cogs > 0, "(" & Peso & _cogs.ToString("N2") & ")", Peso & _cogs.ToString("N2")), _cogs > 0))
+                Dim netIncome As Decimal = _revenue - _returns - _cogs
                 doc.Rows.Add(ReportPrinter.Highlight("NET INCOME", Peso & netIncome.ToString("N2"), netIncome < 0))
 
             Case TAB_TRIAL
@@ -1077,14 +1094,16 @@ Public Class AccountantReportsPanelBuilder
                 doc.PeriodLabel = "Period"
                 doc.PeriodValue = rangeStr
                 doc.Rows.Add(ReportPrinter.TwoColHeader("DEBIT", "CREDIT"))
-                doc.Rows.Add(ReportPrinter.TwoCol("Sales Revenue", "—", Peso & _revenue.ToString("N2")))
-                doc.Rows.Add(ReportPrinter.TwoCol("Purchase Expenses", Peso & _poCost.ToString("N2"), "—"))
-                doc.Rows.Add(ReportPrinter.TwoCol("Returns", Peso & _returns.ToString("N2"), "—"))
-                Dim totalD As Decimal = _poCost + _returns
-                Dim totalC As Decimal = _revenue
-                doc.Rows.Add(ReportPrinter.TwoColTotal("Totals", Peso & totalD.ToString("N2"), Peso & totalC.ToString("N2")))
+                Dim tD As Decimal = 0D, tC As Decimal = 0D
+                For Each r In _trialRows
+                    doc.Rows.Add(ReportPrinter.TwoCol(r.Account,
+                        If(r.Debit > 0, Peso & r.Debit.ToString("N2"), "—"),
+                        If(r.Credit > 0, Peso & r.Credit.ToString("N2"), "—")))
+                    tD += r.Debit : tC += r.Credit
+                Next
+                doc.Rows.Add(ReportPrinter.TwoColTotal("Totals", Peso & tD.ToString("N2"), Peso & tC.ToString("N2")))
                 doc.Rows.Add(ReportPrinter.Spacer())
-                doc.Rows.Add(ReportPrinter.Status(If(totalD = totalC, "✓  Balanced", "⚠  Out of Balance"), totalD = totalC))
+                doc.Rows.Add(ReportPrinter.Status(If(tD = tC, "✓  Balanced", "⚠  Out of Balance"), tD = tC))
 
             Case TAB_BALANCE
                 doc.Title = "Balance Sheet"

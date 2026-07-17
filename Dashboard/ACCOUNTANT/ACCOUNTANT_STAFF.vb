@@ -1,6 +1,7 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 
+
 Public Class ACCOUNTANT_STAFF
 
     Private MintPrimary As Color = Color.FromArgb(0, 200, 170)
@@ -127,7 +128,7 @@ Public Class ACCOUNTANT_STAFF
         incomeExpenses.Text = "Income & Expenses"
         payables.Text = "Payables"
         salesHistory.Text = "Sales History"
-        auditTrail.Text = "Audit Trail"
+        ledger.Text = "Ledger"
         reports.Text = "Reports"
         logout.Text = "Logout"
 
@@ -137,10 +138,10 @@ Public Class ACCOUNTANT_STAFF
             .ForeColor = Color.FromArgb(120, 138, 134),
             .AutoSize = True,
             .Location = New Point(22, 96)
-        }
+}
         Nav.Controls.Add(lblMenu)
 
-        Dim navButtons() As Button = {home, incomeExpenses, payables, salesHistory, auditTrail, reports}
+        Dim navButtons() As Button = {home, incomeExpenses, payables, salesHistory, ledger, reports}
         Dim topPos As Integer = 128
         For Each btn In navButtons
             StyleButton(btn)
@@ -210,11 +211,11 @@ Public Class ACCOUNTANT_STAFF
         Dim iconPath As String = ""
         Select Case btn.Name.ToLower()
             Case "home" : iconPath = "home.png"
-            Case "incomeexpenses" : iconPath = "bar-chart.png"
-            Case "payables" : iconPath = "clipboard.png"
-            Case "saleshistory" : iconPath = "previous.png"
-            Case "audittrail" : iconPath = "clock.png"
-            Case "reports" : iconPath = "inventory.png"
+            Case "incomeexpenses" : iconPath = "wallet-income.png"
+            Case "payables" : iconPath = "task-checklist.png"
+            Case "saleshistory" : iconPath = "time-past.png"
+            Case "ledger" : iconPath = "coins.png"
+            Case "reports" : iconPath = "newspaper.png"
             Case "logout" : iconPath = "logout.png"
         End Select
 
@@ -223,7 +224,20 @@ Public Class ACCOUNTANT_STAFF
             Dim padded As New Bitmap(40, 24)
             Using g As Graphics = Graphics.FromImage(padded)
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic
-                g.DrawImage(src, 0, 0, 24, 24)
+                ' Recolor to black while keeping each pixel's original alpha,
+                ' so the icon shape stays and only its color changes.
+                Dim blackMatrix As New Imaging.ColorMatrix(New Single()() {
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 0, 0},
+                    New Single() {0, 0, 0, 1, 0},
+                    New Single() {0, 0, 0, 0, 1}
+                })
+                Using attrs As New Imaging.ImageAttributes()
+                    attrs.SetColorMatrix(blackMatrix)
+                    g.DrawImage(src, New Rectangle(0, 0, 24, 24),
+                                0, 0, 24, 24, GraphicsUnit.Pixel, attrs)
+                End Using
             End Using
             btn.Image = padded
         End If
@@ -323,11 +337,11 @@ Public Class ACCOUNTANT_STAFF
         MainContainer.Refresh()
     End Sub
 
-    Private Sub auditTrail_Click(sender As Object, e As EventArgs) Handles auditTrail.Click
-        SetActive(auditTrail)
+    Private Sub ledger_Click(sender As Object, e As EventArgs) Handles ledger.Click
+        SetActive(ledger)
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
-        AccountantAuditTrailPanelBuilder.LoadAuditTrail(MainContainer)
+        AccountantLedgerPanelBuilder.LoadLedger(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub

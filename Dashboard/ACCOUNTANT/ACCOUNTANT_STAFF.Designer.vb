@@ -20,7 +20,7 @@ Partial Class ACCOUNTANT_STAFF
         Me.Nav = New System.Windows.Forms.Panel()
         Me.logout = New System.Windows.Forms.Button()
         Me.reports = New System.Windows.Forms.Button()
-        Me.auditTrail = New System.Windows.Forms.Button()
+        Me.ledger = New System.Windows.Forms.Button()
         Me.salesHistory = New System.Windows.Forms.Button()
         Me.payables = New System.Windows.Forms.Button()
         Me.incomeExpenses = New System.Windows.Forms.Button()
@@ -32,7 +32,7 @@ Partial Class ACCOUNTANT_STAFF
         '
         Me.Nav.Controls.Add(Me.logout)
         Me.Nav.Controls.Add(Me.reports)
-        Me.Nav.Controls.Add(Me.auditTrail)
+        Me.Nav.Controls.Add(Me.ledger)
         Me.Nav.Controls.Add(Me.salesHistory)
         Me.Nav.Controls.Add(Me.payables)
         Me.Nav.Controls.Add(Me.incomeExpenses)
@@ -62,14 +62,14 @@ Partial Class ACCOUNTANT_STAFF
         Me.reports.UseVisualStyleBackColor = True
 
         '
-        'auditTrail
+        'ledger
         '
-        Me.auditTrail.Location = New System.Drawing.Point(4, 435)
-        Me.auditTrail.Name = "auditTrail"
-        Me.auditTrail.Size = New System.Drawing.Size(100, 23)
-        Me.auditTrail.TabIndex = 6
-        Me.auditTrail.Text = "Audit Trail"
-        Me.auditTrail.UseVisualStyleBackColor = True
+        Me.ledger.Location = New System.Drawing.Point(4, 435)
+        Me.ledger.Name = "ledger"
+        Me.ledger.Size = New System.Drawing.Size(100, 23)
+        Me.ledger.TabIndex = 6
+        Me.ledger.Text = "Ledger"
+        Me.ledger.UseVisualStyleBackColor = True
         '
         'salesHistory
         '
@@ -128,5 +128,5 @@ Partial Class ACCOUNTANT_STAFF
     Friend WithEvents salesHistory As Button
     Friend WithEvents reports As Button
     Friend WithEvents logout As Button
-    Friend WithEvents auditTrail As Button
+    Friend WithEvents ledger As Button
 End Class
