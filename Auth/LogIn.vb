@@ -527,7 +527,7 @@ Public Class LogIn
         RouteByRole(Session.CurrentRole)
     End Sub
 
-    ' ===== ROLE ROUTING ===== (unchanged from original)
+    ' ===== ROLE ROUTING ===== (CHANGE THIS IF ADMIN IS ON DEVELOPMENT)
     Private Sub RouteByRole(role As String)
         Select Case role
             Case "Admin"
