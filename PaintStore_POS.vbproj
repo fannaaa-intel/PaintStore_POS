@@ -157,6 +157,24 @@
       <DependentUpon>AccountantSalesHistoryPanelBuilder.vb</DependentUpon>
     </Compile>
     <Compile Include="Dashboard\ACCOUNTANT\AccountantSalesHistoryPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminActivityLogPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminCategoriesPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminColorFormulasPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminFinancialReportsPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminInventoryOverviewPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminProcurementOverviewPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminDashPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminRolesPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminSalesOverviewPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminStoreSettingsPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminSuppliersPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\AdminUserPanelBuilder.vb" />
+    <Compile Include="Dashboard\ADMIN\ADMIN_STAFF.Designer.vb">
+      <DependentUpon>ADMIN_STAFF.vb</DependentUpon>
+    </Compile>
+    <Compile Include="Dashboard\ADMIN\ADMIN_STAFF.vb">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Dashboard\ACCOUNTANT\ACCOUNTANT_STAFF.Designer.vb">
       <DependentUpon>ACCOUNTANT_STAFF.vb</DependentUpon>
     </Compile>
@@ -250,6 +268,7 @@
     </Compile>
     <Compile Include="Modules\AppModal.vb" />
     <Compile Include="Modules\POS\ConfirmSaleModal.vb" />
+    <Compile Include="Modules\ActivityLog.vb" />
     <Compile Include="Modules\Db.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />
     <Compile Include="Modules\POS\ReceiptPrinter.vb" />
@@ -257,6 +276,7 @@
     <Compile Include="Modules\POS\SaleCompleteModal.vb" />
     <Compile Include="Modules\ReportPrinter.vb" />
     <Compile Include="Modules\Session.vb" />
+    <Compile Include="Modules\StoreSettings.vb" />
     <Compile Include="Resources\Dashboard.Designer.vb">
       <DependentUpon>Dashboard.vb</DependentUpon>
     </Compile>
@@ -324,6 +344,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantSalesHistoryPanelBuilder.resx">
       <DependentUpon>AccountantSalesHistoryPanelBuilder.vb</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Dashboard\ADMIN\ADMIN_STAFF.resx">
+      <DependentUpon>ADMIN_STAFF.vb</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\ACCOUNTANT\ACCOUNTANT_STAFF.resx">
       <DependentUpon>ACCOUNTANT_STAFF.vb</DependentUpon>

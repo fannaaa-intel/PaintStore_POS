@@ -360,6 +360,7 @@ Public Class ACCOUNTANT_STAFF
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
+        ActivityLog.Record("LOGOUT")
         Dim loginForm As New LogIn()
         loginForm.Show()
         Me.Close()

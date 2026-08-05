@@ -65,3 +65,4 @@ C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantPay
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantSalesHistoryPanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantReportsPanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantLedgerPanelBuilder.resources
+c:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ADMIN_STAFF.resources

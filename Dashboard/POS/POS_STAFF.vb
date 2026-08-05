@@ -619,6 +619,8 @@ Public Class POS_STAFF
             Return
         End If
 
+        ActivityLog.Record("LOGOUT")
+
         ' Close the active shift on logout
         If Session.ShiftId > 0 Then
             Try

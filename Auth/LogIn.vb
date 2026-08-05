@@ -524,6 +524,7 @@ Public Class LogIn
             Return
         End Try
 
+        ActivityLog.Record("LOGIN")
         RouteByRole(Session.CurrentRole)
     End Sub
 
@@ -531,8 +532,8 @@ Public Class LogIn
     Private Sub RouteByRole(role As String)
         Select Case role
             Case "Admin"
-                Dim dash As New Dashboard()
-                dash.Show()
+                Dim adminForm As New ADMIN_STAFF()
+                adminForm.Show()
                 Me.Hide()
             Case "Cashier"
                 Dim staff As New POS_STAFF()

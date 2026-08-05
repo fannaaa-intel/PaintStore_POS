@@ -996,7 +996,7 @@ Public Class TransactionPanelBuilder
         If disc < 0 Then disc = 0
         If disc > subtotal Then disc = subtotal
         Dim grand As Decimal = subtotal - disc
-        Dim vat As Decimal = Math.Round(grand * 12D / 112D, 2)
+        Dim vat As Decimal = StoreSettings.ComputeVat(grand)
         If _lblItems IsNot Nothing Then _lblItems.Text = items.ToString()
         If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "P " & subtotal.ToString("N2")
         If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- P " & disc.ToString("N2")
@@ -1513,7 +1513,7 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
-                            cmd.Parameters.AddWithValue("@vat", Math.Round(total * 12D / 112D, 2))
+                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(total))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.Parameters.AddWithValue("@tendered", amountTendered)
                             cmd.Parameters.AddWithValue("@change", changeDue)
@@ -1572,7 +1572,7 @@ Public Class TransactionPanelBuilder
             _lastSalePay = _payMethodName
             _lastSaleSubtotal = subtotal
             _lastSaleDiscount = discount
-            _lastSaleVat = Math.Round(total * 12D / 112D, 2)
+            _lastSaleVat = StoreSettings.ComputeVat(total)
             _lastSaleTotal = total
             _lastSaleTendered = amountTendered
             _lastSaleChange = changeDue
@@ -1700,7 +1700,7 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
-                            cmd.Parameters.AddWithValue("@vat", Math.Round(total * 12D / 112D, 2))
+                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(total))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.ExecuteNonQuery()
                         End Using
@@ -1911,8 +1911,18 @@ Public Class TransactionPanelBuilder
     ' =========================================================================
     Private Shared Sub PrintReceipt()
         Dim lines As New List(Of ReceiptPrinter.RLine)
-        lines.Add(New ReceiptPrinter.RLine("PAINT STORE POS", , ReceiptPrinter.LineStyle.Title))
-        lines.Add(New ReceiptPrinter.RLine("Sales Receipt", , ReceiptPrinter.LineStyle.Muted))
+        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreName, , ReceiptPrinter.LineStyle.Title))
+        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreTagline, , ReceiptPrinter.LineStyle.Muted))
+        ' Optional header lines — only emitted when the setting is filled in.
+        If StoreSettings.StoreAddress <> "" Then
+            lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreAddress, , ReceiptPrinter.LineStyle.Muted))
+        End If
+        If StoreSettings.StoreContact <> "" Then
+            lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreContact, , ReceiptPrinter.LineStyle.Muted))
+        End If
+        If StoreSettings.StoreTin <> "" Then
+            lines.Add(New ReceiptPrinter.RLine("TIN: " & StoreSettings.StoreTin, , ReceiptPrinter.LineStyle.Muted))
+        End If
         lines.Add(ReceiptPrinter.Divider())
         If Not String.IsNullOrEmpty(_lastSaleNo) Then
             lines.Add(New ReceiptPrinter.RLine("Receipt:", _lastSaleNo))

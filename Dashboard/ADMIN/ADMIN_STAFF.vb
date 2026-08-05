@@ -1,0 +1,573 @@
+Imports System.Drawing
+Imports System.Drawing.Drawing2D
+
+Public Class ADMIN_STAFF
+
+    Private MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    Private MintDarkTop As Color = Color.FromArgb(0, 120, 110)
+    Private MintMid As Color = Color.FromArgb(0, 170, 150)
+    Private MintLight As Color = Color.FromArgb(220, 255, 245)
+    Private MintGlow As Color = Color.FromArgb(0, 255, 200)
+    Private NavBg As Color = Color.FromArgb(250, 252, 251)
+    Private NavHover As Color = Color.FromArgb(238, 248, 244)
+
+    Private MainContainer As Panel
+
+    ' ── Hamburger toggle state ──────────────────────────────────────────────────
+    ' 310 not 260: the longest label ("Procurement Overview") needs 178px of text
+    ' room. Anything narrower makes the button wrap to two lines, which throws its
+    ' baseline out of line with the single-line rows.
+    Private Const NAV_OPEN_WIDTH As Integer = 310
+    Private Const NAV_CLOSED_WIDTH As Integer = 56
+    Private navIsOpen As Boolean = True
+    Private btnHamburger As Button          ' always-visible toggle button
+
+    ' ── Grouped nav list ────────────────────────────────────────────────────────
+    ' Admin has 12 nav buttons + 4 section headers — far more than the other
+    ' dashboards — so the buttons live in a scrollable panel between the logo and
+    ' the pinned Logout instead of sitting directly on Nav. Keeps them from
+    ' colliding with Logout on shorter screens.
+    Private NavList As Panel
+    Private Const NAV_LIST_TOP As Integer = 92
+    Private Const NAV_LIST_BOTTOM_GAP As Integer = 120
+
+    ' ===========================================================================
+    ' FORM LOAD
+    ' ===========================================================================
+    Private Sub ADMIN_STAFF_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+
+        Me.SetStyle(ControlStyles.AllPaintingInWmPaint Or
+                    ControlStyles.OptimizedDoubleBuffer Or
+                    ControlStyles.ResizeRedraw Or
+                    ControlStyles.UserPaint, True)
+        Me.DoubleBuffered = True
+
+        ' ── NAV PANEL ───────────────────────────────────────────────────────────
+        Nav.Dock = DockStyle.Left
+        Nav.Width = NAV_OPEN_WIDTH
+        Nav.BackColor = NavBg
+        AddHandler Nav.Paint,
+    Sub(s As Object, pe As PaintEventArgs)
+        Using pen As New Pen(Color.FromArgb(220, 230, 226), 1)
+            pe.Graphics.DrawLine(pen, Nav.Width - 1, 0, Nav.Width - 1, Nav.Height)
+        End Using
+    End Sub
+
+        ' ── MAIN CONTAINER ──────────────────────────────────────────────────────
+        MainContainer = New Panel With {
+    .Dock = DockStyle.Fill,
+    .BackColor = Color.White
+}
+        Me.Controls.Add(MainContainer)
+        Me.Controls.Add(Nav)
+        MainContainer.Padding = New Padding(0)
+
+        ' ── HAMBURGER BUTTON — lives on the FORM, always visible ────────────────
+        btnHamburger = New Button With {
+    .Size = New Size(36, 36),
+.Location = New Point(NAV_OPEN_WIDTH - 46, 18),
+    .FlatStyle = FlatStyle.Flat,
+    .BackColor = Color.White,
+    .Cursor = Cursors.Hand,
+  .Anchor = AnchorStyles.Top Or AnchorStyles.Right,
+    .TabStop = False
+}
+        btnHamburger.FlatAppearance.BorderSize = 0
+        btnHamburger.FlatAppearance.MouseOverBackColor = Color.FromArgb(230, 248, 242)
+        btnHamburger.FlatAppearance.MouseDownBackColor = Color.FromArgb(210, 240, 232)
+
+        ' Load icon — try full path first, then relative
+        Dim burgerFull As String = "burger-menu.png"
+        Dim burgerRel As String = "burger-menu.png"
+        If IO.File.Exists(burgerFull) Then
+            Using img = Image.FromFile(burgerFull)
+                btnHamburger.Image = New Bitmap(img, New Size(22, 22))
+            End Using
+        ElseIf IO.File.Exists(burgerRel) Then
+            Using img = Image.FromFile(burgerRel)
+                btnHamburger.Image = New Bitmap(img, New Size(22, 22))
+            End Using
+        Else
+            ' Unicode fallback — three-bar "≡" drawn as text
+            btnHamburger.Text = "≡"
+            btnHamburger.Font = New Font("Segoe UI", 16, FontStyle.Bold)
+            btnHamburger.ForeColor = Color.FromArgb(10, 79, 66)
+        End If
+
+        ' Round the hamburger button corners
+        AddHandler btnHamburger.Paint,
+            Sub(s As Object, pe As PaintEventArgs)
+                Dim b = CType(s, Button)
+                pe.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As Integer = 10
+                Dim rect = b.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As New GraphicsPath()
+                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
+                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
+                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
+                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
+                    path.CloseFigure()
+                    Using br As New SolidBrush(b.BackColor)
+                        pe.Graphics.FillPath(br, path)
+                    End Using
+                End Using
+                If b.Image IsNot Nothing Then
+                    Dim ix As Integer = (b.Width - b.Image.Width) \ 2
+                    Dim iy As Integer = (b.Height - b.Image.Height) \ 2
+                    pe.Graphics.DrawImage(b.Image, ix, iy)
+                ElseIf b.Text <> "" Then
+                    TextRenderer.DrawText(pe.Graphics, b.Text, b.Font,
+                        b.ClientRectangle, b.ForeColor,
+                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+                End If
+            End Sub
+
+        AddHandler btnHamburger.Click, AddressOf ToggleNav
+        Nav.Controls.Add(btnHamburger)
+        btnHamburger.BringToFront()
+
+        ' ── NAV CONTENTS ────────────────────────────────────────────────────────
+        Dim logoBox As New PictureBox With {
+            .Size = New Size(38, 38),
+     .Location = New Point(18, 14),
+            .SizeMode = PictureBoxSizeMode.Zoom,
+            .BackColor = MintLight
+        }
+        Dim logoPath2 As New Drawing2D.GraphicsPath()
+        logoPath2.AddEllipse(0, 0, logoBox.Width, logoBox.Height)
+        logoBox.Region = New Region(logoPath2)
+
+        Dim logoFile As String = "paint.png"
+        If IO.File.Exists(logoFile) Then logoBox.Image = Image.FromFile(logoFile)
+        Nav.Controls.Add(logoBox)
+
+        Dim lblLogo As New Label With {
+            .Text = "Paint Admin",
+            .Font = New Font("Segoe UI Semibold", 14, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(30, 45, 43),
+            .AutoSize = True,
+           .Location = New Point(64, 22)
+        }
+        Nav.Controls.Add(lblLogo)
+
+        dashHome.Text = "Dashboard"
+        userMgmt.Text = "User Management"
+        roles.Text = "Roles"
+        storeSettings.Text = "Store Settings"
+        ' Field stays "products"; the screen manages the category list, since
+        ' product CRUD already lives in Inventory ▸ Item List.
+        products.Text = "Categories"
+        suppliers.Text = "Suppliers"
+        colorFormulas.Text = "Color Formulas"
+        salesOverview.Text = "Sales Overview"
+        inventoryOverview.Text = "Inventory Overview"
+        procurementOverview.Text = "Procurement Overview"
+        financialReports.Text = "Financial Reports"
+        activityLogNav.Text = "Activity Log"
+        logout.Text = "Logout"
+
+        ' ── SCROLLABLE GROUPED NAV LIST ─────────────────────────────────────────
+        ' Width is Nav.Width - 1, not Nav.Width: that leaves the rightmost pixel
+        ' column free so the divider drawn by Nav's own Paint handler at
+        ' x = Nav.Width - 1 is never painted over by this panel's background.
+        NavList = New Panel With {
+            .Location = New Point(0, NAV_LIST_TOP),
+            .Size = New Size(Nav.Width - 1, Nav.Height - NAV_LIST_TOP - NAV_LIST_BOTTOM_GAP),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Bottom,
+            .BackColor = NavBg,
+            .AutoScroll = True
+        }
+        Nav.Controls.Add(NavList)
+
+        Dim sections = {
+            ("OVERVIEW", New Button() {dashHome}),
+            ("ADMINISTRATION", New Button() {userMgmt, roles, storeSettings}),
+            ("MASTER DATA", New Button() {products, suppliers, colorFormulas}),
+            ("OVERSIGHT", New Button() {salesOverview, inventoryOverview,
+                                        procurementOverview, financialReports, activityLogNav})
+        }
+
+        ' 18px reserved on the right so the scrollbar never overlaps a button
+        Dim btnWidth As Integer = Nav.Width - 46
+        Dim y As Integer = 8
+        For Each sec In sections
+            NavList.Controls.Add(MakeSectionHeader(sec.Item1, y))
+            y += 28
+            For Each btn As Button In sec.Item2
+                StyleButton(btn)
+                btn.Left = 14
+                btn.Top = y
+                btn.Width = btnWidth
+                btn.Height = 48
+                RoundButton(btn, 12)
+                y += 54
+            Next
+            y += 10
+        Next
+
+        StyleButton(logout)
+        logout.Parent = Nav
+        logout.Left = 14
+        logout.Width = Nav.Width - 28
+        logout.Height = 48
+        logout.Top = Nav.Height - 110
+        logout.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(logout, 12)
+
+        SetActive(dashHome)
+        TintLogout()
+
+        ' ── LOAD DEFAULT PANEL ──────────────────────────────────────────────────
+        ' Health tiles on the dashboard jump to a nav section through this hook.
+        AdminDashPanelBuilder.NavigateTo =
+            Sub(key As String)
+                Select Case key
+                    Case "inventory" : inventoryOverview.PerformClick()
+                    Case "procurement" : procurementOverview.PerformClick()
+                End Select
+            End Sub
+        AdminDashPanelBuilder.LoadDashboard(MainContainer)
+        btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
+        btnHamburger.BringToFront()
+    End Sub
+
+    ' ===========================================================================
+    ' SECTION HEADER — same treatment as the "MENU" label on the other dashboards
+    ' ===========================================================================
+    Private Function MakeSectionHeader(text As String, top As Integer) As Label
+        Return New Label With {
+            .Text = text,
+            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(120, 138, 134),
+            .AutoSize = True,
+            .Location = New Point(22, top),
+            .BackColor = NavBg
+        }
+    End Function
+
+    ' ===========================================================================
+    ' HAMBURGER TOGGLE
+    ' ===========================================================================
+    Private Sub ToggleNav(sender As Object, e As EventArgs)
+        navIsOpen = Not navIsOpen
+
+        If navIsOpen Then
+            Nav.Width = NAV_OPEN_WIDTH
+            Nav.Controls.Add(btnHamburger)
+            btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
+            btnHamburger.BackColor = Color.White
+            ' Show all nav contents
+            For Each ctrl As Control In Nav.Controls
+                If ctrl IsNot btnHamburger Then ctrl.Visible = True
+            Next
+        Else
+            Nav.Width = NAV_CLOSED_WIDTH
+            Nav.Controls.Add(btnHamburger)
+            btnHamburger.Location = New Point((NAV_CLOSED_WIDTH - btnHamburger.Width) \ 2, 18)
+            btnHamburger.BackColor = Color.Transparent
+            ' Hide all nav contents except burger
+            For Each ctrl As Control In Nav.Controls
+                If ctrl IsNot btnHamburger Then ctrl.Visible = False
+            Next
+        End If
+
+        btnHamburger.BringToFront()
+        MainContainer.PerformLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    ' ===========================================================================
+    ' PLACEHOLDER — centered "<section> — coming soon"
+    ' ===========================================================================
+    Private Sub LoadPlaceholder(title As String)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+
+        Dim panel As New Panel With {
+            .Dock = DockStyle.Fill,
+            .BackColor = Color.White
+        }
+        Dim lblTitle As New Label With {
+            .Text = title & " — coming soon",
+            .Font = New Font("Segoe UI", 18, FontStyle.Bold),
+            .ForeColor = MintDarkTop,
+            .AutoSize = True
+        }
+        panel.Controls.Add(lblTitle)
+
+        Dim centre As Action =
+            Sub()
+                lblTitle.Left = (panel.Width - lblTitle.PreferredWidth) \ 2
+                lblTitle.Top = (panel.Height - lblTitle.PreferredHeight) \ 2
+            End Sub
+        AddHandler panel.Resize, Sub() centre()
+
+        MainContainer.Controls.Add(panel)
+        MainContainer.ResumeLayout()
+        centre()
+    End Sub
+
+    ' ===========================================================================
+    ' STYLE HELPERS
+    ' ===========================================================================
+    Private Sub StyleButton(btn As Button)
+        If btn IsNot logout Then btn.Parent = NavList
+
+        Dim iconPath As String = ""
+        Select Case btn.Name.ToLower()
+            Case "dashhome" : iconPath = "home.png"
+            Case "usermgmt" : iconPath = "group.png"
+            Case "roles" : iconPath = "user.png"
+            Case "storesettings" : iconPath = "settings.png"
+            Case "products" : iconPath = "inventory.png"
+            Case "suppliers" : iconPath = "express-delivery.png"
+            Case "colorformulas" : iconPath = "paint.png"
+            Case "salesoverview" : iconPath = "sales.png"
+            Case "inventoryoverview" : iconPath = "clipboard.png"
+            Case "procurementoverview" : iconPath = "quotation.png"
+            Case "financialreports" : iconPath = "coins.png"
+            Case "activitylognav" : iconPath = "recent.png"
+            Case "logout" : iconPath = "logout.png"
+        End Select
+
+        ' Every button gets a 40x24 image — blank when the icon file is missing —
+        ' so the text offset is identical on every row rather than jumping left
+        ' by the image width whenever a load fails.
+        Dim padded As New Bitmap(40, 24)
+        If IO.File.Exists(iconPath) Then
+            Dim src As Bitmap
+            Using img = Image.FromFile(iconPath)
+                src = New Bitmap(img, New Size(24, 24))
+            End Using
+            Using g As Graphics = Graphics.FromImage(padded)
+                g.InterpolationMode = Drawing2D.InterpolationMode.HighQualityBicubic
+                g.DrawImage(src, 0, 0, 24, 24)
+            End Using
+        End If
+        btn.Image = padded
+
+        ' Hard guarantee against a second line, which would shift the baseline.
+        btn.AutoEllipsis = True
+        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+        btn.ForeColor = Color.FromArgb(90, 105, 102)
+        btn.TextImageRelation = TextImageRelation.ImageBeforeText
+        btn.ImageAlign = ContentAlignment.MiddleLeft
+        btn.TextAlign = ContentAlignment.MiddleLeft
+        btn.Padding = New Padding(20, 0, 14, 0)
+        btn.FlatStyle = FlatStyle.Flat
+        btn.FlatAppearance.BorderSize = 0
+        btn.FlatAppearance.MouseOverBackColor = NavBg
+        btn.FlatAppearance.MouseDownBackColor = NavHover
+        btn.BackColor = NavBg
+        btn.Cursor = Cursors.Hand
+
+        AddHandler btn.MouseEnter, Sub() If btn.Tag <> "active" Then btn.BackColor = NavHover
+        AddHandler btn.MouseLeave, Sub() If btn.Tag <> "active" Then btn.BackColor = NavBg
+    End Sub
+
+    Private Sub SetActive(btn As Button)
+        For Each ctrl As Control In NavList.Controls
+            If TypeOf ctrl Is Button AndAlso ctrl IsNot logout Then
+                ctrl.BackColor = NavBg
+                ctrl.ForeColor = Color.FromArgb(90, 105, 102)
+                ctrl.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+                ctrl.Tag = ""
+            End If
+        Next
+        btn.BackColor = MintLight
+        btn.ForeColor = MintDarkTop
+        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
+        btn.Tag = "active"
+    End Sub
+
+    Private Sub RoundButton(btn As Button, radius As Integer)
+        Dim r As Integer = radius
+        Dim w As Integer = btn.Width
+        Dim h As Integer = btn.Height
+        Dim path As New Drawing2D.GraphicsPath()
+        path.AddArc(0, 0, r, r, 180, 90)
+        path.AddArc(w - r, 0, r, r, 270, 90)
+        path.AddArc(w - r, h - r, r, r, 0, 90)
+        path.AddArc(0, h - r, r, r, 90, 90)
+        path.CloseFigure()
+        btn.Region = New Region(path)
+    End Sub
+
+    Private Sub TintLogout()
+        Dim redText As Color = Color.FromArgb(200, 50, 50)
+        Dim redTintBg As Color = Color.FromArgb(253, 240, 240)
+        Dim redHoverBg As Color = Color.FromArgb(248, 220, 220)
+        logout.ForeColor = redText
+        logout.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
+        logout.BackColor = redTintBg
+        logout.FlatAppearance.MouseOverBackColor = redHoverBg
+        AddHandler logout.MouseEnter, Sub() logout.BackColor = redHoverBg
+        AddHandler logout.MouseLeave, Sub() logout.BackColor = redTintBg
+    End Sub
+
+    Private Sub ApplyModernButton(btn As Button)
+        btn.FlatStyle = FlatStyle.Flat
+        btn.FlatAppearance.BorderSize = 0
+        btn.Font = New Font("Segoe UI Semibold", 10, FontStyle.Bold)
+        btn.ForeColor = Color.White
+        btn.Cursor = Cursors.Hand
+
+        AddHandler btn.Paint,
+            Sub(s, ev)
+                Dim rect As Rectangle = btn.ClientRectangle
+                Dim radius As Integer = 12
+                Using path As New Drawing2D.GraphicsPath()
+                    path.AddArc(0, 0, radius, radius, 180, 90)
+                    path.AddArc(rect.Width - radius, 0, radius, radius, 270, 90)
+                    path.AddArc(rect.Width - radius, rect.Height - radius, radius, radius, 0, 90)
+                    path.AddArc(0, rect.Height - radius, radius, radius, 90, 90)
+                    path.CloseFigure()
+                    ev.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                    Using brush As New Drawing2D.LinearGradientBrush(rect, MintMid, MintDarkTop, 90.0F)
+                        ev.Graphics.FillPath(brush, path)
+                    End Using
+                    Using pen As New Pen(MintGlow, 2)
+                        ev.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(ev.Graphics, btn.Text, btn.Font, rect, Color.White,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+    End Sub
+
+    ' ===========================================================================
+    ' NAV SWITCHING
+    ' ===========================================================================
+    Private Sub ShowSection(btn As Button, title As String)
+        SetActive(btn)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        LoadPlaceholder(title)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    ' ===========================================================================
+    ' BUTTON CLICK HANDLERS
+    ' ===========================================================================
+    Private Sub dashHome_Click(sender As Object, e As EventArgs) Handles dashHome.Click
+        SetActive(dashHome)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminDashPanelBuilder.LoadDashboard(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub userMgmt_Click(sender As Object, e As EventArgs) Handles userMgmt.Click
+        SetActive(userMgmt)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminUserPanelBuilder.LoadUsers(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub roles_Click(sender As Object, e As EventArgs) Handles roles.Click
+        SetActive(roles)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminRolesPanelBuilder.LoadRoles(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub storeSettings_Click(sender As Object, e As EventArgs) Handles storeSettings.Click
+        SetActive(storeSettings)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminStoreSettingsPanelBuilder.LoadStoreSettings(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub products_Click(sender As Object, e As EventArgs) Handles products.Click
+        SetActive(products)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminCategoriesPanelBuilder.LoadCategories(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub suppliers_Click(sender As Object, e As EventArgs) Handles suppliers.Click
+        SetActive(suppliers)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminSuppliersPanelBuilder.LoadSuppliers(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub colorFormulas_Click(sender As Object, e As EventArgs) Handles colorFormulas.Click
+        SetActive(colorFormulas)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminColorFormulasPanelBuilder.LoadColorFormulas(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub salesOverview_Click(sender As Object, e As EventArgs) Handles salesOverview.Click
+        SetActive(salesOverview)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminSalesOverviewPanelBuilder.LoadSalesOverview(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub inventoryOverview_Click(sender As Object, e As EventArgs) Handles inventoryOverview.Click
+        SetActive(inventoryOverview)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminInventoryOverviewPanelBuilder.LoadInventoryOverview(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub procurementOverview_Click(sender As Object, e As EventArgs) Handles procurementOverview.Click
+        SetActive(procurementOverview)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminProcurementOverviewPanelBuilder.LoadProcurementOverview(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub financialReports_Click(sender As Object, e As EventArgs) Handles financialReports.Click
+        SetActive(financialReports)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminFinancialReportsPanelBuilder.LoadFinancialReports(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub activityLogNav_Click(sender As Object, e As EventArgs) Handles activityLogNav.Click
+        SetActive(activityLogNav)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        AdminActivityLogPanelBuilder.LoadActivityLog(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub logout_Click(sender As Object, e As EventArgs) Handles logout.Click
+        If AppModal.Show("Are you sure you want to log out?", "Logout",
+                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
+            Return
+        End If
+        ActivityLog.Record("LOGOUT")
+        Dim loginForm As New LogIn()
+        loginForm.Show()
+        Me.Close()
+    End Sub
+
+End Class
