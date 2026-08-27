@@ -61,7 +61,7 @@ Public Class ReturnsPanelBuilder
     Private Shared _mainContainer As Panel
     Private Shared _saleId As Integer = 0
     Private Shared _saleNo As String = ""
-    Private Shared _rowsHost As Panel
+    Private Shared _rowsHost As CardTableBody
     Private Shared _lblLoaded As Label
     Private Shared _selectedRefundMethod As String = "Cash"
     Private Shared _cmbReason As ComboBox
@@ -379,16 +379,20 @@ Public Class ReturnsPanelBuilder
 
         ' ── Column headers ──
         Dim colHeader As New Panel With {
-            .Top = 116, .Left = 0, .Height = 36, .BackColor = Color.FromArgb(247, 250, 249),
+            .Top = 116, .Left = 2, .Height = 36, .BackColor = Color.FromArgb(247, 250, 249),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
-        AddHandler card.Resize, Sub() colHeader.Width = card.Width
+        AddHandler card.Resize, Sub() colHeader.Width = card.Width - 4
         AddHandler colHeader.Paint,
             Sub(s, e)
                 Using p As New Pen(SoftBorder, 1)
                     e.Graphics.DrawLine(p, 0, colHeader.Height - 1, colHeader.Width, colHeader.Height - 1)
                     e.Graphics.DrawLine(p, 0, 0, colHeader.Width, 0)
                 End Using
+                ' The strip is inset 2px inside the card, so the card's own
+                ' hairline already shows to either side of it -- nothing more to
+                ' draw here. (Previously this strip spanned the full card width
+                ' and painted over that border, which made the edge look ragged.)
             End Sub
 
         Dim colGrid As New TableLayoutPanel With {
@@ -418,14 +422,14 @@ Public Class ReturnsPanelBuilder
         card.Controls.Add(colHeader)
 
         ' ── Scrollable row list ──
-        Dim rowList As New Panel With {
-            .Top = 152, .Left = 0, .AutoScroll = True, .BackColor = Color.White,
+        Dim rowList As New CardTableBody With {
+            .Top = 152, .Left = 2, .EmptyText = "",
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                rowList.Width = card.Width
-                rowList.Height = card.Height - 152 - 40
+                rowList.Width = card.Width - 4
+                rowList.Height = card.Height - 152 - 41
             End Sub
 
         Dim SyncGutter As Action =
@@ -444,25 +448,27 @@ Public Class ReturnsPanelBuilder
         card.Controls.Add(rowList)
 
         ' ── Footer ──
-        Dim footer As New Panel With {
-            .Height = 40, .Left = 0, .BackColor = Color.White,
+        ' Inset 1px with a rounded bottom so the card's corner + border survive.
+        Dim footer As New CardFooterPanel With {
+            .Height = 40, .Left = 2, .BackColor = Color.White,
             .Padding = New Padding(18, 0, 18, 0),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                footer.Width = card.Width
-                footer.Top = card.Height - footer.Height
+                footer.Width = card.Width - 4
+                footer.Top = card.Height - footer.Height - 1
             End Sub
-        AddHandler footer.Paint,
-            Sub(s, e)
-                Using p As New Pen(SoftBorder, 1) : e.Graphics.DrawLine(p, 0, 0, footer.Width, 0) : End Using
-            End Sub
-        footer.Controls.Add(New Label With {
+        ' Inset + vertically centred; at x=0 / fixed y the text was clipped by
+        ' the footer's rounded corner.
+        Dim lblHint As New Label With {
             .Text = "Tick an item and set the quantity to include it in the refund.",
             .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(0, 12)
-        })
+            .AutoSize = True
+        }
+        AddHandler footer.Resize,
+            Sub() lblHint.Location = New Point(18, (footer.Height - lblHint.Height) \ 2)
+        footer.Controls.Add(lblHint)
         card.Controls.Add(footer)
 
         Return card

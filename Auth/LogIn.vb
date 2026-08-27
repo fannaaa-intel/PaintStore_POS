@@ -354,6 +354,9 @@ Public Class LogIn
         AddHandler btnLogin.MouseLeave, Sub() btnLogin.Invalidate()
         AddHandler btnLogin.Click, AddressOf HandleLogin
         loginCard.Controls.Add(btnLogin)
+
+        ' Enter submits the form from either field instead of forcing a click.
+        Me.AcceptButton = btnLogin
         curY += 56
 
         ' ===== SIGN UP LINK =====

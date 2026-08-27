@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 
 Public Class ADMIN_STAFF
@@ -395,16 +395,44 @@ Public Class ADMIN_STAFF
     End Sub
 
     Private Sub TintLogout()
-        Dim redText As Color = Color.FromArgb(200, 50, 50)
-        Dim redTintBg As Color = Color.FromArgb(253, 240, 240)
-        Dim redHoverBg As Color = Color.FromArgb(248, 220, 220)
-        logout.ForeColor = redText
+        ' Solid red so Logout reads as a real, deliberate action rather than a
+        ' pale tinted strip. White label + white-tinted icon for contrast.
+        Dim redBg As Color = Color.FromArgb(198, 40, 40)
+        Dim redHoverBg As Color = Color.FromArgb(176, 30, 30)
+        Dim redDownBg As Color = Color.FromArgb(154, 24, 24)
+        logout.ForeColor = Color.White
         logout.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
-        logout.BackColor = redTintBg
+        logout.BackColor = redBg
+        logout.FlatStyle = FlatStyle.Flat
+        logout.FlatAppearance.BorderSize = 0
         logout.FlatAppearance.MouseOverBackColor = redHoverBg
+        logout.FlatAppearance.MouseDownBackColor = redDownBg
+        logout.Cursor = Cursors.Hand
+        If logout.Image IsNot Nothing Then
+            logout.Image = TintLogoutIcon(logout.Image, Color.White)
+        End If
         AddHandler logout.MouseEnter, Sub() logout.BackColor = redHoverBg
-        AddHandler logout.MouseLeave, Sub() logout.BackColor = redTintBg
+        AddHandler logout.MouseLeave, Sub() logout.BackColor = redBg
     End Sub
+
+    ' Re-colours the logout glyph to a solid target colour, preserving alpha.
+    Private Shared Function TintLogoutIcon(src As Image, target As Color) As Image
+        Dim bmp As New Bitmap(src.Width, src.Height)
+        Using g As Graphics = Graphics.FromImage(bmp)
+            Dim cm As New Imaging.ColorMatrix(New Single()() {
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 0, 0},
+                New Single() {0, 0, 0, 1, 0},
+                New Single() {target.R / 255.0F, target.G / 255.0F, target.B / 255.0F, 0, 1}})
+            Using ia As New Imaging.ImageAttributes()
+                ia.SetColorMatrix(cm)
+                g.DrawImage(src, New Rectangle(0, 0, src.Width, src.Height),
+                            0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia)
+            End Using
+        End Using
+        Return bmp
+    End Function
 
     Private Sub ApplyModernButton(btn As Button)
         btn.FlatStyle = FlatStyle.Flat

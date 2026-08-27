@@ -62,6 +62,8 @@ Public Class InventoryPutAwayPanelBuilder
     Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
     Private Shared ReadOnly PositiveClr As Color = Color.FromArgb(0, 160, 106)
     Private Shared ReadOnly WarningClr As Color = Color.FromArgb(232, 120, 30)
+    ' Border for the quantity field — dark enough to read as an editable input.
+    Private Shared ReadOnly InputBorder As Color = Color.FromArgb(196, 214, 206)
     Private Const PaintCategory As String = "Paint"
 
     ' ── DATA MODELS ───────────────────────────────────────────────────────────
@@ -273,11 +275,13 @@ Public Class InventoryPutAwayPanelBuilder
         card.Controls.AddRange({lblPo, lblMeta})
 
         ' ── Badge — top right ─────────────────────────────────────────────────
+        ' Soft tinted chip, not a solid fill — this is a status label, so it must
+        ' not compete with the Stock In button for "clickable" affordance.
         Dim badge As New Label With {
             .Text = po.TotalPending & If(po.TotalPending = 1, " unit pending", " units pending"),
-            .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-            .ForeColor = Color.White, .BackColor = MintDeep,
-            .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
+            .Font = New Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+            .ForeColor = MintDeep, .BackColor = TileBg,
+            .AutoSize = True, .Padding = New Padding(12, 5, 12, 5),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         RoundLabel(badge, 12)
@@ -285,20 +289,18 @@ Public Class InventoryPutAwayPanelBuilder
 
         ' ── Stock In pill — bottom right with chevron icon ────────────────────
         Dim vpH As Integer = 38
-        Dim vpW As Integer = 130
+        Dim vpW As Integer = 118
+        ' No Region clip here: Region edges are aliased, so they stair-step the
+        ' corners while the Paint handler below draws a smooth anti-aliased pill.
+        ' The two shapes disagreed, which is why the resting button read as
+        ' square-cornered next to its own rounded hover state. The pill shape is
+        ' defined purely by the anti-aliased fill in Paint.
         Dim stockPill As New BufferedPanel With {
             .Size = New Size(vpW, vpH),
-            .BackColor = TileBg,
+            .BackColor = MintDeep,
             .Cursor = Cursors.Hand,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        Dim vpRgn As New GraphicsPath()
-        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
-        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
-        vpRgn.CloseFigure()
-        stockPill.Region = New Region(vpRgn)
 
         ' Load chevron icon
         Dim chevronImg As Image = Nothing
@@ -313,7 +315,7 @@ Public Class InventoryPutAwayPanelBuilder
                         New Single() {0, 0, 0, 0, 0},
                         New Single() {0, 0, 0, 0, 0},
                         New Single() {0, 0, 0, 1, 0},
-                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                        New Single() {1, 1, 1, 0, 1}
                     })
                     Dim ia As New Imaging.ImageAttributes()
                     ia.SetColorMatrix(cm)
@@ -330,49 +332,54 @@ Public Class InventoryPutAwayPanelBuilder
             Sub(s, e)
                 Dim b As BufferedPanel = CType(s, BufferedPanel)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+
+                ' Clear to the parent card colour first — with no Region clip the
+                ' panel's own rectangle would otherwise show at the corners.
+                e.Graphics.Clear(CardBg)
+
                 Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
                     Using br As New SolidBrush(b.BackColor)
                         e.Graphics.FillPath(br, path)
                     End Using
                 End Using
+                ' Label and chevron are laid out as one centred group with a
+                ' fixed gap, rather than pinning each to an opposite edge.
+                Const ICON_SIZE As Integer = 16
+                Const ICON_GAP As Integer = 8
+
                 Using f As New Font("Segoe UI Semibold", 11.5F, FontStyle.Bold),
-                      br As New SolidBrush(MintDark)
+                      br As New SolidBrush(Color.White)
+                    Dim textW As Single = e.Graphics.MeasureString("Stock In", f).Width
+                    Dim groupW As Single = textW + ICON_GAP + ICON_SIZE
+                    Dim startX As Single = (b.Width - groupW) / 2.0F
+
                     Dim sf As New StringFormat With {
                         .Alignment = StringAlignment.Near,
                         .LineAlignment = StringAlignment.Center
                     }
-                    e.Graphics.DrawString("Stock In", f, br, New RectangleF(14, 0, 82, b.Height), sf)
+                    e.Graphics.DrawString("Stock In", f, br,
+                                          New RectangleF(startX, 0, textW + 2, b.Height), sf)
+
+                    Dim iconX As Integer = CInt(startX + textW + ICON_GAP)
+                    Dim iconY As Integer = (b.Height - ICON_SIZE) \ 2
+                    If chevronImg IsNot Nothing Then
+                        e.Graphics.DrawImage(chevronImg,
+                                             New Rectangle(iconX, iconY, ICON_SIZE, ICON_SIZE))
+                    Else
+                        DrawChevron(e.Graphics, iconX + ICON_SIZE \ 2, b.Height / 2.0F)
+                    End If
                 End Using
-                If chevronImg IsNot Nothing Then
-                    Dim iconSize As Integer = 16
-                    Dim iconX As Integer = b.Width - iconSize - 12
-                    Dim iconY As Integer = (b.Height - iconSize) \ 2
-                    e.Graphics.DrawImage(chevronImg, New Rectangle(iconX, iconY, iconSize, iconSize))
-                Else
-                    Dim chX As Single = b.Width - 22
-                    Dim midY As Single = b.Height / 2.0F
-                    Dim arm As Single = 8
-                    Using pen As New Pen(MintDark, 2.5F)
-                        pen.LineJoin = LineJoin.Round
-                        pen.StartCap = LineCap.Round
-                        pen.EndCap = LineCap.Round
-                        e.Graphics.DrawLines(pen, New PointF() {
-                            New PointF(chX, midY - arm),
-                            New PointF(chX + arm * 0.7F, midY),
-                            New PointF(chX, midY + arm)
-                        })
-                    End Using
-                End If
+
             End Sub
 
         AddHandler stockPill.MouseEnter,
             Sub()
-                stockPill.BackColor = Color.FromArgb(180, 230, 218)
+                stockPill.BackColor = MintDark
                 stockPill.Invalidate()
             End Sub
         AddHandler stockPill.MouseLeave,
             Sub()
-                stockPill.BackColor = TileBg
+                stockPill.BackColor = MintDeep
                 stockPill.Invalidate()
             End Sub
         card.Controls.Add(stockPill)
@@ -482,7 +489,11 @@ Public Class InventoryPutAwayPanelBuilder
 
 
 
-        Dim linesHeight As Integer = 64 + putAwayLines.Count * 88 + 72 + 16  ' +72 for confirm bar
+        ' Horizontal breathing room between the card's rounded border and the
+        ' rows inside it — see the linesCard.Resize handler below.
+        Const CARD_INSET As Integer = 12
+
+        Dim linesHeight As Integer = 72 + putAwayLines.Count * 96 + 72 + 16  ' +72 for confirm bar
         Dim linesCard As New BufferedPanel With {
             .Height = linesHeight, .BackColor = CardBg, .Dock = DockStyle.Top
         }
@@ -496,67 +507,73 @@ Public Class InventoryPutAwayPanelBuilder
         }
         Dim lblHint As New Label With {
             .Text = "Defaults to stocking in everything pending. Reduce a quantity to only partially stock a product.",
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = FaintText,
-            .AutoSize = True, .Location = New Point(22, 40), .BackColor = Color.Transparent
+            .Font = New Font("Segoe UI", 9F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(21, 41), .BackColor = Color.Transparent
         }
         linesCard.Controls.AddRange({lblHead, lblHint})
 
-        Dim y As Integer = 64
+        Dim y As Integer = 72
         For Each ln In putAwayLines
-            Dim row As Panel = BuildPutAwayLineRow(ln, 88)
-            row.Location = New Point(0, y)
-            row.Width = linesCard.ClientSize.Width - 4
+            Dim row As Panel = BuildPutAwayLineRow(ln, 96)
+            row.Location = New Point(CARD_INSET, y)
+            row.Width = linesCard.ClientSize.Width - CARD_INSET * 2
             row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             linesCard.Controls.Add(row)
-            y += 88
+            y += 96
         Next
 
         ' ── Confirm Stock In button — inside the lines card, below all rows ──
-        Dim confirmBarY As Integer = 64 + putAwayLines.Count * 88
+        Dim confirmBarY As Integer = 72 + putAwayLines.Count * 96
         Dim confirmBar As New Panel With {
             .BackColor = Color.Transparent,
-            .Location = New Point(0, confirmBarY),
+            .Location = New Point(CARD_INSET, confirmBarY),
             .Height = 64,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
         AddHandler confirmBar.Paint,
             Sub(s, e)
-                Using pen As New Pen(CardBorder, 1)
-                    e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 8, 0, CType(s, Panel).Width - 8, 0)
                 End Using
             End Sub
 
         Dim btnConfirm As New Button With {
             .Text = "Confirm Stock In",
-            .Size = New Size(180, 42),
+            .Size = New Size(186, 44),
             .FlatStyle = FlatStyle.Flat,
             .Cursor = Cursors.Hand,
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+            .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold),
             .ForeColor = Color.White,
-            .BackColor = MintPrimary,
+            .BackColor = MintDeep,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
         btnConfirm.FlatAppearance.BorderSize = 0
-        RoundControl(btnConfirm, 10)
+        btnConfirm.FlatAppearance.MouseOverBackColor = MintDark
+        btnConfirm.FlatAppearance.MouseDownBackColor = MintDark
+        RoundControl(btnConfirm, 12)
         AddHandler btnConfirm.Click, Sub() CommitPutAway()
         confirmBar.Controls.Add(btnConfirm)
 
         Dim PositionConfirm As Action =
             Sub()
                 btnConfirm.Top = (confirmBar.Height - btnConfirm.Height) \ 2
-                btnConfirm.Left = confirmBar.Width - btnConfirm.Width - 20
+                btnConfirm.Left = confirmBar.Width - btnConfirm.Width - 8
             End Sub
         AddHandler confirmBar.Resize, Sub() PositionConfirm()
         PositionConfirm()
 
         linesCard.Controls.Add(confirmBar)
 
+        ' Rows and the confirm bar are inset from the card's client edge on both
+        ' sides. The card's rounded border is stroked at its own ClientRectangle,
+        ' so a full-bleed child that draws its own border (the qty field) had its
+        ' stroke land under that line and looked clipped at the card edge.
         AddHandler linesCard.Resize,
             Sub()
-                Dim w As Integer = linesCard.ClientSize.Width - 4
+                Dim w As Integer = linesCard.ClientSize.Width - CARD_INSET * 2
                 For Each c As Control In linesCard.Controls
                     If TypeOf c Is Panel Then
-                        c.Left = 0
+                        c.Left = CARD_INSET
                         c.Width = w
                     End If
                 Next
@@ -569,14 +586,35 @@ Public Class InventoryPutAwayPanelBuilder
         })
 
         ' ── 3. INFO BANNER ────────────────────────────────────────────────────
-        Dim bannerCard As New BufferedPanel With {.Height = 52, .BackColor = TileBg, .Dock = DockStyle.Top}
-        AddHandler bannerCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        Dim bannerCard As New BufferedPanel With {.Height = 60, .BackColor = TileBg, .Dock = DockStyle.Top}
+        AddHandler bannerCard.Paint,
+            Sub(s, e)
+                Dim b As Panel = CType(s, Panel)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+
+                ' Tinted panel with a left accent bar, rather than a flat strip —
+                ' the accent marks it as an advisory note at a glance.
+                Using path = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), 10)
+                    Using br As New SolidBrush(TileBg)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                    Using clip As New Region(path)
+                        Dim prev = e.Graphics.Clip
+                        e.Graphics.Clip = clip
+                        Using accent As New SolidBrush(MintPrimary)
+                            e.Graphics.FillRectangle(accent, 0, 0, 4, b.Height)
+                        End Using
+                        e.Graphics.Clip = prev
+                    End Using
+                End Using
+            End Sub
+
         Dim lblBanner As New Label With {
-            .Text = ChrW(8505) & "  Only units already confirmed by Procurement are shown." &
+            .Text = "Only units already confirmed by Procurement are shown." &
                     "  Adjust quantities if you are partially shelving — the rest stays in the queue.",
-            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = MintDark,
             .AutoSize = False, .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
-            .Padding = New Padding(18, 0, 18, 0), .TextAlign = ContentAlignment.MiddleLeft
+            .Padding = New Padding(22, 0, 18, 0), .TextAlign = ContentAlignment.MiddleLeft
         }
         bannerCard.Controls.Add(lblBanner)
         body.Controls.Add(bannerCard)
@@ -684,58 +722,111 @@ Public Class InventoryPutAwayPanelBuilder
         AddHandler row.Paint,
             Sub(s, e)
                 Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, height - 1, row.Width - 16, height - 1)
+                    e.Graphics.DrawLine(pen, 4, height - 1, row.Width - 4, height - 1)
                 End Using
             End Sub
 
-        Dim thumb As Panel = BuildThumb(ln, 42)
-        thumb.Location = New Point(18, (height - 42) \ 2)
+        ' Thumbnail and label block sized to the row rather than left at the
+        ' dimensions from the shorter row — both read as undersized otherwise.
+        Const THUMB_SIZE As Integer = 54
+        Dim thumb As Panel = BuildThumb(ln, THUMB_SIZE)
+        thumb.Location = New Point(8, (height - THUMB_SIZE) \ 2)
         row.Controls.Add(thumb)
 
         Dim lblName As New Label With {
             .Text = ln.ProductName,
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 12F, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(72, 14), .BackColor = Color.Transparent
+            .Location = New Point(76, 26), .BackColor = Color.Transparent
         }
         Dim lblMeta As New Label With {
             .Text = ln.Sku & "   " & ChrW(8226) & "   Current stock: " & ln.CurrentStock,
-            .Font = New Font("Segoe UI", 8.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(72, 35), .BackColor = Color.Transparent
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(76, 50), .BackColor = Color.Transparent
         }
         row.Controls.Add(lblName)
         row.Controls.Add(lblMeta)
 
-        ' ── "N remaining" badge (was "N pending") ─────────────────────────────
+        ' ── Pending count — plain text, not a badge ───────────────────────────
+        ' This is a quiet reference figure, so it reads as a caption beside the
+        ' input it qualifies rather than as a status chip competing with it.
+        Dim capLn As PutAwayLine = ln
+        ' No Anchor on this or the two controls below: the row itself is
+        ' anchored Left|Right inside the card, so on every stretch the anchor
+        ' engine re-offsets its children by the width delta *on top of* what
+        ' LayoutRight() already computed, and the three drift into each other.
+        ' LayoutRight() owns all three positions instead.
         Dim pendBadge As New Label With {
-            .Text = ln.PendingQty & " remaining",
-            .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = WarningClr,
-            .BackColor = Color.FromArgb(252, 240, 228),
-            .AutoSize = True,
-            .Padding = New Padding(8, 3, 8, 3),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            .Text = ln.PendingQty & " pending",
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubText,
+            .BackColor = Color.Transparent,
+            .AutoSize = True
         }
-        RoundLabel(pendBadge, 10)
         row.Controls.Add(pendBadge)
 
-        ' Shelve-now input
-        Dim capLn As PutAwayLine = ln
+        ' ── Stock-in input ────────────────────────────────────────────────────
+        ' Sentence-case label in the body text colour: the old tiny grey all-caps
+        ' caption read as disabled, and floated away from its own field.
         Dim lblCap As New Label With {
-            .Text = "STOCK IN",
-            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            .Text = "Stock in",
+            .Font = New Font("Segoe UI", 9F, FontStyle.Bold),
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
         }
+
+        ' The textbox is hosted in a rounded panel — a bare FixedSingle box drew a
+        ' hard square rectangle that clashed with every other control on screen.
+        Dim qtyHost As New BufferedPanel With {
+            .Size = New Size(92, 42),
+            .BackColor = CardBg
+        }
+        AddHandler qtyHost.Paint,
+            Sub(s, e)
+                ' Clear to the card colour first: the panel's own BackColor fills
+                ' the full square before Paint runs, so painting the pill straight
+                ' on top left white in the corners and the field looked square.
+                e.Graphics.Clear(CardBg)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+
+                ' Inset by 1px on every side: a 1.4px pen straddles the path by
+                ' 0.7px, so drawing on the panel's outermost pixels clipped the
+                ' top and right edges of the stroke and the border looked broken.
+                Using path = RoundRect(New Rectangle(1, 1, qtyHost.Width - 3, qtyHost.Height - 3), 10)
+                    Using br As New SolidBrush(Color.White)
+                        e.Graphics.FillPath(br, path)
+                    End Using
+                    Using pen As New Pen(InputBorder, 1.4F)
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+            End Sub
+
+        ' BackColor must match the pill's fill: the textbox is opaque and sits on
+        ' top of the painted rounded rect, so any other colour shows as a hard
+        ' rectangle cutting across the field.
         Dim txtQty As New TextBox With {
-            .Width = 72, .Height = 28,
-            .BorderStyle = BorderStyle.FixedSingle,
-            .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+            .Width = 66, .Height = 26,
+            .BorderStyle = BorderStyle.None,
+            .BackColor = Color.White,
+            .Font = New Font("Segoe UI", 14, FontStyle.Bold),
             .ForeColor = MintDark,
             .TextAlign = HorizontalAlignment.Center,
-            .Text = ln.ShelveNow.ToString(),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+            .Text = ln.ShelveNow.ToString()
         }
+        qtyHost.Controls.Add(txtQty)
+
+        ' Centre the textbox immediately AND on resize. qtyHost is given a fixed
+        ' Size at construction and nothing ever changes it, so a Resize-only
+        ' handler never fired: the textbox stayed at its default (0, 0), where
+        ' its opaque rectangle painted over the left and top of the rounded
+        ' border and the number sat in the corner instead of the centre.
+        Dim CentreQty As Action =
+            Sub()
+                txtQty.Left = (qtyHost.Width - txtQty.Width) \ 2
+                txtQty.Top = (qtyHost.Height - txtQty.Height) \ 2
+            End Sub
+        AddHandler qtyHost.Resize, Sub() CentreQty()
+        CentreQty()
         AddHandler txtQty.TextChanged,
             Sub()
                 Dim n As Integer = 0
@@ -748,17 +839,64 @@ Public Class InventoryPutAwayPanelBuilder
         AddHandler txtQty.Leave,
             Sub() txtQty.Text = capLn.ShelveNow.ToString()
         row.Controls.Add(lblCap)
-        row.Controls.Add(txtQty)
+        row.Controls.Add(qtyHost)
 
-        AddHandler row.Resize,
+        Dim LayoutRight As Action =
             Sub()
-                txtQty.Left = row.Width - txtQty.Width - 24
-                txtQty.Top = (height - txtQty.Height) \ 2 + 8
-                lblCap.Left = txtQty.Left
-                lblCap.Top = txtQty.Top - 20
-                pendBadge.Left = txtQty.Left - pendBadge.Width - 18
-                pendBadge.Top = txtQty.Top + (txtQty.Height - pendBadge.Height) \ 2
+                ' Field anchored right; its caption sits directly above it and the
+                ' pending figure sits on the field's own vertical centre, so the
+                ' three read as one group instead of three floating elements.
+                '
+                ' The caption block is laid out from a fixed CAP_BLOCK height
+                ' rather than from lblCap.Height: the label is AutoSize, so during
+                ' early layout passes its Height is still stale and the caption
+                ' landed on top of the input box.
+                Const CAP_BLOCK As Integer = 18
+                Const CAP_GAP As Integer = 4
+                Const RIGHT_MARGIN As Integer = 8
+
+                Dim groupH As Integer = CAP_BLOCK + CAP_GAP + qtyHost.Height
+                Dim groupTop As Integer = (height - groupH) \ 2
+
+                ' 8px matches the Confirm Stock In button's right margin, so
+                ' the field and the button share one right edge. The row is
+                ' inset CARD_INSET from the card, which keeps the field's own
+                ' 1.4px stroke clear of the card's rounded border — full-bleed
+                ' put the two strokes on the same pixel and it read as clipped.
+                qtyHost.Left = row.Width - qtyHost.Width - RIGHT_MARGIN
+                qtyHost.Top = groupTop + CAP_BLOCK + CAP_GAP
+
+                ' Measure both AutoSize labels rather than reading Width/Height:
+                ' during the first layout passes those still hold the default
+                ' 100x23, which pushed the caption off-centre and dropped the
+                ' pending text onto the top edge of the input box.
+                Dim capSz As Size = TextRenderer.MeasureText(lblCap.Text, lblCap.Font)
+                Dim pendSz As Size = TextRenderer.MeasureText(pendBadge.Text, pendBadge.Font)
+
+                lblCap.Left = qtyHost.Left + (qtyHost.Width - capSz.Width) \ 2
+                lblCap.Top = groupTop + (CAP_BLOCK - capSz.Height) \ 2
+
+                ' Right edge of the pending text is pinned a fixed gap left of
+                ' the field, so it can never grow rightwards under the box.
+                pendBadge.Left = qtyHost.Left - pendSz.Width - 20
+                pendBadge.Top = qtyHost.Top + (qtyHost.Height - pendSz.Height) \ 2
+
+                ' Cap the left-hand text block at whatever space is left before
+                ' the pending figure. AutoSize labels otherwise keep growing and
+                ' a long product name slides under the pending text and field.
+                Dim textRight As Integer = pendBadge.Left - 16
+                Dim avail As Integer = Math.Max(80, textRight - 76)
+                For Each l As Label In {lblName, lblMeta}
+                    l.MaximumSize = New Size(avail, 0)
+                Next
             End Sub
+
+        AddHandler row.Resize, Sub() LayoutRight()
+        ' AutoSize labels settle their width after the text is applied, so re-run
+        ' the layout when either caption resizes or they stay mis-centred.
+        AddHandler lblCap.Resize, Sub() LayoutRight()
+        AddHandler pendBadge.Resize, Sub() LayoutRight()
+        LayoutRight()
 
         Return row
     End Function
@@ -882,6 +1020,22 @@ Public Class InventoryPutAwayPanelBuilder
     '  DATA LOADERS
     ' =========================================================================
     ' Returns POs that have at least one product with received_qty > shelved_qty.
+    ' Fallback chevron drawn when right-chevron.png is unavailable. Centred on
+    ' (cx, cy) so it drops into the same slot as the bitmap icon.
+    Private Shared Sub DrawChevron(g As Graphics, cx As Single, cy As Single)
+        Const ARM As Single = 4.5F
+        Using pen As New Pen(Color.White, 2.2F)
+            pen.LineJoin = LineJoin.Round
+            pen.StartCap = LineCap.Round
+            pen.EndCap = LineCap.Round
+            g.DrawLines(pen, New PointF() {
+                New PointF(cx - ARM * 0.6F, cy - ARM),
+                New PointF(cx + ARM * 0.6F, cy),
+                New PointF(cx - ARM * 0.6F, cy + ARM)
+            })
+        End Using
+    End Sub
+
     Private Shared Function LoadPendingList() As List(Of PutAwayPoRow)
         Dim result As New List(Of PutAwayPoRow)
         Try

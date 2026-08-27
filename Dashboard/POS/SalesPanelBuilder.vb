@@ -28,7 +28,7 @@ Public Class SalesPanelBuilder
     End Structure
 
     ' ── SHARED STATE (live filtering / chart data) ─────────────────────────────
-    Private Shared _txnRowList As Panel
+    Private Shared _txnRowList As CardTableBody
     Private Shared _txnColGrid As TableLayoutPanel
     Private Shared _activeFilter As String = "All"
     Private Shared _container As Panel
@@ -544,16 +544,20 @@ Public Class SalesPanelBuilder
 
         ' ── Column headers ──
         Dim colHeader As New Panel With {
-            .Top = 104, .Left = 0, .Height = 36, .BackColor = Color.FromArgb(247, 250, 249),
+            .Top = 104, .Left = 2, .Height = 36, .BackColor = Color.FromArgb(247, 250, 249),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
-        AddHandler card.Resize, Sub() colHeader.Width = card.Width
+        AddHandler card.Resize, Sub() colHeader.Width = card.Width - 4
         AddHandler colHeader.Paint,
             Sub(s, e)
                 Using p As New Pen(SoftBorder, 1)
                     e.Graphics.DrawLine(p, 0, colHeader.Height - 1, colHeader.Width, colHeader.Height - 1)
                     e.Graphics.DrawLine(p, 0, 0, colHeader.Width, 0)
                 End Using
+                ' The strip is inset 2px inside the card, so the card's own
+                ' hairline already shows to either side of it -- nothing more to
+                ' draw here. (Previously this strip spanned the full card width
+                ' and painted over that border, which made the edge look ragged.)
             End Sub
 
         _txnColGrid = New TableLayoutPanel With {
@@ -583,14 +587,15 @@ Public Class SalesPanelBuilder
         card.Controls.Add(colHeader)
 
         ' ── Data rows ──
-        _txnRowList = New Panel With {
-            .Top = 140, .Left = 0, .AutoScroll = True, .BackColor = Color.White,
+        _txnRowList = New CardTableBody With {
+            .Top = 140, .Left = 2,
+            .EmptyText = "No transactions yet today.",
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                _txnRowList.Width = card.Width
-                _txnRowList.Height = card.Height - 140 - 44
+                _txnRowList.Width = card.Width - 4
+                _txnRowList.Height = card.Height - 140 - 45
             End Sub
 
         Dim SyncHeaderGutter As Action =
@@ -604,24 +609,27 @@ Public Class SalesPanelBuilder
         card.Controls.Add(_txnRowList)
 
         ' ── Footer / pagination ──
-        Dim footer As New Panel With {
-            .Height = 44, .Left = 0, .BackColor = Color.White, .Padding = New Padding(18, 0, 18, 0),
+        ' Footer is inset by 1px and given a rounded bottom so the card's own
+        ' rounded corner + hairline border stay visible underneath it.
+        Dim footer As New CardFooterPanel With {
+            .Height = 44, .Left = 2, .BackColor = Color.White, .Padding = New Padding(18, 0, 18, 0),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                footer.Width = card.Width
-                footer.Top = card.Height - footer.Height
-            End Sub
-        AddHandler footer.Paint,
-            Sub(s, e)
-                Using p As New Pen(SoftBorder, 1) : e.Graphics.DrawLine(p, 0, 0, footer.Width, 0) : End Using
+                footer.Width = card.Width - 4
+                footer.Top = card.Height - footer.Height - 1
             End Sub
 
+        ' Padding does not offset absolutely-positioned children, so inset the
+        ' label explicitly and centre it in the strip -- at x=0 it collided with
+        ' the footer's clipped corner and the text was cut off at the bottom.
         _lblPaging = New Label With {
             .Text = "Loading transactions...", .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 11)
+            .ForeColor = SubText, .AutoSize = True
         }
+        AddHandler footer.Resize,
+            Sub() _lblPaging.Location = New Point(18, (footer.Height - _lblPaging.Height) \ 2)
         footer.Controls.Add(_lblPaging)
         card.Controls.Add(footer)
 

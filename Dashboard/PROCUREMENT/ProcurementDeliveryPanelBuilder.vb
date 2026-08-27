@@ -296,23 +296,20 @@ Public Class ProcurementDeliveryPanelBuilder
 
         ' Expected date chip
         Dim expText As String = If(po.HasExpected, "Expected " & po.ExpectedDate.ToString("MMM d"), "No date")
+        ' Expected date reads as quiet supporting text, not a filled chip.
         Dim expChip As New Label With {
-            .Text = expText, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDeep, .BackColor = TileBg, .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
+            .Text = expText, .Font = New Font("Segoe UI", 9.5F, FontStyle.Regular),
+            .ForeColor = If(po.HasExpected, SubText, FaintText),
+            .BackColor = Color.Transparent,
+            .AutoSize = True, .Padding = New Padding(0, 7, 4, 7),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(expChip, 12)
         card.Controls.Add(expChip)
 
         Dim st = StatusInfo(po.Status)
-        Dim badge As New Label With {
-            .Text = st.text, .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-            .ForeColor = Color.White, .BackColor = If(po.Status = "Received", PositiveClr,
-                                                      If(po.Status = "Partially Received", WarningClr, MintDeep)),
-            .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 12)
+        Dim badgeAccent As Color = If(po.Status = "Received", PositiveClr,
+                                      If(po.Status = "Partially Received", WarningClr, MintDeep))
+        Dim badge As Label = OutlineBadge(st.text, badgeAccent)
         card.Controls.Add(badge)
 
         Dim caret As New Label With {
@@ -462,16 +459,7 @@ Public Class ProcurementDeliveryPanelBuilder
         row.Controls.AddRange({lblName, lblSku, lblQty})
 
         Dim ls = LineStatus(it)
-        Dim badge As New Label With {
-        .Text = ls.text,
-        .Font = New Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-        .ForeColor = ls.fore,
-        .BackColor = ls.back,
-        .AutoSize = True,
-        .Padding = New Padding(14, 6, 14, 6),
-        .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-    }
-        RoundLabel(badge, 12)
+        Dim badge As Label = OutlineBadge(ls.text, ls.fore)
         row.Controls.Add(badge)
 
         AddHandler row.Resize,
@@ -680,6 +668,65 @@ Public Class ProcurementDeliveryPanelBuilder
     End Function
 
 
+
+    ' True pill: corner radius always equals the label's full height, so both
+    ' ends are perfect semicircles no matter how the text/padding sizes it.
+    ' AutoSize labels have usually already sized themselves by the time this is
+    ' called, so apply the region NOW as well as on every later resize.
+    ' Minimalist status badge: no fill, just the status colour as text plus a
+    ' hairline border at a soft 6px radius. Owner-drawn because a WinForms Label
+    ' cannot paint its own border without going square/3-D.
+    Private Shared Function OutlineBadge(text As String, accent As Color) As Label
+        Dim lbl As New Label With {
+            .Text = text,
+            .Font = New Font("Segoe UI", 9.0F, FontStyle.Regular),
+            .ForeColor = accent,
+            .BackColor = Color.Transparent,
+            .AutoSize = True,
+            .Padding = New Padding(12, 5, 12, 5),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        AddHandler lbl.Paint,
+            Sub(s2, e2)
+                Dim b As Label = CType(s2, Label)
+                e2.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, b.Width - 1, b.Height - 1)
+                Using path As GraphicsPath = RoundRect(r, 12)
+                    Using pen As New Pen(Color.FromArgb(85, accent), 1.0F)
+                        e2.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                Dim sf As New StringFormat With {
+                    .Alignment = StringAlignment.Center,
+                    .LineAlignment = StringAlignment.Center
+                }
+                Using br As New SolidBrush(b.ForeColor)
+                    e2.Graphics.DrawString(b.Text, b.Font, br, New RectangleF(0, 0, b.Width, b.Height), sf)
+                End Using
+            End Sub
+        Return lbl
+    End Function
+
+    Private Shared Sub PillLabel(lbl As Label)
+        Dim apply As Action =
+            Sub()
+                Dim h As Integer = lbl.Height
+                If h <= 0 OrElse lbl.Width < h Then Return
+                Dim path As New GraphicsPath()
+                path.AddArc(0, 0, h, h, 90, 180)
+                path.AddArc(lbl.Width - h, 0, h, h, 270, 180)
+                path.CloseFigure()
+                lbl.Region = New Region(path)
+            End Sub
+        AddHandler lbl.Resize, Sub() apply()
+        AddHandler lbl.TextChanged, Sub() apply()
+        AddHandler lbl.FontChanged, Sub() apply()
+        ' AutoSize labels report their final size only once they have a parent /
+        ' have been laid out; cover both the immediate and deferred cases.
+        AddHandler lbl.HandleCreated, Sub() apply()
+        AddHandler lbl.ParentChanged, Sub() apply()
+        apply()
+    End Sub
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
         AddHandler lbl.Resize,

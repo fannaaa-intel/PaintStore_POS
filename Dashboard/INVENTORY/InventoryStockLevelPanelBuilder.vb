@@ -49,6 +49,24 @@ Public Class InventoryStockLevelPanelBuilder
     Private Shared ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
     Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
     Private Shared ReadOnly CardBg As Color = Color.White
+    ' Tint for the table's column-header band — a touch off white so the header
+    ' reads as part of the card rather than as a separate strip above it.
+    Private Shared ReadOnly HeaderBandBg As Color = Color.FromArgb(248, 251, 249)
+    ' Must match the radius PanelRenderer.Draw uses for the card border, so the
+    ' header band's top corners sit exactly on that curve.
+    Private Const CARD_RADIUS As Integer = 14
+
+    ' Padding on the card that keeps its children clear of the border stroke.
+    Private Const CARD_INNER_INSET As Integer = 2
+
+    ' Rules inside the table. Lighter than the frame so rows do not compete with
+    ' the card edge, but the same hue family and clearly visible.
+    Private Shared ReadOnly TableRule As Color = Color.FromArgb(214, 224, 219)
+
+    ' Side inset shared by every horizontal rule in the table — the header
+    ' underline, each row divider, the blank filler rules and the footer rule.
+    ' They must all use this or the lines visibly disagree at the card edges.
+    Private Const RULE_INSET As Integer = 16
     Private Shared ReadOnly CardBorder As Color = Color.FromArgb(228, 232, 230)
     Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
     Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
@@ -110,6 +128,10 @@ Public Class InventoryStockLevelPanelBuilder
 
     ' ── CONTROL REFERENCES ────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
+    ' Fixed row pitch — shared by real rows and the blank filler rows painted
+    ' beneath them, so the ruling stays continuous down the whole table.
+    Private Const ROW_HEIGHT As Integer = 64
+
     Private Shared rowsHost As Panel
     Private Shared lblSubtitle As Label
     Private Shared lblShowing As Label
@@ -147,20 +169,31 @@ Public Class InventoryStockLevelPanelBuilder
         container.BackColor = MintBg
 
         ' ---- Main list card (pinned header + scrolling rows) ----
+        ' PanelRenderer strokes the rounded border 1px inside the client rect, and
+        ' Dock=Fill children cover the whole client rect. Padding of 1 put the
+        ' header band on exactly the same pixel as that stroke — and since the
+        ' band paints after the card, it covered the frame and left it looking
+        ' pale above and beside the column header. 2 clears the stroke entirely.
         Dim listCard As New BufferedPanel With {
             .Dock = DockStyle.Fill, .BackColor = CardBg,
-            .Padding = New Padding(0), .Margin = New Padding(0)
+            .Padding = New Padding(CARD_INNER_INSET), .Margin = New Padding(0)
         }
+        ' Same renderer the KPI/stat cards use, so the table card's border, corner
+        ' radius and drop shadow are identical to every other container.
         AddHandler listCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
         Dim colHead As Panel = BuildColumnHeader()
         colHead.Dock = DockStyle.Top
 
+        ' Zero horizontal padding: rows must line up with the docked column
+        ' header, which spans the full card width. AutoScroll stays off so no
+        ' scrollbar is ever painted — HookSilentScroll drives it by wheel instead.
         rowsHost = New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True,
-            .Padding = New Padding(8, 0, 8, 8)
+            .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = False,
+            .Padding = New Padding(0)
         }
         AddHandler rowsHost.Resize, Sub() ReflowRowWidths()
+        HookSilentScroll(rowsHost)
 
         Dim footer As New Panel With {.Height = 34, .Dock = DockStyle.Bottom, .BackColor = Color.Transparent}
         lblShowing = New Label With {
@@ -170,8 +203,8 @@ Public Class InventoryStockLevelPanelBuilder
         footer.Controls.Add(lblShowing)
         AddHandler footer.Paint,
             Sub(s, e)
-                Using pen As New Pen(CardBorder, 1)
-                    e.Graphics.DrawLine(pen, 16, 0, footer.Width - 16, 0)
+                Using pen As New Pen(TableRule, 1)
+                    e.Graphics.DrawLine(pen, RULE_INSET, 0, footer.Width - RULE_INSET, 0)
                 End Using
             End Sub
 
@@ -787,8 +820,13 @@ Public Class InventoryStockLevelPanelBuilder
     ' =========================================================================
     '  PRODUCT TABLE
     ' =========================================================================
+
     Private Shared Function BuildColumnHeader() As Panel
-        Dim head As New Panel With {.Height = 40, .BackColor = MintBg, .Padding = New Padding(0)}
+        ' Transparent so the card's own rounded white fill shows through: painting
+        ' this strip in the page tone made the card look open at the top, as if the
+        ' header sat outside the box. The tint is drawn in Paint below, clipped to
+        ' the card's top corner radius so the border stays closed.
+        Dim head As New BufferedPanel With {.Height = 40, .BackColor = Color.Transparent, .Padding = New Padding(0)}
         Dim inner As New TableLayoutPanel With {
             .Dock = DockStyle.Fill, .ColumnCount = 7, .RowCount = 1,
             .BackColor = Color.Transparent, .Padding = New Padding(16, 0, 16, 0)
@@ -803,18 +841,60 @@ Public Class InventoryStockLevelPanelBuilder
             ("LINE VALUE", ContentAlignment.MiddleRight),
             ("ACTION", ContentAlignment.MiddleCenter)
         }
+        ' Margin must be zero on both this grid and the row grid, otherwise the
+        ' default 3px cell margin shifts header text off its column. Col 0 is
+        ' padded to clear the row thumbnail so PRODUCT sits over the item name.
         For i = 0 To 6
             inner.Controls.Add(New Label With {
                 .Text = titles(i).t, .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
                 .ForeColor = SubText, .Dock = DockStyle.Fill, .TextAlign = titles(i).align,
-                .BackColor = Color.Transparent
+                .BackColor = Color.Transparent,
+                .Margin = New Padding(0),
+                .Padding = New Padding(If(i = 0, 52, 0), 0, 0, 0)
             }, i, 0)
         Next
         head.Controls.Add(inner)
         AddHandler head.Paint,
             Sub(s, e)
-                Using pen As New Pen(CardBorder, 1)
-                    e.Graphics.DrawLine(pen, 16, head.Height - 1, head.Width - 16, head.Height - 1)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+
+                ' Fill the strip with the header tint, rounding only the two top
+                ' corners so it follows the card's border exactly.
+                '
+                ' AddArc takes a bounding BOX, not a radius — PanelRenderer passes
+                ' radius*2 for that box, so this must too or the band curves at
+                ' half the card's radius and exposes white along the corner.
+                '
+                ' The band must stop INSIDE the card's border, never paint over
+                ' it: the card paints first and this header is a child drawn on
+                ' top, so any bleed would erase the frame along the top edge.
+                Dim w As Integer = head.Width
+                Dim h As Integer = head.Height
+                ' The band sits CARD_INNER_INSET px inside the card, so its corner
+                ' curve is the card's radius less that inset — otherwise the band
+                ' curves wider than the frame it sits in.
+                Dim d As Integer = (CARD_RADIUS - CARD_INNER_INSET) * 2
+                Using gp As New GraphicsPath()
+                    gp.AddArc(0, 0, d, d, 180, 90)
+                    gp.AddArc(w - d, 0, d, d, 270, 90)
+                    gp.AddLine(w, h, 0, h)
+                    gp.CloseFigure()
+                    Using br As New SolidBrush(HeaderBandBg)
+                        e.Graphics.FillPath(br, gp)
+                    End Using
+                End Using
+
+                ' Divider between the header band and the first row. Uses
+                ' TableRule, the same grey as every other rule in the table, so
+                ' the header line never reads heavier than the rows beneath it.
+                '
+                ' Smoothing is switched off first: the rounded corners above need
+                ' AntiAlias, but an anti-aliased 1px horizontal line is spread
+                ' over two pixel rows at partial alpha, which made this rule look
+                ' washed out next to the crisp, unsmoothed row dividers.
+                e.Graphics.SmoothingMode = SmoothingMode.None
+                Using pen As New Pen(TableRule, 1)
+                    e.Graphics.DrawLine(pen, RULE_INSET, h - 1, w - RULE_INSET, h - 1)
                 End Using
             End Sub
         Return head
@@ -860,7 +940,7 @@ Public Class InventoryStockLevelPanelBuilder
             }
             rowsHost.Controls.Add(empty)
         Else
-            Dim top As Integer = 4
+            Dim top As Integer = 0
             Dim width As Integer = rowsHost.ClientSize.Width
             For Each it In list
                 Dim row As Panel = BuildProductRow(it)
@@ -871,9 +951,12 @@ Public Class InventoryStockLevelPanelBuilder
                 activeRows.Add(row)
                 top += row.Height
             Next
+            rowContentHeight = top
         End If
 
         rowsHost.ResumeLayout()
+        scrollOffset = 0
+        ApplyScrollOffset()
 
         If lblShowing IsNot Nothing Then
             lblShowing.Text = "Showing " & list.Count & " of " & items.Count
@@ -885,17 +968,97 @@ Public Class InventoryStockLevelPanelBuilder
         For Each r In activeRows
             r.Width = width
         Next
+        ApplyScrollOffset()
+        rowsHost.Invalidate()
+    End Sub
+
+    ' ── SILENT SCROLLING ─────────────────────────────────────────────────────
+    ' The rows panel scrolls with the mouse wheel but never shows a scrollbar,
+    ' so the table keeps a clean edge and the rows stay aligned with the column
+    ' header (a visible scrollbar would shrink the client area and shift them).
+    Private Shared scrollOffset As Integer = 0
+    Private Shared rowContentHeight As Integer = 0
+
+    Private Shared Function MaxScroll() As Integer
+        If rowsHost Is Nothing Then Return 0
+        Return Math.Max(rowContentHeight - rowsHost.ClientSize.Height, 0)
+    End Function
+
+    Private Shared Sub ApplyScrollOffset()
+        If rowsHost Is Nothing Then Return
+        scrollOffset = Math.Max(0, Math.Min(scrollOffset, MaxScroll()))
+        Dim top As Integer = -scrollOffset
+        For Each r In activeRows
+            r.Top = top
+            top += r.Height
+        Next
+    End Sub
+
+    Private Shared Sub HookSilentScroll(host As Panel)
+        Dim onWheel As MouseEventHandler =
+            Sub(s, e)
+                If MaxScroll() <= 0 Then Return
+                scrollOffset -= CInt(e.Delta / 120.0 * 48)
+                host.SuspendLayout()
+                ApplyScrollOffset()
+                host.ResumeLayout()
+                host.Invalidate()
+            End Sub
+        AddHandler host.MouseWheel, onWheel
+
+        ' A Panel only gets wheel messages while focused, so take focus when the
+        ' pointer enters the table. TabStop stays off — this is not a tab target.
+        host.TabStop = False
+        AddHandler host.MouseEnter,
+            Sub()
+                If Not host.Focused Then host.Focus()
+            End Sub
+
+        ' Child controls swallow the wheel event, so relay it up to the host.
+        Dim relay As MouseEventHandler = Sub(s, e) onWheel(host, e)
+        AddHandler host.ControlAdded,
+            Sub(s, e)
+                AttachWheelRelay(e.Control, relay)
+            End Sub
+
+        ' Empty space below the final row is painted as blank striped rows so the
+        ' table body always reaches the footer instead of ending in a grey void.
+        AddHandler host.Paint,
+            Sub(s, e)
+                ' The last real row already drew its own divider at
+                ' rowContentHeight - 1, so start a full row below that rather than
+                ' at rowContentHeight — otherwise the first filler rule doubles up
+                ' on the last row's line and the spacing below it reads uneven.
+                Dim y As Integer = (rowContentHeight - scrollOffset) + ROW_HEIGHT - 1
+                Dim h As Integer = host.ClientSize.Height
+                Using pen As New Pen(TableRule, 1)
+                    While y < h
+                        If y >= 0 Then
+                            e.Graphics.DrawLine(pen, RULE_INSET, y, host.ClientSize.Width - RULE_INSET, y)
+                        End If
+                        y += ROW_HEIGHT
+                    End While
+                End Using
+            End Sub
+    End Sub
+
+    Private Shared Sub AttachWheelRelay(c As Control, relay As MouseEventHandler)
+        AddHandler c.MouseWheel, relay
+        For Each child As Control In c.Controls
+            AttachWheelRelay(child, relay)
+        Next
+        AddHandler c.ControlAdded, Sub(s, e) AttachWheelRelay(e.Control, relay)
     End Sub
 
     Private Shared Function BuildProductRow(it As StockItem) As Panel
         Dim row As New Panel With {
-            .Height = 64, .BackColor = Color.Transparent,
+            .Height = ROW_HEIGHT, .BackColor = Color.Transparent,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Top
         }
         AddHandler row.Paint,
             Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, row.Height - 1, row.Width - 16, row.Height - 1)
+                Using pen As New Pen(TableRule, 1)
+                    e.Graphics.DrawLine(pen, RULE_INSET, row.Height - 1, row.Width - RULE_INSET, row.Height - 1)
                 End Using
             End Sub
         AddHandler row.MouseEnter, Sub() row.BackColor = Color.FromArgb(247, 251, 249)
@@ -989,6 +1152,10 @@ Public Class InventoryStockLevelPanelBuilder
         Dim capId As Integer = it.Id
         Dim capName As String = it.Name
         AddHandler btnAdjust.Click, Sub() OpenStockAdjustment(capId, capName)
+
+        For Each cell As Control In New Control() {cProduct, lblCat, cStock, cLevel, cStatus, lblValue, cAct}
+            cell.Margin = New Padding(0)
+        Next
 
         grid.Controls.Add(cProduct, 0, 0)
         grid.Controls.Add(lblCat, 1, 0)

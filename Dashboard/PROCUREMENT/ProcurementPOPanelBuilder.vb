@@ -495,7 +495,6 @@ Public Class ProcurementPOPanelBuilder
         ' Status badge — top-right of card
 
         Dim st = StatusInfo(po.Status)
-        Dim badgeFore As Color = Color.White
         Dim badgeBack As Color
         Select Case po.Status
             Case "Ordered" : badgeBack = MintDeep
@@ -506,80 +505,92 @@ Public Class ProcurementPOPanelBuilder
             Case Else : badgeBack = SubText
         End Select
 
-        Dim badge As New Label With {
-            .Text = st.text,
-            .Font = New Font("Segoe UI Semibold", 12.0F, FontStyle.Bold),
-            .ForeColor = badgeFore,
-            .BackColor = badgeBack,
-            .AutoSize = True,
-            .Padding = New Padding(16, 8, 16, 8),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 14)
+        Dim badge As Label = OutlineBadge(StatusInfo(po.Status).text, badgeBack)
         card.Controls.Add(badge)
-
-        ' "View >" pill — bottom-right, same drawn chevron as Suppliers screen
-        Dim vpH As Integer = 44
-        Dim vpW As Integer = 110
+        ' "View" button — solid mint, button-shaped corners, bottom-right
+        Dim vpH As Integer = 32
+        Dim vpW As Integer = 92
         Dim viewPill As New BufferedPanel With {
             .Size = New Size(vpW, vpH),
-            .BackColor = TileBg,
+            .BackColor = MintDeep,
             .Cursor = Cursors.Hand,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
 
-        ' Pill-shaped region (fully rounded ends)
-        Dim vpRgn As New GraphicsPath()
-        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
-        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
-        vpRgn.CloseFigure()
-        viewPill.Region = New Region(vpRgn)
+        ' Button-shaped region — modest 8px corners, NOT a pill
+        Dim viewPillRadius As Integer = 6
+        Using rgnPath As GraphicsPath = RoundRect(New Rectangle(0, 0, vpW, vpH), viewPillRadius * 2)
+            viewPill.Region = New Region(rgnPath)
+        End Using
+
+        ' Hover / press state drives the fill colour
+        Dim viewPillHot As Boolean = False
+        Dim viewPillDown As Boolean = False
 
         AddHandler viewPill.Paint,
             Sub(s, e)
                 Dim b As BufferedPanel = CType(s, BufferedPanel)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                ' Pill fill
-                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
-                    Using br As New SolidBrush(b.BackColor)
+                Dim fill As Color = MintDeep
+                If viewPillDown Then
+                    fill = Color.FromArgb(0, 104, 87)
+                ElseIf viewPillHot Then
+                    fill = MintPrimary
+                End If
+                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), viewPillRadius * 2)
+                    Using br As New SolidBrush(fill)
                         e.Graphics.FillPath(br, path)
                     End Using
                 End Using
-                ' "View" text
-                Using f As New Font("Segoe UI Semibold", 13.0F, FontStyle.Bold),
-                      br As New SolidBrush(MintDeep)
+                ' Label + chevron, centred as a unit
+                Using f As New Font("Segoe UI Semibold", 9.5F, FontStyle.Regular),
+                      br As New SolidBrush(Color.White)
+                    Dim txtSz As SizeF = e.Graphics.MeasureString("View", f)
+                    Dim gap As Single = 8
+                    Dim chW As Single = 6 * 0.7F
+                    Dim totalW As Single = txtSz.Width + gap + chW
+                    Dim startX As Single = (b.Width - totalW) / 2.0F
                     Dim sf As New StringFormat With {
                         .Alignment = StringAlignment.Near,
                         .LineAlignment = StringAlignment.Center
                     }
-                    e.Graphics.DrawString("View", f, br, New RectangleF(16, 0, 56, b.Height), sf)
-                End Using
-                ' Thick ">" chevron — rounded pen
-                Dim chX As Single = b.Width - 24
-                Dim midY As Single = b.Height / 2.0F
-                Dim arm As Single = 11
-                Using pen As New Pen(MintDeep, 3.0F)
-                    pen.LineJoin = LineJoin.Round
-                    pen.StartCap = LineCap.Round
-                    pen.EndCap = LineCap.Round
-                    e.Graphics.DrawLines(pen, New PointF() {
-                        New PointF(chX, midY - arm),
-                        New PointF(chX + arm * 0.7F, midY),
-                        New PointF(chX, midY + arm)
-                    })
+                    e.Graphics.DrawString("View", f, br,
+                        New RectangleF(startX, 0, txtSz.Width + 2, b.Height), sf)
+                    Dim chX As Single = startX + txtSz.Width + gap
+                    Dim midY As Single = b.Height / 2.0F
+                    Dim arm As Single = 5
+                    Using pen As New Pen(Color.White, 2.0F)
+                        pen.LineJoin = LineJoin.Round
+                        pen.StartCap = LineCap.Round
+                        pen.EndCap = LineCap.Round
+                        e.Graphics.DrawLines(pen, New PointF() {
+                            New PointF(chX, midY - arm),
+                            New PointF(chX + arm * 0.7F, midY),
+                            New PointF(chX, midY + arm)
+                        })
+                    End Using
                 End Using
             End Sub
 
         AddHandler viewPill.MouseEnter,
             Sub()
-                viewPill.BackColor = Color.FromArgb(180, 230, 218)
+                viewPillHot = True
                 viewPill.Invalidate()
             End Sub
         AddHandler viewPill.MouseLeave,
             Sub()
-                viewPill.BackColor = TileBg
+                viewPillHot = False
+                viewPillDown = False
+                viewPill.Invalidate()
+            End Sub
+        AddHandler viewPill.MouseDown,
+            Sub()
+                viewPillDown = True
+                viewPill.Invalidate()
+            End Sub
+        AddHandler viewPill.MouseUp,
+            Sub()
+                viewPillDown = False
                 viewPill.Invalidate()
             End Sub
         card.Controls.Add(viewPill)
@@ -912,7 +923,7 @@ Public Class ProcurementPOPanelBuilder
             .AutoSize = True, .Padding = New Padding(8, 3, 8, 3),
             .Location = New Point(textX, 43)
         }
-        RoundLabel(pillQty, 9)
+        PillLabel(pillQty)
 
         Dim lblBy As New Label With {
             .Text = ChrW(8226) & "  " & req.RequestedBy, .Font = New Font("Segoe UI", 9.5F),
@@ -2374,7 +2385,7 @@ Public Class ProcurementPOPanelBuilder
             .Padding = New Padding(16, 8, 16, 8),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        RoundLabel(cardBadge, 14)
+        PillLabel(cardBadge)
         poCard.Controls.AddRange({lblEyebrow, lblPoNum, lblSupName, cardBadge})
 
         ' ── 2. IDENTITY / META DIVIDER ───────────────────────────────────────────
@@ -3090,6 +3101,65 @@ Public Class ProcurementPOPanelBuilder
         path.AddArc(0, ctrl.Height - r, r, r, 90, 90)
         path.CloseFigure()
         ctrl.Region = New Region(path)
+    End Sub
+
+    ' True pill: corner radius always equals the label's full height, so both
+    ' ends are perfect semicircles no matter how the text/padding sizes it.
+    ' AutoSize labels have usually already sized themselves by the time this is
+    ' called, so apply the region NOW as well as on every later resize.
+    ' Minimalist status badge: no fill, just the status colour as text plus a
+    ' hairline border at a soft radius. Owner-drawn because a WinForms Label
+    ' cannot paint its own rounded border.
+    Private Shared Function OutlineBadge(text As String, accent As Color) As Label
+        Dim lbl As New Label With {
+            .Text = text,
+            .Font = New Font("Segoe UI", 9.0F, FontStyle.Regular),
+            .ForeColor = accent,
+            .BackColor = Color.Transparent,
+            .AutoSize = True,
+            .Padding = New Padding(12, 5, 12, 5),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        AddHandler lbl.Paint,
+            Sub(s2, e2)
+                Dim b As Label = CType(s2, Label)
+                e2.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, b.Width - 1, b.Height - 1)
+                Using path As GraphicsPath = RoundRect(r, 12)
+                    Using pen As New Pen(Color.FromArgb(85, accent), 1.0F)
+                        e2.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                Dim sf As New StringFormat With {
+                    .Alignment = StringAlignment.Center,
+                    .LineAlignment = StringAlignment.Center
+                }
+                Using br As New SolidBrush(b.ForeColor)
+                    e2.Graphics.DrawString(b.Text, b.Font, br, New RectangleF(0, 0, b.Width, b.Height), sf)
+                End Using
+            End Sub
+        Return lbl
+    End Function
+
+    Private Shared Sub PillLabel(lbl As Label)
+        Dim apply As Action =
+            Sub()
+                Dim h As Integer = lbl.Height
+                If h <= 0 OrElse lbl.Width < h Then Return
+                Dim path As New GraphicsPath()
+                path.AddArc(0, 0, h, h, 90, 180)
+                path.AddArc(lbl.Width - h, 0, h, h, 270, 180)
+                path.CloseFigure()
+                lbl.Region = New Region(path)
+            End Sub
+        AddHandler lbl.Resize, Sub() apply()
+        AddHandler lbl.TextChanged, Sub() apply()
+        AddHandler lbl.FontChanged, Sub() apply()
+        ' AutoSize labels report their final size only once they have a parent /
+        ' have been laid out; cover both the immediate and deferred cases.
+        AddHandler lbl.HandleCreated, Sub() apply()
+        AddHandler lbl.ParentChanged, Sub() apply()
+        apply()
     End Sub
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)

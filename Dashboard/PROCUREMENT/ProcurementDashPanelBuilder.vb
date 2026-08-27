@@ -441,7 +441,7 @@ Public Class ProcurementDashPanelBuilder
     .ForeColor = MintDeep, .BackColor = Color.Transparent, .AutoSize = True,
     .Padding = New Padding(7, 2, 7, 2)
 }
-        RoundLabel(qtyPill, 10)
+        PillLabel(qtyPill)
 
         ' Col 3 — Requested by
         Dim lblBy As New Label With {
@@ -604,7 +604,7 @@ Public Class ProcurementDashPanelBuilder
         .ForeColor = st.fore, .BackColor = st.back, .AutoSize = True,
         .Padding = New Padding(8, 3, 8, 3), .Anchor = AnchorStyles.Top Or AnchorStyles.Right
     }
-        RoundLabel(badge, 10)
+        PillLabel(badge)
 
         row.Controls.AddRange({lblPo, lblSupplier, lblItems, lblCost, badge})
 
@@ -781,6 +781,31 @@ Public Class ProcurementDashPanelBuilder
         row.Invalidate()
     End Sub
 
+
+    ' True pill: corner radius always equals the label's full height, so both
+    ' ends are perfect semicircles no matter how the text/padding sizes it.
+    ' AutoSize labels have usually already sized themselves by the time this is
+    ' called, so apply the region NOW as well as on every later resize.
+    Private Shared Sub PillLabel(lbl As Label)
+        Dim apply As Action =
+            Sub()
+                Dim h As Integer = lbl.Height
+                If h <= 0 OrElse lbl.Width < h Then Return
+                Dim path As New GraphicsPath()
+                path.AddArc(0, 0, h, h, 90, 180)
+                path.AddArc(lbl.Width - h, 0, h, h, 270, 180)
+                path.CloseFigure()
+                lbl.Region = New Region(path)
+            End Sub
+        AddHandler lbl.Resize, Sub() apply()
+        AddHandler lbl.TextChanged, Sub() apply()
+        AddHandler lbl.FontChanged, Sub() apply()
+        ' AutoSize labels report their final size only once they have a parent /
+        ' have been laid out; cover both the immediate and deferred cases.
+        AddHandler lbl.HandleCreated, Sub() apply()
+        AddHandler lbl.ParentChanged, Sub() apply()
+        apply()
+    End Sub
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
         AddHandler lbl.Resize,

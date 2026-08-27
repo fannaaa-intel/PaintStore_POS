@@ -248,80 +248,98 @@ Public Class ProcurementReceivePanelBuilder
         card.Controls.AddRange({lblPo, lblSupplier, lblMeta})
 
         ' ── Status badge — solid fill, TOP-RIGHT ─────────────────────────────────
-        Dim badgeFore As Color = Color.White
         Dim badgeBack As Color
         Select Case po.Status
             Case "Ordered" : badgeBack = MintDeep
             Case "Partially Received" : badgeBack = WarningClr
             Case Else : badgeBack = SubText
         End Select
-        Dim badge As New Label With {
-            .Text = StatusInfo(po.Status).text,
-            .Font = New Font("Segoe UI Semibold", 11.0F, FontStyle.Bold),
-            .ForeColor = badgeFore, .BackColor = badgeBack,
-            .AutoSize = True, .Padding = New Padding(14, 6, 14, 6),
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        RoundLabel(badge, 12)
+        Dim badge As Label = OutlineBadge(StatusInfo(po.Status).text, badgeBack)
         card.Controls.Add(badge)
-
-        ' ── "Receive >" pill — thick drawn chevron, BOTTOM-RIGHT ─────────────────
-        Dim vpH As Integer = 38
-        Dim vpW As Integer = 114
+        ' ── "Receive" button — solid mint, button-shaped corners, BOTTOM-RIGHT ──
+        Dim vpH As Integer = 32
+        Dim vpW As Integer = 104
         Dim receivePill As New BufferedPanel With {
             .Size = New Size(vpW, vpH),
-            .BackColor = TileBg,
+            .BackColor = MintDeep,
             .Cursor = Cursors.Hand,
             .Anchor = AnchorStyles.Top Or AnchorStyles.Right
         }
-        Dim vpRgn As New GraphicsPath()
-        vpRgn.AddArc(0, 0, vpH, vpH, 180, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 270, 90)
-        vpRgn.AddArc(vpW - vpH, 0, vpH, vpH, 0, 90)
-        vpRgn.AddArc(0, 0, vpH, vpH, 90, 90)
-        vpRgn.CloseFigure()
-        receivePill.Region = New Region(vpRgn)
+
+        ' Button-shaped region — modest 8px corners, NOT a pill
+        Dim receivePillRadius As Integer = 6
+        Using rgnPath As GraphicsPath = RoundRect(New Rectangle(0, 0, vpW, vpH), receivePillRadius * 2)
+            receivePill.Region = New Region(rgnPath)
+        End Using
+
+        ' Hover / press state drives the fill colour
+        Dim receivePillHot As Boolean = False
+        Dim receivePillDown As Boolean = False
 
         AddHandler receivePill.Paint,
             Sub(s, e)
                 Dim b As BufferedPanel = CType(s, BufferedPanel)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), vpH \ 2)
-                    Using br As New SolidBrush(b.BackColor)
+                Dim fill As Color = MintDeep
+                If receivePillDown Then
+                    fill = Color.FromArgb(0, 104, 87)
+                ElseIf receivePillHot Then
+                    fill = MintPrimary
+                End If
+                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), receivePillRadius * 2)
+                    Using br As New SolidBrush(fill)
                         e.Graphics.FillPath(br, path)
                     End Using
                 End Using
-                Using f As New Font("Segoe UI Semibold", 11.5F, FontStyle.Bold),
-                      br As New SolidBrush(MintDeep)
+                ' Label + chevron, centred as a unit
+                Using f As New Font("Segoe UI Semibold", 9.5F, FontStyle.Regular),
+                      br As New SolidBrush(Color.White)
+                    Dim txtSz As SizeF = e.Graphics.MeasureString("Receive", f)
+                    Dim gap As Single = 8
+                    Dim chW As Single = 6 * 0.7F
+                    Dim totalW As Single = txtSz.Width + gap + chW
+                    Dim startX As Single = (b.Width - totalW) / 2.0F
                     Dim sf As New StringFormat With {
                         .Alignment = StringAlignment.Near,
                         .LineAlignment = StringAlignment.Center
                     }
-                    e.Graphics.DrawString("Receive", f, br, New RectangleF(14, 0, 68, b.Height), sf)
-                End Using
-                Dim chX As Single = b.Width - 22
-                Dim midY As Single = b.Height / 2.0F
-                Dim arm As Single = 9
-                Using pen As New Pen(MintDeep, 2.5F)
-                    pen.LineJoin = LineJoin.Round
-                    pen.StartCap = LineCap.Round
-                    pen.EndCap = LineCap.Round
-                    e.Graphics.DrawLines(pen, New PointF() {
-                        New PointF(chX, midY - arm),
-                        New PointF(chX + arm * 0.7F, midY),
-                        New PointF(chX, midY + arm)
-                    })
+                    e.Graphics.DrawString("Receive", f, br,
+                        New RectangleF(startX, 0, txtSz.Width + 2, b.Height), sf)
+                    Dim chX As Single = startX + txtSz.Width + gap
+                    Dim midY As Single = b.Height / 2.0F
+                    Dim arm As Single = 5
+                    Using pen As New Pen(Color.White, 2.0F)
+                        pen.LineJoin = LineJoin.Round
+                        pen.StartCap = LineCap.Round
+                        pen.EndCap = LineCap.Round
+                        e.Graphics.DrawLines(pen, New PointF() {
+                            New PointF(chX, midY - arm),
+                            New PointF(chX + arm * 0.7F, midY),
+                            New PointF(chX, midY + arm)
+                        })
+                    End Using
                 End Using
             End Sub
 
         AddHandler receivePill.MouseEnter,
             Sub()
-                receivePill.BackColor = Color.FromArgb(180, 230, 218)
+                receivePillHot = True
                 receivePill.Invalidate()
             End Sub
         AddHandler receivePill.MouseLeave,
             Sub()
-                receivePill.BackColor = TileBg
+                receivePillHot = False
+                receivePillDown = False
+                receivePill.Invalidate()
+            End Sub
+        AddHandler receivePill.MouseDown,
+            Sub()
+                receivePillDown = True
+                receivePill.Invalidate()
+            End Sub
+        AddHandler receivePill.MouseUp,
+            Sub()
+                receivePillDown = False
                 receivePill.Invalidate()
             End Sub
         card.Controls.Add(receivePill)
@@ -457,7 +475,7 @@ Public Class ProcurementReceivePanelBuilder
             .AutoSize = True, .Padding = New Padding(10, 4, 10, 4),
             .Location = New Point(130, 20)
         }
-        RoundLabel(itemCountPill, 10)
+        PillLabel(itemCountPill)
         itemCountPill.Top = lblHead.Top + (lblHead.PreferredHeight - itemCountPill.PreferredHeight) \ 2
         Dim lblHint As New Label With {
             .Text = "All remaining quantities will be received on save.",
@@ -1070,6 +1088,65 @@ Public Class ProcurementReceivePanelBuilder
         path.AddArc(0, ctrl.Height - r, r, r, 90, 90)
         path.CloseFigure()
         ctrl.Region = New Region(path)
+    End Sub
+
+    ' True pill: corner radius always equals the label's full height, so both
+    ' ends are perfect semicircles no matter how the text/padding sizes it.
+    ' AutoSize labels have usually already sized themselves by the time this is
+    ' called, so apply the region NOW as well as on every later resize.
+    ' Minimalist status badge: no fill, just the status colour as text plus a
+    ' hairline border at a soft radius. Owner-drawn because a WinForms Label
+    ' cannot paint its own rounded border.
+    Private Shared Function OutlineBadge(text As String, accent As Color) As Label
+        Dim lbl As New Label With {
+            .Text = text,
+            .Font = New Font("Segoe UI", 9.0F, FontStyle.Regular),
+            .ForeColor = accent,
+            .BackColor = Color.Transparent,
+            .AutoSize = True,
+            .Padding = New Padding(12, 5, 12, 5),
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        AddHandler lbl.Paint,
+            Sub(s2, e2)
+                Dim b As Label = CType(s2, Label)
+                e2.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As New Rectangle(0, 0, b.Width - 1, b.Height - 1)
+                Using path As GraphicsPath = RoundRect(r, 12)
+                    Using pen As New Pen(Color.FromArgb(85, accent), 1.0F)
+                        e2.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                Dim sf As New StringFormat With {
+                    .Alignment = StringAlignment.Center,
+                    .LineAlignment = StringAlignment.Center
+                }
+                Using br As New SolidBrush(b.ForeColor)
+                    e2.Graphics.DrawString(b.Text, b.Font, br, New RectangleF(0, 0, b.Width, b.Height), sf)
+                End Using
+            End Sub
+        Return lbl
+    End Function
+
+    Private Shared Sub PillLabel(lbl As Label)
+        Dim apply As Action =
+            Sub()
+                Dim h As Integer = lbl.Height
+                If h <= 0 OrElse lbl.Width < h Then Return
+                Dim path As New GraphicsPath()
+                path.AddArc(0, 0, h, h, 90, 180)
+                path.AddArc(lbl.Width - h, 0, h, h, 270, 180)
+                path.CloseFigure()
+                lbl.Region = New Region(path)
+            End Sub
+        AddHandler lbl.Resize, Sub() apply()
+        AddHandler lbl.TextChanged, Sub() apply()
+        AddHandler lbl.FontChanged, Sub() apply()
+        ' AutoSize labels report their final size only once they have a parent /
+        ' have been laid out; cover both the immediate and deferred cases.
+        AddHandler lbl.HandleCreated, Sub() apply()
+        AddHandler lbl.ParentChanged, Sub() apply()
+        apply()
     End Sub
 
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)

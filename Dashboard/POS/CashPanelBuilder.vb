@@ -386,16 +386,20 @@ Public Class CashPanelBuilder
         card.Controls.SetChildIndex(header, 0)
 
         Dim colHeader As New Panel With {
-            .Top = 60, .Left = 0, .Height = 34, .BackColor = Color.FromArgb(247, 250, 249),
+            .Top = 60, .Left = 2, .Height = 34, .BackColor = Color.FromArgb(247, 250, 249),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
-        AddHandler card.Resize, Sub() colHeader.Width = card.Width
+        AddHandler card.Resize, Sub() colHeader.Width = card.Width - 4
         AddHandler colHeader.Paint,
             Sub(s, e)
                 Using p As New Pen(SoftBorder, 1)
                     e.Graphics.DrawLine(p, 0, colHeader.Height - 1, colHeader.Width, colHeader.Height - 1)
                     e.Graphics.DrawLine(p, 0, 0, colHeader.Width, 0)
                 End Using
+                ' The strip is inset 2px inside the card, so the card's own
+                ' hairline already shows to either side of it -- nothing more to
+                ' draw here. (Previously this strip spanned the full card width
+                ' and painted over that border, which made the edge look ragged.)
             End Sub
 
         Dim colGrid As New TableLayoutPanel With {
@@ -419,14 +423,14 @@ Public Class CashPanelBuilder
         colHeader.Controls.Add(colGrid)
         card.Controls.Add(colHeader)
 
-        Dim rowList As New Panel With {
-            .Top = 94, .Left = 0, .AutoScroll = True, .BackColor = Color.White,
+        Dim rowList As New CardTableBody With {
+            .Top = 94, .Left = 2, .EmptyText = "",
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                rowList.Width = card.Width
-                rowList.Height = card.Height - 94 - 52
+                rowList.Width = card.Width - 4
+                rowList.Height = card.Height - 94 - 53
             End Sub
 
         Dim SyncGutter As Action =
@@ -437,44 +441,53 @@ Public Class CashPanelBuilder
         AddHandler rowList.Layout, Sub() SyncGutter()
         AddHandler card.Resize, Sub() SyncGutter()
 
-        rowList.Controls.Add(MakeSectionHeader("BILLS"))
+        ' Build the strip in the order it should read top-to-bottom, then add in
+        ' reverse: with Dock=Top the control added last sits highest, so adding
+        ' the reversed sequence yields the intended order. The previous version
+        ' added forwards and then reversed the whole child list, which detached
+        ' each header from its group -- COINS ended up labelling the bills.
+        Dim ordered As New List(Of Control)
+        ordered.Add(MakeSectionHeader("BILLS"))
         For Each d In _denoms.Where(Function(x) x.IsBill)
-            rowList.Controls.Add(BuildDenomRow(d))
+            ordered.Add(BuildDenomRow(d))
         Next
-        rowList.Controls.Add(MakeSectionHeader("COINS"))
+        ordered.Add(MakeSectionHeader("COINS"))
         For Each d In _denoms.Where(Function(x) Not x.IsBill)
-            rowList.Controls.Add(BuildDenomRow(d))
+            ordered.Add(BuildDenomRow(d))
         Next
-        For i = rowList.Controls.Count - 1 To 0 Step -1
-            rowList.Controls.SetChildIndex(rowList.Controls(i), rowList.Controls.Count - 1 - i)
+        For i = ordered.Count - 1 To 0 Step -1
+            rowList.Controls.Add(ordered(i))
         Next
         card.Controls.Add(rowList)
 
-        Dim footer As New Panel With {
-            .Height = 52, .Left = 0, .BackColor = Color.FromArgb(247, 250, 249),
+        ' Inset 1px with a rounded bottom so the card's corner + border survive.
+        Dim footer As New CardFooterPanel With {
+            .Height = 52, .Left = 2, .BackColor = Color.FromArgb(247, 250, 249),
             .Padding = New Padding(18, 0, 18, 0),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Bottom
         }
         AddHandler card.Resize,
             Sub()
-                footer.Width = card.Width
-                footer.Top = card.Height - footer.Height
-            End Sub
-        AddHandler footer.Paint,
-            Sub(s, e)
-                Using p As New Pen(SoftBorder, 1) : e.Graphics.DrawLine(p, 0, 0, footer.Width, 0) : End Using
+                footer.Width = card.Width - 4
+                footer.Top = card.Height - footer.Height - 1
             End Sub
 
         Dim lblCaption As New Label With {
             .Text = "CASH COUNTED", .Font = New Font("Segoe UI Semibold", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 18)
+            .ForeColor = SubText, .AutoSize = True
         }
         _lblCountFooter = New Label With {
             .Text = "₱ 0.00", .Font = New Font("Segoe UI", 16, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Anchor = AnchorStyles.Right Or AnchorStyles.Top
         }
+        ' Both labels inset from the card border and vertically centred, so the
+        ' rounded footer corners never clip them.
         AddHandler footer.Resize,
-            Sub() _lblCountFooter.Location = New Point(footer.Width - _lblCountFooter.Width - 18, 13)
+            Sub()
+                lblCaption.Location = New Point(18, (footer.Height - lblCaption.Height) \ 2)
+                _lblCountFooter.Location = New Point(footer.Width - _lblCountFooter.Width - 18,
+                                                     (footer.Height - _lblCountFooter.Height) \ 2)
+            End Sub
         footer.Controls.Add(lblCaption)
         footer.Controls.Add(_lblCountFooter)
         card.Controls.Add(footer)

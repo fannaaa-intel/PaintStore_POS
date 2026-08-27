@@ -42,7 +42,6 @@ Public Class InventoryHomePanelBuilder
 
     ' ── ICONS ──────────────────────────────────────────────────────────────────
     Private Shared ReadOnly IconInventory As String = "inventory.png"
-    Private Shared ReadOnly IconDiagram As String = "bar-chart.png"
     Private Shared ReadOnly IconTransfer As String = "transfer.png"
     Private Shared ReadOnly IconNotif As String = "notification.png"
     Private Shared ReadOnly IconActivity As String = "recent.png"
@@ -107,6 +106,9 @@ Public Class InventoryHomePanelBuilder
         ' FIX 3: Instead of stacking AddHandler wrap.Resize on every load, we use
         ' a single local ResizeWrap sub and wire it only once per load.  The handler
         ' is automatically removed when wrap is disposed (end of this panel's lifetime).
+        ' wrap sits at Left=18 and is 40px narrower than the scroll viewport, so
+        ' its right edge stops 22px short. Rows inside wrap must therefore size to
+        ' wrap.Width — never to the scroll width, which would overflow wrap.
         Dim ResizeWrap As Action =
             Sub()
                 Dim w As Integer = Math.Max(scroll.ClientSize.Width - 40, 100)
@@ -132,8 +134,6 @@ Public Class InventoryHomePanelBuilder
         Dim outStockCount As Integer = 0
         Dim lowStockItems As New List(Of (name As String, sku As String, qty As Integer, reorder As Integer, hex As String))
         Dim recentMoves As New List(Of (name As String, mtype As String, qty As Integer, timeStr As String))
-        Dim catRows As New List(Of (name As String, count As Integer))
-        Dim catProducts As New Dictionary(Of String, List(Of (name As String, sku As String, hex As String, qty As Integer)))
 
         Try
             Using conn = Db.GetConnection()
@@ -190,38 +190,6 @@ Public Class InventoryHomePanelBuilder
                     End Using
                 End Using
 
-                ' Products per category (for hover preview)
-                Using cmd As New MySqlCommand(
-                    "SELECT c.name AS cname, p.name AS pname, p.sku, p.color_hex, p.stock_qty " &
-                    "FROM products p JOIN categories c ON p.category_id = c.category_id " &
-                    "WHERE p.is_active = 1 ORDER BY c.name ASC, p.name ASC", conn)
-                    Using rdr = cmd.ExecuteReader()
-                        While rdr.Read()
-                            Dim cname = rdr("cname").ToString()
-                            If Not catProducts.ContainsKey(cname) Then
-                                catProducts(cname) = New List(Of (name As String, sku As String, hex As String, qty As Integer))
-                            End If
-                            catProducts(cname).Add((
-                                rdr("pname").ToString(),
-                                rdr("sku").ToString(),
-                                If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString()),
-                                SafeInt(rdr("stock_qty"))))
-                        End While
-                    End Using
-                End Using
-
-                ' Category breakdown
-                Using cmd As New MySqlCommand(
-                    "SELECT c.name AS cname, COUNT(p.product_id) AS cnt " &
-                    "FROM categories c LEFT JOIN products p " &
-                    "  ON p.category_id = c.category_id AND p.is_active = 1 " &
-                    "GROUP BY c.category_id, c.name ORDER BY cnt DESC", conn)
-                    Using rdr = cmd.ExecuteReader()
-                        While rdr.Read()
-                            catRows.Add((rdr("cname").ToString(), SafeInt(rdr("cnt"))))
-                        End While
-                    End Using
-                End Using
             End Using
         Catch ex As Exception
             ' FIX 2: Surface the error to the user instead of silently swallowing it.
@@ -233,6 +201,13 @@ Public Class InventoryHomePanelBuilder
         End Try
 
         Const GAP As Integer = 16
+        ' PanelRenderer strokes each card's rounded border 1px inside the client
+        ' rect with a 14px radius. Dock=Fill children would otherwise paint over
+        ' that stroke, so every card carries this inset to hold content inside.
+        Const CARD_INSET As Integer = 3
+        ' Height of the horizontal Quick Actions bar: 60 header + 14 icon inset
+        ' + 34 icon + 8 gap + 20 title + 2 gap + 16 subtitle + 12 bottom padding.
+        Const QA_BAR_HEIGHT As Integer = 190
         Dim curTop As Integer = 0
 
         ' ===========================
@@ -373,7 +348,7 @@ Public Class InventoryHomePanelBuilder
             Sub()
                 If statRow.Parent IsNot Nothing Then statRow.Width = statRow.Parent.Width
             End Sub
-        AddHandler scroll.Resize, Sub() statRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
+        AddHandler scroll.Resize, Sub() statRow.Width = wrap.Width
 
         Dim statData() As (title As String, value As String, subtitle As String, badge As String, valColor As Color) = {
             ("Total Products", totalProducts.ToString(), "Active items", "Items", MintDark),
@@ -438,6 +413,11 @@ Public Class InventoryHomePanelBuilder
         wrap.Controls.Add(statRow)
         curTop = statRow.Bottom + GAP
 
+        ' Placeholder — the Quick Actions bar is built further down (it needs the
+        ' nav wiring defined there) and is inserted at this vertical slot.
+        Dim qaBarTop As Integer = curTop
+        curTop += QA_BAR_HEIGHT + GAP
+
         ' ===========================
         ' 3. MIDDLE ROW — Low Stock Alerts + Recent Movements
         ' ===========================
@@ -451,12 +431,13 @@ Public Class InventoryHomePanelBuilder
         }
         midRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 55))
         midRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 45))
-        AddHandler scroll.Resize, Sub() midRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
+        AddHandler scroll.Resize, Sub() midRow.Width = wrap.Width
 
         ' ---- LOW & OUT-OF-STOCK ALERTS CARD ----
         Dim lowCard As New BufferedPanel With {
             .Dock = DockStyle.Fill, .BackColor = CardBg,
-            .Margin = New Padding(2, 0, 10, 0)
+            .Margin = New Padding(2, 0, 10, 0),
+            .Padding = New Padding(CARD_INSET)
         }
         AddHandler lowCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
@@ -464,13 +445,10 @@ Public Class InventoryHomePanelBuilder
         Dim lowCardHeader As Panel = MakeCardHeader("Low & Out of Stock Alerts", IconNotif, "!")
 
         ' FIX 10: AutoScroll=True so the list scrolls independently when tiles overflow.
-        Dim lowList As New FlowLayoutPanel With {
+        Dim lowList As New QuietScrollFlowPanel With {
             .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
-            .Padding = New Padding(12, 8, 12, 8),
-            .AutoScroll = True,
-            .FlowDirection = FlowDirection.TopDown,
-            .WrapContents = False
+            .Padding = New Padding(20, 10, 20, 14)
         }
 
         If lowStockItems.Count = 0 Then
@@ -570,23 +548,23 @@ Public Class InventoryHomePanelBuilder
         lowCard.Controls.Add(lowList)
         lowCard.Controls.Add(lowCardHeader)
 
+
+
         ' ---- RECENT MOVEMENTS CARD ----
         Dim moveCard As New BufferedPanel With {
             .Dock = DockStyle.Fill, .BackColor = CardBg,
-            .Margin = New Padding(10, 0, 2, 0)
+            .Margin = New Padding(10, 0, 2, 0),
+            .Padding = New Padding(CARD_INSET)
         }
         AddHandler moveCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
         Dim moveCardHeader As Panel = MakeCardHeader("Recent Stock Movements", IconActivity, "↻")
 
         ' FIX 10: AutoScroll=True so the movement list scrolls independently.
-        Dim moveList As New FlowLayoutPanel With {
+        Dim moveList As New QuietScrollFlowPanel With {
             .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
-            .Padding = New Padding(12, 8, 12, 8),
-            .AutoScroll = True,
-            .FlowDirection = FlowDirection.TopDown,
-            .WrapContents = False
+            .Padding = New Padding(20, 10, 20, 14)
         }
         If recentMoves.Count = 0 Then
             moveList.Controls.Add(MakeEmptyLabel("No stock movements yet."))
@@ -668,6 +646,8 @@ Public Class InventoryHomePanelBuilder
         moveCard.Controls.Add(moveList)
         moveCard.Controls.Add(moveCardHeader)
 
+
+
         midRow.Controls.Add(lowCard, 0, 0)
         midRow.Controls.Add(moveCard, 1, 0)
         wrap.Controls.Add(midRow)
@@ -677,22 +657,27 @@ Public Class InventoryHomePanelBuilder
         ' 4. QUICK ACTIONS CARD
         ' ===========================
         Dim qaCard As New BufferedPanel With {
-            .Top = curTop, .Left = 0, .Width = wrap.Width, .BackColor = CardBg,
+            .Top = qaBarTop, .Left = 0, .Width = wrap.Width,
+            .Height = QA_BAR_HEIGHT, .BackColor = CardBg,
+            .Padding = New Padding(CARD_INSET),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
+        AddHandler scroll.Resize, Sub() qaCard.Width = wrap.Width
         AddHandler qaCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         qaCard.Controls.Add(MakeCardHeader("Quick Actions", IconQuickActions, "≡"))
 
+        ' Quick Actions is now a single horizontal bar: 4 tiles side by side so
+        ' the whole card fits above the fold instead of a tall right-hand column.
         Dim qaGrid As New TableLayoutPanel With {
-            .ColumnCount = 1, .RowCount = 4, .Dock = DockStyle.Fill,
+            .ColumnCount = 4, .RowCount = 1, .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
             .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-            .Padding = New Padding(14, 10, 14, 10)
+            .Padding = New Padding(14, 10, 14, 12)
         }
-        qaGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
         For i = 0 To 3
-            qaGrid.RowStyles.Add(New RowStyle(SizeType.Percent, 25))
+            qaGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25))
         Next
+        qaGrid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         ' FIX 6: Icon path typo corrected — was "bar-chart    .png" (spaces).
         Dim qaTiles() As (title As String, sub1 As String, iconPath As String, fallback As String, iconBg As Color, target As String) = {
@@ -702,12 +687,13 @@ Public Class InventoryHomePanelBuilder
             ("Low Stock Alerts", "Items to reorder", "notification.png", "!", Color.Transparent, "lowStock")
         }
 
-        Dim qaRowIndex As Integer = 0
+        Dim qaColIndex As Integer = 0
         For Each qt In qaTiles
             Dim capQt = qt
+            ' Horizontal bar: gutters go left/right between tiles, none at the ends.
             Dim tile As New BufferedPanel With {
                 .BackColor = TileBg, .Dock = DockStyle.Fill,
-                .Margin = New Padding(0, If(capQt.target = "itemList", 0, 5), 0, If(capQt.target = "lowStock", 0, 5)),
+                .Margin = New Padding(If(qaColIndex = 0, 0, 5), 0, If(qaColIndex = 3, 0, 5), 0),
                 .Cursor = Cursors.Hand
             }
             AddHandler tile.Paint, Sub(s, e) PaintFlatTile(CType(s, Panel), e)
@@ -748,17 +734,18 @@ Public Class InventoryHomePanelBuilder
                 .ForeColor = SubText, .AutoSize = True,
                 .Location = New Point(58, 30), .BackColor = Color.Transparent
             }
-            Dim chev As New Label With {
-                .Text = "›",
-                .Font = New Font("Segoe UI", 14), .ForeColor = SubText,
-                .AutoSize = True, .BackColor = Color.Transparent
-            }
-
-            tile.Controls.AddRange({tileIconBox, tileName, tileSub, chev})
+            ' No chevron in the horizontal bar — the tiles are narrow and the
+            ' arrow would crowd the label. Contents are centred in the tile.
+            tile.Controls.AddRange({tileIconBox, tileName, tileSub})
             AddHandler tile.Resize,
                 Sub()
-                    chev.Left = tile.Width - chev.Width - 14
-                    chev.Top = (tile.Height \ 2) - (chev.Height \ 2)
+                    If tile.Width < 10 Then Return
+                    tileIconBox.Left = (tile.Width - tileIconBox.Width) \ 2
+                    tileIconBox.Top = 14
+                    tileName.Left = Math.Max((tile.Width - tileName.Width) \ 2, 6)
+                    tileName.Top = tileIconBox.Bottom + 8
+                    tileSub.Left = Math.Max((tile.Width - tileSub.Width) \ 2, 6)
+                    tileSub.Top = tileName.Bottom + 2
                 End Sub
             AddHandler tile.MouseEnter, Sub() tile.BackColor = Color.FromArgb(220, 242, 235)
             AddHandler tile.MouseLeave, Sub() tile.BackColor = TileBg
@@ -773,165 +760,17 @@ Public Class InventoryHomePanelBuilder
                 Next
             Next
 
-            qaGrid.Controls.Add(tile, 0, qaRowIndex)
-            qaRowIndex += 1
+            qaGrid.Controls.Add(tile, qaColIndex, 0)
+            qaColIndex += 1
         Next
 
         qaCard.Controls.Add(qaGrid)
         qaGrid.BringToFront()
 
         ' ===========================
-        ' 5. CATEGORY BREAKDOWN CARD
-        ' ===========================
-        Dim catCard As New BufferedPanel With {
-            .Top = curTop, .Left = 0, .Width = wrap.Width, .BackColor = CardBg,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        }
-        AddHandler catCard.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
-        catCard.Controls.Add(MakeCardHeader("Category Breakdown", IconDiagram, "▦"))
-
-        Dim catGridWrap As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
-            .Padding = New Padding(18, 16, 18, 16)
-        }
-
-        If catRows.Count = 0 Then
-            catGridWrap.Controls.Add(MakeEmptyLabel("No categories found."))
-        Else
-            Dim catGrid As New TableLayoutPanel With {
-                .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
-                .ColumnCount = 2,
-                .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
-            }
-            catGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
-            catGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
-            Dim rowsNeeded As Integer = CInt(Math.Ceiling(catRows.Count / 2.0))
-            For r = 0 To rowsNeeded - 1
-                catGrid.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F / rowsNeeded))
-            Next
-
-            Dim totalCatProducts As Integer = 0
-            For Each cr In catRows
-                totalCatProducts += cr.count
-            Next
-
-            Dim cIdx As Integer = 0
-            For Each cr In catRows
-                Dim capCr = cr
-                Dim col As Integer = cIdx Mod 2
-                Dim rowI As Integer = cIdx \ 2
-                Dim isLastRow As Boolean = (rowI = rowsNeeded - 1)
-                Dim hasStock As Boolean = capCr.count > 0
-                Dim pct As Integer = If(totalCatProducts > 0,
-                    CInt(Math.Round(capCr.count * 100.0 / totalCatProducts)), 0)
-
-                Dim chipBg As Color = If(hasStock, TileBg, MintBg)
-                Dim chipHoverBg As Color = If(hasStock, Color.FromArgb(225, 240, 234), Color.FromArgb(238, 241, 239))
-                Dim nameColor As Color = If(hasStock, MintDark, Color.FromArgb(136, 135, 128))
-                Dim metaColor As Color = If(hasStock, SubText, Color.FromArgb(180, 178, 169))
-                Dim dotColor As Color = If(hasStock, MintPrimary, Color.FromArgb(197, 200, 197))
-                Dim barTrackColor As Color = If(hasStock, Color.FromArgb(214, 238, 229), Color.FromArgb(228, 232, 230))
-                Dim barFillColor As Color = If(hasStock, MintPrimary, Color.FromArgb(180, 178, 169))
-
-                Dim chip As New BufferedPanel With {
-                    .Dock = DockStyle.Fill, .BackColor = chipBg,
-                    .Margin = New Padding(If(col = 0, 0, 8), 0, If(col = 0, 8, 0), If(isLastRow, 0, 16)),
-                    .Cursor = Cursors.Hand
-                }
-                AddHandler chip.Paint, Sub(s, e) PaintFlatTile(CType(s, Panel), e)
-
-                Dim swatchDot As New Panel With {.Size = New Size(9, 9), .BackColor = Color.Transparent}
-                AddHandler swatchDot.Paint,
-                    Sub(s, e)
-                        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                        Using br As New SolidBrush(dotColor)
-                            e.Graphics.FillEllipse(br, 0, 0, 8, 8)
-                        End Using
-                    End Sub
-
-                Dim lblC As New Label With {
-                    .Text = capCr.name,
-                    .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-                    .ForeColor = nameColor, .AutoSize = True, .BackColor = Color.Transparent
-                }
-                Dim chev As New Label With {
-                    .Text = "›", .Font = New Font("Segoe UI", 14), .ForeColor = metaColor,
-                    .AutoSize = True, .BackColor = Color.Transparent
-                }
-                Dim lblBig As New Label With {
-                    .Text = capCr.count.ToString(),
-                    .Font = New Font("Segoe UI", 19, FontStyle.Bold),
-                    .ForeColor = nameColor, .AutoSize = True, .BackColor = Color.Transparent
-                }
-                Dim lblMeta As New Label With {
-                    .Text = If(capCr.count = 1, "product · ", "products · ") & pct.ToString() & "%",
-                    .Font = New Font("Segoe UI", 9), .ForeColor = metaColor,
-                    .AutoSize = True, .BackColor = Color.Transparent
-                }
-                Dim barTrack As New Panel With {.Height = 4, .BackColor = barTrackColor}
-                Dim barFill As New Panel With {.Height = 4, .BackColor = barFillColor, .Location = New Point(0, 0)}
-                barTrack.Controls.Add(barFill)
-
-                chip.Controls.AddRange({swatchDot, lblC, chev, lblBig, lblMeta, barTrack})
-
-                Dim LayoutChip As Action =
-                    Sub()
-                        swatchDot.Location = New Point(16, 17)
-                        lblC.Location = New Point(31, 13)
-                        chev.Location = New Point(chip.Width - chev.Width - 14, 13)
-                        lblBig.Location = New Point(16, 38)
-                        lblMeta.Location = New Point(lblBig.Right + 6, lblBig.Bottom - lblMeta.Height - 4)
-                        barTrack.Location = New Point(16, chip.Height - 20)
-                        barTrack.Width = Math.Max(chip.Width - 32, 10)
-                        barFill.Height = barTrack.Height
-                        barFill.Width = CInt(barTrack.Width * (pct / 100.0))
-                    End Sub
-                AddHandler chip.Resize, Sub() LayoutChip()
-                LayoutChip()
-
-                AddHandler chip.MouseEnter, Sub() chip.BackColor = chipHoverBg
-                AddHandler chip.MouseLeave, Sub() chip.BackColor = chipBg
-
-                Dim capCat As String = capCr.name
-                Dim onClick As EventHandler = Sub(s, e) OpenItemListFiltered(chip, capCat, "")
-                AddHandler chip.Click, onClick
-                For Each child As Control In chip.Controls
-                    AddHandler child.Click, onClick
-                Next
-
-                catGrid.Controls.Add(chip, col, rowI)
-                cIdx += 1
-            Next
-
-            catGridWrap.Controls.Add(catGrid)
-        End If
-
-        catCard.Controls.Add(catGridWrap)
-        catGridWrap.BringToFront()
-
-        ' ===========================
-        ' BOTTOM ROW: Category (left) + Quick Actions (right)
-        ' ===========================
-        Dim bottomRow As New TableLayoutPanel With {
-            .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = 340,
-            .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent,
-            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        }
-        bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 55))
-        bottomRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 45))
-        AddHandler scroll.Resize, Sub() bottomRow.Width = Math.Max(scroll.ClientSize.Width - 40, 100)
-
-        catCard.Dock = DockStyle.Fill
-        catCard.Margin = New Padding(2, 0, 10, 0)
-        bottomRow.Controls.Add(catCard, 0, 0)
-
-        qaCard.Dock = DockStyle.Fill
-        qaCard.Margin = New Padding(10, 0, 2, 0)
-        bottomRow.Controls.Add(qaCard, 1, 0)
-
-        wrap.Controls.Add(bottomRow)
-        curTop = bottomRow.Bottom + GAP
+        ' The dashboard ends with the Low Stock / Recent Movements row; the
+        ' Quick Actions bar is the last thing added to the canvas.
+        wrap.Controls.Add(qaCard)
 
         ' FIX 7: Set wrap height AFTER ResumeLayout so the scroll panel can
         ' correctly measure the virtual canvas and display the scrollbar.
@@ -999,6 +838,9 @@ Public Class InventoryHomePanelBuilder
         }
     End Function
 
+
+
+
     Private Shared Function MakeCardHeader(title As String, iconPath As String, fallbackIcon As String) As Panel
         Dim header As New BufferedPanel With {
             .Height = 60, .Dock = DockStyle.Top, .BackColor = Color.Transparent
@@ -1039,7 +881,8 @@ Public Class InventoryHomePanelBuilder
             .Text = title,
             .Font = New Font("Segoe UI", 14, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(62, 18)
+            .Location = New Point(62, 18),
+            .UseMnemonic = False
         }
 
         header.Controls.AddRange({iconBox, titleLbl})

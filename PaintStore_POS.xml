@@ -69,5 +69,14 @@ PaintStore_POS
  Not a standards-compliant barcode — purely decorative / scannable aesthetic.
  </summary>
 </member>
+<member name="P:PaintStore_POS.CardTableBody.CornerRadius">
+ <summary>Corner radius of the parent card. Must match PanelRenderer.</summary>
+</member>
+<member name="P:PaintStore_POS.CardTableBody.RoundBottom">
+ <summary>True when this panel is the last element in the card (no footer below).</summary>
+</member>
+<member name="P:PaintStore_POS.CardTableBody.EmptyText">
+ <summary>Message shown centred when the panel holds no rows.</summary>
+</member>
 </members>
 </doc>

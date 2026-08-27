@@ -538,7 +538,9 @@ Public Class InventoryLowStockPanelBuilder
         rowsHost.Controls.Add(headerStrip)
 
         ' Card that holds all the rows.
-        Dim rowH As Integer = 64
+        ' 78px: at 64 the 42px thumbnail plus the two-line name/SKU stack left
+        ' almost no breathing room top or bottom and the row read as cramped.
+        Dim rowH As Integer = 78
         Dim card As New BufferedPanel With {
             .Height = items.Count * rowH + 12, .BackColor = CardBg
         }
@@ -597,17 +599,20 @@ Public Class InventoryLowStockPanelBuilder
         AddHandler row.MouseLeave, Sub() row.BackColor = Color.Transparent
 
         ' PRODUCT thumbnail + name + SKU
-        Dim thumb As Panel = BuildThumb(it, 42)
-        thumb.Location = New Point(ColProductX, (height - 42) \ 2)
+        Const ThumbSize As Integer = 50
+        Dim thumb As Panel = BuildThumb(it, ThumbSize)
+        thumb.Location = New Point(ColProductX, (height - ThumbSize) \ 2)
         row.Controls.Add(thumb)
+        Dim textX As Integer = ColProductX + ThumbSize + 14
         Dim lblName As New Label With {
             .Text = it.Name, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(ColProductX + 56, 13), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblSku As New Label With {
             .Text = it.Sku, .Font = New Font("Segoe UI", 9),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(ColProductX + 56, 36), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' Positioned in SnapCols so the pair centres as one block in the row.
         row.Controls.AddRange({lblName, lblSku})
 
         ' CATEGORY
@@ -696,8 +701,24 @@ Public Class InventoryLowStockPanelBuilder
         ' Receive link — navigates to Stock Adjustment pre-loaded for this product.
         ' This makes OpenReceive() reachable from the UI for the first time.
         Dim capId As Integer = it.Id
-        Dim btnReceive As Label = MakeLink("Receive", MintPrimary)
-        AddHandler btnReceive.Click, Sub() OpenReceive(capId)
+        ' Only clickable when units are actually awaiting receipt for this
+        ' product; otherwise it stays visible but greyed out, so staff can see
+        ' the action exists without being sent to an empty Stock Adjustment.
+        Dim pendingIn As Integer = PendingReceiptQty(it.Id)
+        Dim btnReceive As Label
+        If pendingIn > 0 Then
+            btnReceive = MakeLink("Receive", MintPrimary)
+            AddHandler btnReceive.Click, Sub() OpenReceive(capId)
+        Else
+            btnReceive = New Label With {
+                .Text = "Receive",
+                .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+                .ForeColor = FaintText,
+                .AutoSize = True,
+                .Cursor = Cursors.Default,
+                .BackColor = Color.Transparent
+            }
+        End If
         row.Controls.Add(btnReceive)
         ' ─────────────────────────────────────────────────────────────────────
 
@@ -705,6 +726,12 @@ Public Class InventoryLowStockPanelBuilder
         Dim SnapCols As Action =
             Sub()
                 Dim c = ColX(row.Width)
+
+                ' Vertically centre the name/SKU pair as one block.
+                Dim nameBlockH As Integer = lblName.Height + 2 + lblSku.Height
+                Dim nameTop As Integer = (row.Height - nameBlockH) \ 2
+                lblName.Location = New Point(textX, nameTop)
+                lblSku.Location = New Point(textX, nameTop + lblName.Height + 2)
 
                 ' Vertically centre two-line qty stack as a unit.
                 Dim qtyBlockH As Integer = lblQty.Height + 2 + lblReorder.Height
@@ -755,6 +782,34 @@ Public Class InventoryLowStockPanelBuilder
     '  PURCHASE REQUEST HELPERS
     ' =========================================================================
 
+    ' Units for this product sitting on an ordered PO that have not been
+    ' shelved yet. Mirrors the pending calculation in InventoryPutAwayPanelBuilder
+    ' so "Receive" is only offered when there is genuinely something to receive.
+    Private Shared Function PendingReceiptQty(productId As Integer) As Integer
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(COALESCE(sm_agg.recv, 0) - poi.shelved_qty), 0) " &
+                    "FROM purchase_orders po " &
+                    "JOIN po_items poi ON poi.po_id = po.po_id " &
+                    "LEFT JOIN ( " &
+                    "    SELECT reference_id AS po_id, product_id, SUM(qty_change) AS recv " &
+                    "    FROM stock_movements " &
+                    "    WHERE reference_type = 'receive' AND movement_type = 'Purchase' " &
+                    "    GROUP BY reference_id, product_id " &
+                    ") sm_agg ON sm_agg.po_id = po.po_id AND sm_agg.product_id = poi.product_id " &
+                    "WHERE po.status IN ('Ordered','Partially Received','Received') " &
+                    "  AND poi.product_id = @pid", conn)
+                    cmd.Parameters.AddWithValue("@pid", productId)
+                    Return Math.Max(0, Convert.ToInt32(cmd.ExecuteScalar()))
+                End Using
+            End Using
+        Catch
+            Return 0
+        End Try
+    End Function
+
     ' Returns True if a Pending request already exists for this product.
     Private Shared Function HasPendingRequest(productId As Integer) As Boolean
         Try
@@ -773,20 +828,38 @@ Public Class InventoryLowStockPanelBuilder
     End Function
 
     ' Inserts a purchase_request row and updates the button in place.
+    ' The suggested qty is offered as the pre-filled default, but staff can type
+    ' any quantity they judge correct — whatever they confirm is what reaches
+    ' Procurement in purchase_requests.qty_requested.
     Private Shared Sub RaiseRequest(it As AlertItem, btnRequest As Label)
         Try
+            Dim q As String = ChrW(34)
             Dim msg As String =
-                "Raise a restock request for """ & it.Name & """?" &
+                "Raise a restock request for " & q & it.Name & q & "?" &
                 Environment.NewLine & Environment.NewLine &
-                "Suggested qty: " & it.SuggestedQty & " units" &
-                Environment.NewLine &
-                "Procurement will review and create a Purchase Order."
+                "Recommended: " & it.SuggestedQty & " units" &
+                "   (stock " & it.StockQty & ", reorder level " & it.ReorderLevel & ")" &
+                Environment.NewLine & Environment.NewLine &
+                "Enter the quantity to request. Procurement will review it and " &
+                "create a Purchase Order."
 
-            If AppModal.Show(msg, "Raise Request",
-                             MessageBoxButtons.YesNo,
-                             MessageBoxIcon.Question) <> DialogResult.Yes Then
-                Return
-            End If
+            ' Loop until we get a valid number or the user cancels, so a typo
+            ' re-opens the prompt with what they typed instead of silently
+            ' falling back to the recommendation.
+            Dim qty As Integer = 0
+            Dim seed As String = it.SuggestedQty.ToString()
+            Do
+                Dim answer As String = AppModal.Prompt(msg, "Raise Request", seed)
+                If answer Is Nothing Then Return   ' cancelled
+
+                answer = answer.Trim()
+                If Integer.TryParse(answer, qty) AndAlso qty > 0 Then Exit Do
+
+                seed = answer
+                AppModal.Show(
+                    "Enter a whole number of units greater than 0.",
+                    "Invalid Quantity", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Loop
 
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -796,10 +869,12 @@ Public Class InventoryLowStockPanelBuilder
                     "VALUES (@pid, @uid, @qty, 'Pending', @note, NOW())", conn)
                     cmd.Parameters.AddWithValue("@pid", it.Id)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
-                    cmd.Parameters.AddWithValue("@qty", it.SuggestedQty)
+                    cmd.Parameters.AddWithValue("@qty", qty)
                     cmd.Parameters.AddWithValue("@note",
-                        "Auto-suggested from Low Stock Alerts. Stock: " &
-                        it.StockQty & ", Reorder level: " & it.ReorderLevel)
+                        "Raised from Low Stock Alerts. Stock: " &
+                        it.StockQty & ", Reorder level: " & it.ReorderLevel &
+                        ", Recommended: " & it.SuggestedQty &
+                        If(qty = it.SuggestedQty, "", " (staff adjusted to " & qty & ")"))
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
@@ -812,7 +887,7 @@ Public Class InventoryLowStockPanelBuilder
             btnRequest.Tag = "done"
 
             AppModal.Show(
-                "Request raised successfully." & Environment.NewLine &
+                "Request raised for " & qty & " units." & Environment.NewLine &
                 "Procurement has been notified and will review it.",
                 "Request Sent", MessageBoxButtons.OK, MessageBoxIcon.Information)
 
