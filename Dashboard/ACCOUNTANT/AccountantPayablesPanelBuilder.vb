@@ -13,6 +13,13 @@ Imports MySql.Data.MySqlClient
 '    3. Overdue tag positioning fixed (uses Load event instead of Resize)
 '    4. Virtual/paged scrolling: renders only PAGE_SIZE rows at a time
 '    5. DB failure shows visible error label instead of silent Debug.WriteLine
+'
+'  DB REQUIREMENT (optional, run once):
+'     ALTER TABLE purchase_orders ADD COLUMN paid_at DATETIME DEFAULT NULL AFTER received_at;
+'
+'  Without it this screen behaves exactly as before. With it, received-but-
+'  unpaid orders appear as the real liabilities they are and can be settled
+'  from the row detail. See PayableWhere().
 ' =============================================================================
 Public Class AccountantPayablesPanelBuilder
 
@@ -57,7 +64,12 @@ Public Class AccountantPayablesPanelBuilder
     Private Shared _loadError As String = ""   ' FIX 5: track DB error message
 
     ' Filter tabs
-    Private Shared ReadOnly FilterTabs() As String = {"All", "Draft", "Ordered", "Partially Received"}
+    ' "Received" appears only once paid_at exists -- see PayableWhere(). On an
+    ' un-migrated database the tab would always be empty, so it is filtered out
+    ' of this list at build time rather than shown as a dead end.
+    Private Shared ReadOnly AllFilterTabs() As String =
+        {"All", "Draft", "Ordered", "Partially Received", "Received"}
+    Private Shared FilterTabs() As String = {"All", "Draft", "Ordered", "Partially Received"}
     Private Shared _filterBtns() As Button
     Private Shared _activeFilterIdx As Integer = 0
 
@@ -77,6 +89,100 @@ Public Class AccountantPayablesPanelBuilder
         Render()
     End Sub
 
+    ' ── SETTLEMENT SUPPORT ───────────────────────────────────────────────────
+    '  DB REQUIREMENT (run once, optional):
+    '     ALTER TABLE purchase_orders ADD COLUMN paid_at DATETIME DEFAULT NULL AFTER received_at;
+    '
+    '  Receiving goods is what creates the liability -- the ledger credits
+    '  Accounts Payable at that moment. This screen used to EXCLUDE 'Received'
+    '  POs, so it showed the opposite of what was owed: real debts vanished the
+    '  instant they became real, while un-received orders (not yet liabilities)
+    '  were listed as payable.
+    '
+    '  Received POs can only be shown once "settled" is expressible, hence the
+    '  column. Where it does not exist the screen keeps its old behaviour
+    '  exactly, so an un-migrated database is never shown wrong figures.
+    Private Shared _hasPaidAt As Boolean = False
+
+    Private Shared Sub DetectPaidAtColumn(conn As MySqlConnection)
+        _hasPaidAt = False
+        Try
+            Using cmd As New MySqlCommand(
+                "SELECT COUNT(*) FROM information_schema.columns " &
+                "WHERE table_schema = DATABASE() " &
+                "  AND table_name = 'purchase_orders' " &
+                "  AND column_name = 'paid_at'", conn)
+                _hasPaidAt = Convert.ToInt32(cmd.ExecuteScalar()) > 0
+            End Using
+        Catch
+            ' No access to information_schema: stay on the old behaviour.
+            _hasPaidAt = False
+        End Try
+    End Sub
+
+    ' Show the Received tab only when settlement can actually be tracked.
+    Private Shared Sub RefreshVisibleTabs()
+        If _hasPaidAt Then
+            FilterTabs = AllFilterTabs
+        Else
+            FilterTabs = AllFilterTabs.Take(AllFilterTabs.Length - 1).ToArray()
+        End If
+        ' A filter that just disappeared must not leave the screen on a dead tab.
+        If Array.IndexOf(FilterTabs, _filter) < 0 Then _filter = "All"
+    End Sub
+
+    ' Settle a received purchase order: stamps paid_at, which is what removes it
+    ' from payables (see PayableWhere). Guarded on paid_at IS NULL so a second
+    ' click, or another accountant settling the same PO, cannot overwrite the
+    ' original settlement date.
+    Private Shared Sub MarkPaid(row As PayableRow)
+        Try
+            Dim affected As Integer
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "UPDATE purchase_orders SET paid_at = NOW() " &
+                    "WHERE po_no = @no AND status = 'Received' AND paid_at IS NULL", conn)
+                    cmd.Parameters.AddWithValue("@no", row.PoNo)
+                    affected = cmd.ExecuteNonQuery()
+                End Using
+            End Using
+
+            If affected = 0 Then
+                AppModal.Show("This purchase order has already been settled." & Environment.NewLine &
+                              "Its original payment date was left unchanged.",
+                              "Already Paid", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Else
+                ActivityLog.Record("PO_PAID", "purchase_order", Nothing,
+                                   row.PoNo & " to " & row.Supplier & ", " &
+                                   Peso & row.Amount.ToString("N2"))
+                AppModal.Show(row.PoNo & " marked as paid." & Environment.NewLine &
+                              Peso & row.Amount.ToString("N2") & " cleared from payables.",
+                              "Payment Recorded", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            End If
+
+            LoadPayables(_container, _filter)
+
+        Catch ex As Exception
+            AppModal.Show("Could not record the payment:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+    End Sub
+
+    ' Statuses that represent money owed to a supplier.
+    '
+    ' With paid_at present, a Received PO is payable until it is settled, which
+    ' is the accounting-correct view. Without it, "Received" cannot be
+    ' distinguished from "Received and paid", so those are left out rather than
+    ' shown as owed forever.
+    Private Shared Function PayableWhere() As String
+        If _hasPaidAt Then
+            Return "WHERE po.status IN ('Draft','Ordered','Partially Received','Received') " &
+                   "AND po.paid_at IS NULL"
+        End If
+        Return "WHERE po.status NOT IN ('Received','Cancelled')"
+    End Function
+
     ' =========================================================================
     '  DATA
     ' =========================================================================
@@ -90,13 +196,15 @@ Public Class AccountantPayablesPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                DetectPaidAtColumn(conn)
+                RefreshVisibleTabs()
 
                 Using cmd As New MySqlCommand(
                     "SELECT po.po_no, s.name AS sname, po.order_date, " &
                     "po.expected_date, po.total_cost, po.status " &
                     "FROM purchase_orders po " &
                     "JOIN suppliers s ON po.supplier_id = s.supplier_id " &
-                    "WHERE po.status NOT IN ('Received','Cancelled')" & statusWhere &
+                    PayableWhere() & statusWhere &
                     " ORDER BY po.order_date ASC", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
@@ -116,7 +224,7 @@ Public Class AccountantPayablesPanelBuilder
 
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(po.total_cost),0) FROM purchase_orders po " &
-                    "WHERE po.status NOT IN ('Received','Cancelled')" & statusWhere, conn)
+                    PayableWhere() & statusWhere, conn)
                     _totalPayable = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
             End Using
@@ -133,6 +241,7 @@ Public Class AccountantPayablesPanelBuilder
             Case "Draft" : Return " AND po.status = 'Draft'"
             Case "Ordered" : Return " AND po.status = 'Ordered'"
             Case "Partially Received" : Return " AND po.status = 'Partially Received'"
+            Case "Received" : Return " AND po.status = 'Received'"
             Case Else : Return ""
         End Select
     End Function
@@ -299,6 +408,7 @@ Public Class AccountantPayablesPanelBuilder
             Dim idx As Integer = i
             Dim capTab As String = FilterTabs(i)
             Dim btnWidth As Integer = If(capTab = "Partially Received", 146, 96)
+            If capTab = "Received" Then btnWidth = 110
 
             Dim b As New Button With {
                 .Text = capTab,
@@ -776,8 +886,9 @@ Public Class AccountantPayablesPanelBuilder
             End Sub
 
         ' FIX 1: row click — opens PO detail
-        ' Wire this up to your own detail form/panel.
-        ' Currently shows a summary MessageBox as a safe default.
+        ' A Received PO is a debt that can be settled, so its detail offers that
+        ' as a Yes/No instead of adding another button to the row. Everything
+        ' else keeps the plain OK it always had.
         Dim openDetail As Action =
     Sub()
         Dim sb As New System.Text.StringBuilder()
@@ -788,10 +899,24 @@ Public Class AccountantPayablesPanelBuilder
         sb.AppendLine($"Amount    : {Peso}{row.Amount:N2}")
         If isOverdue Then sb.AppendLine(vbCrLf & "⚠ This order is OVERDUE.")
 
-        AppModal.Show(sb.ToString(),
-                      caption:=$"PO Details — {row.PoNo}",
-                      buttons:=MessageBoxButtons.OK,
-                      icon:=If(isOverdue, MessageBoxIcon.Warning, MessageBoxIcon.Information))
+        Dim canSettle As Boolean = _hasPaidAt AndAlso row.Status = "Received"
+        If canSettle Then
+            sb.AppendLine()
+            sb.AppendLine("This order has been received in full, so the amount is owed")
+            sb.AppendLine("to the supplier. Mark it as paid and clear it from payables?")
+
+            If AppModal.Show(sb.ToString(),
+                             caption:=$"PO Details — {row.PoNo}",
+                             buttons:=MessageBoxButtons.YesNo,
+                             icon:=MessageBoxIcon.Question) = DialogResult.Yes Then
+                MarkPaid(row)
+            End If
+        Else
+            AppModal.Show(sb.ToString(),
+                          caption:=$"PO Details — {row.PoNo}",
+                          buttons:=MessageBoxButtons.OK,
+                          icon:=If(isOverdue, MessageBoxIcon.Warning, MessageBoxIcon.Information))
+        End If
     End Sub
 
         AddHandler p.Click, Sub() openDetail()
