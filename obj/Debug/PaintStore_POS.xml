@@ -63,6 +63,18 @@ PaintStore_POS
 <member name="M:PaintStore_POS.CashPanelBuilder.PromptAmount(System.String,System.String)">
  <summary>Modal amount + note prompt. Returns (ok, amount, note).</summary>
 </member>
+<member name="M:PaintStore_POS.ImageCache.ClearAndDispose(System.Collections.Generic.Dictionary{System.String,System.Drawing.Image},System.Windows.Forms.Control)">
+ <summary>
+ Empty an image cache and dispose what it held, once the UI thread has
+ finished the rebuild that replaced those images.
+ </summary>
+ <param name="cache">The builder's thumbnail dictionary.</param>
+ <param name="host">
+ Any live control on the UI thread, used to defer the disposal. When it is
+ Nothing or its handle is gone the images are released immediately, which
+ is correct because there is no surviving control left to paint them.
+ </param>
+</member>
 <member name="M:PaintStore_POS.ReceiptPrinter.DrawBarcode(System.Drawing.Graphics,System.String,System.Int32,System.Int32,System.Int32)">
  <summary>
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.

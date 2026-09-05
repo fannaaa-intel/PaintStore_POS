@@ -171,7 +171,7 @@ Public Class InventoryLowStockPanelBuilder
     ' =========================================================================
     Public Shared Sub LoadLowStock(container As Panel)
         containerRef = container
-        thumbCache.Clear()
+        ImageCache.ClearAndDispose(thumbCache, containerRef)
         LoadData()
 
         container.SuspendLayout()

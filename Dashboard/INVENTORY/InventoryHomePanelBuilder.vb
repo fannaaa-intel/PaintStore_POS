@@ -78,7 +78,8 @@ Public Class InventoryHomePanelBuilder
             End Sub
 
         ' FIX 5: Clear icon cache so stale images are never reused across reloads.
-        IconCache.Clear()
+        ' Disposed after the rebuild -- the cached bitmaps hold GDI+ handles.
+        ImageCache.ClearAndDispose(IconCache, container)
 
         container.SuspendLayout()
         container.Controls.Clear()

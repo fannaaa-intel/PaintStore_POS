@@ -131,7 +131,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
         entryMode = ModeChange
         reasonCards.Clear()
         modeTabs.Clear()
-        thumbCache.Clear()
+        ImageCache.ClearAndDispose(thumbCache, containerRef)
 
         selected = Nothing
         If productId > 0 Then selected = LoadProduct(productId)

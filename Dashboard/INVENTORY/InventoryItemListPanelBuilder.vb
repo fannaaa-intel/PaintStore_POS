@@ -295,7 +295,7 @@ Public Class InventoryItemListPanelBuilder
     ' FIX B: searchTerm is also cleared so that after a save/delete the full
     ' list is visible and the search cue placeholder reappears correctly.
     Private Shared Sub ReloadAndRefresh()
-        thumbCache.Clear()
+        ImageCache.ClearAndDispose(thumbCache, containerRef)
         searchTerm = ""
         If searchBox IsNot Nothing Then
             Dim cue As String = CStr(If(searchBox.Tag, ""))

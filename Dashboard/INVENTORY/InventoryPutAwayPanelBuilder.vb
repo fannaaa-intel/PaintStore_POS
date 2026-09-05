@@ -108,7 +108,7 @@ Public Class InventoryPutAwayPanelBuilder
     ' =========================================================================
     Public Shared Sub LoadPutAway(container As Panel)
         containerRef = container
-        thumbCache.Clear()
+        ImageCache.ClearAndDispose(thumbCache, containerRef)
         RenderList()
     End Sub
 

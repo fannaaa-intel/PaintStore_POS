@@ -160,7 +160,7 @@ Public Class InventoryStockLevelPanelBuilder
         kpiCards.Clear()
         chipMap.Clear()
         activeRows.Clear()
-        thumbCache.Clear()
+        ImageCache.ClearAndDispose(thumbCache, containerRef)
 
         LoadData()
 

@@ -146,8 +146,10 @@ Public Class TransactionPanelBuilder
         ' start empty too - otherwise the catalog renders against a stale term.
         _searchText = ""
 
-        ' Drop cached thumbnails so freshly-set images show immediately.
-        _thumbCache.Clear()
+        ' Drop cached thumbnails so freshly-set images show immediately. The
+        ' bitmaps hold GDI+ handles, so they are disposed once this rebuild has
+        ' replaced the controls that were still painting them.
+        ImageCache.ClearAndDispose(_thumbCache, mainContainer)
 
         LoadPaymentMethods()
         LoadProducts()

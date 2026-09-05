@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -776,6 +776,18 @@ Public Class AdminUserPanelBuilder
             Return
         End If
 
+        ' Guard — nor may the LAST enabled admin be disabled. Blocking only
+        ' self-disable still allowed one admin to disable the other and leave
+        ' the store with no way back into user management at all.
+        If Not newState AndAlso r.RoleId = ADMIN_ROLE_ID AndAlso CountActiveAdmins() <= 1 Then
+            AppModal.Show("This is the only enabled administrator account." & Environment.NewLine &
+                          "Disabling it would leave no one able to manage users." & Environment.NewLine &
+                          Environment.NewLine &
+                          "Enable another administrator first.",
+                          "Action Blocked", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
         Dim verb As String = If(newState, "enable", "disable")
         If AppModal.Show("Are you sure you want to " & verb & " """ & r.Username & """?",
                          "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
@@ -801,6 +813,23 @@ Public Class AdminUserPanelBuilder
         ActivityLog.Record(If(newState, "USER_ENABLE", "USER_DISABLE"), "user", r.UserId, r.Username)
         Refresh()
     End Sub
+
+    ' Number of enabled admin accounts. Returns 2 on error so a database
+    ' problem blocks the disable rather than waving through a lockout.
+    Private Shared Function CountActiveAdmins() As Integer
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM users WHERE role_id=@rid AND is_active=1", conn)
+                    cmd.Parameters.AddWithValue("@rid", ADMIN_ROLE_ID)
+                    Return Convert.ToInt32(cmd.ExecuteScalar())
+                End Using
+            End Using
+        Catch
+            Return 2
+        End Try
+    End Function
 
     ' =========================================================================
     '  ACTION 4 — RESET PASSWORD
