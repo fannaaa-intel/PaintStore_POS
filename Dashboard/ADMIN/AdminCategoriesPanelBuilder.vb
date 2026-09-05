@@ -416,9 +416,6 @@ Public Class AdminCategoriesPanelBuilder
                         e.Graphics.FillRoundedRectangle(br, rect, 10)
                     End Using
                 End If
-                Using br As New SolidBrush(If(inUse, MintPrimary, Color.FromArgb(200, 208, 205)))
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 12, 3, height - 24))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
                 End Using

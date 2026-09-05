@@ -508,10 +508,6 @@ Public Class AdminSuppliersPanelBuilder
                         e.Graphics.FillRoundedRectangle(br, rect, 10)
                     End Using
                 End If
-                ' Mint accent for active suppliers, grey for inactive ones.
-                Using br As New SolidBrush(If(r.IsActive, MintPrimary, Color.FromArgb(200, 208, 205)))
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 14, 3, height - 28))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
                 End Using

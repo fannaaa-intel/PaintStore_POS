@@ -83,6 +83,72 @@ ALTER TABLE suppliers
 
 
 -- -----------------------------------------------------------------------------
+--  6. users — self-service sign-up and admin approval
+--
+--     Sign-up writes a row with status='Pending'. The user cannot log in until
+--     an admin approves it in Admin > User Management > Pending Approval.
+--
+--     DEFAULT 'Approved' matters: every user that already exists keeps working
+--     exactly as before after this migration runs. Only new sign-ups are
+--     pending. The backfill below covers rows created before the default
+--     applied.
+--
+--     requested_role_id is what the applicant ASKED for; role_id is what the
+--     admin actually granted. Keeping both means the pending list can show
+--     "requested Cashier" while the admin stays free to approve a
+--     different role.
+-- -----------------------------------------------------------------------------
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS status ENUM('Pending','Approved','Rejected')
+        NOT NULL DEFAULT 'Approved' AFTER is_active;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS requested_role_id INT(11) DEFAULT NULL AFTER status;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS reviewed_by INT(11) DEFAULT NULL AFTER requested_role_id;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS reviewed_at DATETIME DEFAULT NULL AFTER reviewed_by;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS reject_reason VARCHAR(255) DEFAULT NULL AFTER reviewed_at;
+
+--  Force a password change after an admin-issued temporary password.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0
+        AFTER reject_reason;
+
+--  Any row that predates the status column is an existing, working account.
+UPDATE users SET status = 'Approved' WHERE status IS NULL OR status = '';
+
+
+-- -----------------------------------------------------------------------------
+--  7. password_reset_requests
+--
+--     "Forgot password?" on the login screen files a row here instead of
+--     telling the user to phone someone. The admin sees it in
+--     Admin > User Management > Password Requests.
+--
+--     username_typed is stored as-is even when it matches no account, so the
+--     login screen can show the same neutral confirmation either way and never
+--     reveal which usernames exist. user_id stays NULL in that case.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    request_id    INT(11)      NOT NULL AUTO_INCREMENT,
+    user_id       INT(11)      DEFAULT NULL,
+    username_typed VARCHAR(50) NOT NULL,
+    status        ENUM('Pending','Handled','Dismissed') NOT NULL DEFAULT 'Pending',
+    requested_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    handled_by    INT(11)      DEFAULT NULL,
+    handled_at    DATETIME     DEFAULT NULL,
+    PRIMARY KEY (request_id),
+    KEY idx_prr_status (status),
+    KEY idx_prr_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- -----------------------------------------------------------------------------
 --  Check the result — every column below should be listed.
 -- -----------------------------------------------------------------------------
 SHOW COLUMNS FROM products LIKE 'image_path';
@@ -91,3 +157,7 @@ SHOW COLUMNS FROM suppliers LIKE 'image_path';
 SHOW COLUMNS FROM suppliers LIKE 'tin';
 SHOW COLUMNS FROM suppliers LIKE 'payment_terms';
 SHOW COLUMNS FROM suppliers LIKE 'notes';
+SHOW COLUMNS FROM users LIKE 'status';
+SHOW COLUMNS FROM users LIKE 'requested_role_id';
+SHOW COLUMNS FROM users LIKE 'must_change_password';
+SHOW TABLES LIKE 'password_reset_requests';

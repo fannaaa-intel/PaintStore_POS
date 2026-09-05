@@ -246,15 +246,6 @@ Public Class InventoryPutAwayPanelBuilder
         AddHandler card.Paint,
             Sub(s, e)
                 PaintCard(CType(s, Panel), e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
-                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
-                    e.Graphics.SetClip(clipPath)
-                    Using br As New SolidBrush(MintDeep)
-                        e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, cardH - 28))
-                    End Using
-                    e.Graphics.ResetClip()
-                End Using
             End Sub
 
         Dim lblPo As New Label With {
@@ -592,19 +583,9 @@ Public Class InventoryPutAwayPanelBuilder
                 Dim b As Panel = CType(s, Panel)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
 
-                ' Tinted panel with a left accent bar, rather than a flat strip —
-                ' the accent marks it as an advisory note at a glance.
                 Using path = RoundRect(New Rectangle(0, 0, b.Width - 1, b.Height - 1), 10)
                     Using br As New SolidBrush(TileBg)
                         e.Graphics.FillPath(br, path)
-                    End Using
-                    Using clip As New Region(path)
-                        Dim prev = e.Graphics.Clip
-                        e.Graphics.Clip = clip
-                        Using accent As New SolidBrush(MintPrimary)
-                            e.Graphics.FillRectangle(accent, 0, 0, 4, b.Height)
-                        End Using
-                        e.Graphics.Clip = prev
                     End Using
                 End Using
             End Sub

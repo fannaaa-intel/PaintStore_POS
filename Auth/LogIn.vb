@@ -314,8 +314,7 @@ Public Class LogIn
         lnkForgot.ActiveLinkColor = MintDark
         loginCard.Controls.Add(lnkForgot)
         lnkForgot.Location = New Point(padL + fieldW - lnkForgot.PreferredWidth, curY)
-        AddHandler lnkForgot.LinkClicked,
-            Sub() AppModal.Show("Please contact your administrator.", "Forgot Password", MessageBoxButtons.OK, MessageBoxIcon.Information)
+        AddHandler lnkForgot.LinkClicked, Sub() ShowForgotPassword()
         curY += 30
 
         ' ===== SIGN IN BUTTON =====
@@ -511,7 +510,14 @@ Public Class LogIn
         Try
             Using cn = Db.GetConnection()
                 cn.Open()
-                Dim sql = "SELECT u.user_id, u.full_name, u.username, u.password_hash, u.is_active, r.role_name " &
+                ' status only exists once migrations.sql section 6 is applied.
+                ' Selecting it unconditionally would break every login on an
+                ' un-migrated database, so it is added to the projection only
+                ' when the column is actually there.
+                Dim hasStatus As Boolean = AccountRequests.HasApprovalColumns()
+                Dim sql = "SELECT u.user_id, u.full_name, u.username, u.password_hash, u.is_active, " &
+                      If(hasStatus, "u.status, ", "") &
+                      "r.role_name " &
                       "FROM users u JOIN roles r ON u.role_id = r.role_id " &
                       "WHERE u.username = @u LIMIT 1"
                 Using cmd As New MySqlCommand(sql, cn)
@@ -525,6 +531,26 @@ Public Class LogIn
 
                         Dim isActive = Convert.ToBoolean(rdr("is_active"))
                         Dim storedHash = rdr("password_hash").ToString()
+
+                        ' An account awaiting approval is not the same as a
+                        ' disabled one, and saying so saves a support call.
+                        If hasStatus Then
+                            Dim status As String = If(IsDBNull(rdr("status")), "Approved", rdr("status").ToString())
+                            If String.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) Then
+                                AppModal.Show("This account is still awaiting administrator approval." & vbCrLf &
+                                            "You will be able to sign in once it has been approved.",
+                                            "Awaiting Approval", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                                Return
+                            End If
+                            If String.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) Then
+                                ' Deliberately the same wording as a bad password:
+                                ' a rejected applicant should not be able to tell
+                                ' that the username exists at all.
+                                AppModal.Show("Invalid credentials. Please try again.", "Login Failed",
+                                            MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                Return
+                            End If
+                        End If
 
                         If Not isActive Then
                             AppModal.Show("This account is disabled. Contact your administrator.",
@@ -600,6 +626,183 @@ Public Class LogIn
                 AppModal.Show("Unknown role: " & role, "Login",
                             MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Select
+    End Sub
+
+    ' =========================================================================
+    '  FORGOT PASSWORD
+    '
+    '  Files a request the admin can act on in Admin > User Management >
+    '  Password Requests, rather than the old dead-end notice.
+    '
+    '  The confirmation is deliberately identical whether or not the username
+    '  exists. Saying "no such user" would turn this box into a way to test
+    '  which usernames are real.
+    ' =========================================================================
+    Private Sub ShowForgotPassword()
+        If Not AccountRequests.HasResetTable() Then
+            ' Un-migrated database - keep the previous behaviour rather than
+            ' promising a request that cannot be recorded.
+            AppModal.Show("Please contact your administrator.", "Forgot Password",
+                          MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return
+        End If
+
+        Dim MintDarkC As Color = Color.FromArgb(10, 79, 66)
+        Dim MintPrimaryC As Color = Color.FromArgb(0, 168, 142)
+        Dim SubTextC As Color = Color.FromArgb(90, 114, 107)
+        Dim TileBgC As Color = Color.FromArgb(236, 248, 244)
+        Dim BorderC As Color = Color.FromArgb(228, 232, 230)
+
+        Dim W As Integer = 420
+        Dim H As Integer = 290
+
+        Using dlg As New Form With {
+            .FormBorderStyle = FormBorderStyle.None,
+            .StartPosition = FormStartPosition.CenterParent,
+            .ClientSize = New Size(W, H),
+            .BackColor = Color.White
+        }
+            Using p As New Drawing2D.GraphicsPath()
+                p.AddArc(0, 0, 18, 18, 180, 90)
+                p.AddArc(W - 18, 0, 18, 18, 270, 90)
+                p.AddArc(W - 18, H - 18, 18, 18, 0, 90)
+                p.AddArc(0, H - 18, 18, 18, 90, 90)
+                p.CloseFigure()
+                dlg.Region = New Region(p)
+            End Using
+
+            AddHandler dlg.Paint,
+                Sub(s As Object, pe As PaintEventArgs)
+                    pe.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                    Using pen As New Pen(BorderC, 1.5F)
+                        pe.Graphics.DrawRectangle(pen, 0, 0, W - 1, H - 1)
+                    End Using
+                End Sub
+
+            dlg.Controls.Add(New Label With {
+                .Text = "Reset your password",
+                .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+                .ForeColor = MintDarkC,
+                .AutoSize = True,
+                .Location = New Point(32, 30)
+            })
+            dlg.Controls.Add(New Label With {
+                .Text = "Enter your username. We will notify your" & vbCrLf &
+                        "administrator, who will issue a new password.",
+                .Font = New Font("Segoe UI", 9.5F),
+                .ForeColor = SubTextC,
+                .AutoSize = True,
+                .Location = New Point(32, 62)
+            })
+
+            Dim shell As New Panel With {
+                .Size = New Size(W - 64, 46),
+                .Location = New Point(32, 116),
+                .BackColor = TileBgC
+            }
+            Dim txt As New TextBox With {
+                .BorderStyle = BorderStyle.None,
+                .BackColor = TileBgC,
+                .ForeColor = MintDarkC,
+                .Font = New Font("Segoe UI", 10.5F),
+                .Location = New Point(14, 14),
+                .Width = shell.Width - 28
+            }
+            shell.Controls.Add(txt)
+            AddHandler shell.Paint,
+                Sub(s As Object, pe As PaintEventArgs)
+                    Dim g = pe.Graphics
+                    g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                    Dim rect = shell.ClientRectangle
+                    rect.Inflate(-1, -1)
+                    Using path As New Drawing2D.GraphicsPath()
+                        path.AddArc(rect.X, rect.Y, 10, 10, 180, 90)
+                        path.AddArc(rect.Right - 10, rect.Y, 10, 10, 270, 90)
+                        path.AddArc(rect.Right - 10, rect.Bottom - 10, 10, 10, 0, 90)
+                        path.AddArc(rect.X, rect.Bottom - 10, 10, 10, 90, 90)
+                        path.CloseFigure()
+                        Using fill As New SolidBrush(TileBgC)
+                            g.FillPath(fill, path)
+                        End Using
+                        Using pen As New Pen(If(txt.Focused, MintPrimaryC, BorderC),
+                                             If(txt.Focused, 1.8F, 1.2F))
+                            g.DrawPath(pen, path)
+                        End Using
+                    End Using
+                    If txt.Text = "" AndAlso Not txt.Focused Then
+                        TextRenderer.DrawText(g, "Your username", txt.Font,
+                            New Rectangle(txt.Left, txt.Top - 1, txt.Width, txt.Height + 2),
+                            Color.FromArgb(150, 165, 160),
+                            TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+                    End If
+                End Sub
+            AddHandler txt.GotFocus, Sub() shell.Invalidate()
+            AddHandler txt.LostFocus, Sub() shell.Invalidate()
+            AddHandler txt.TextChanged, Sub() shell.Invalidate()
+            dlg.Controls.Add(shell)
+
+            Dim lblErr As New Label With {
+                .Text = "",
+                .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = Color.FromArgb(198, 40, 40),
+                .AutoSize = True,
+                .Location = New Point(34, 166)
+            }
+            dlg.Controls.Add(lblErr)
+
+            Dim btnCancel As New Button With {
+                .Text = "Cancel",
+                .Size = New Size(120, 42),
+                .Location = New Point(32, 200),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = Color.FromArgb(240, 245, 243),
+                .ForeColor = SubTextC,
+                .Font = New Font("Segoe UI Semibold", 10),
+                .Cursor = Cursors.Hand
+            }
+            btnCancel.FlatAppearance.BorderSize = 0
+            AddHandler btnCancel.Click, Sub() dlg.Close()
+            dlg.Controls.Add(btnCancel)
+
+            Dim btnSend As New Button With {
+                .Text = "Send request",
+                .Size = New Size(W - 64 - 132, 42),
+                .Location = New Point(164, 200),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = MintPrimaryC,
+                .ForeColor = Color.White,
+                .Font = New Font("Segoe UI Semibold", 10),
+                .Cursor = Cursors.Hand
+            }
+            btnSend.FlatAppearance.BorderSize = 0
+            AddHandler btnSend.Click,
+                Sub()
+                    Dim u As String = txt.Text.Trim()
+                    If u = "" Then
+                        lblErr.Text = "Please enter your username."
+                        txt.Focus()
+                        Return
+                    End If
+                    AccountRequests.FileResetRequest(u)
+                    dlg.Close()
+                    AppModal.Show(
+                        "If that username belongs to an account, your administrator " &
+                        "has been notified." & vbCrLf & vbCrLf &
+                        "They will issue you a new password.",
+                        "Request Sent", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                End Sub
+            dlg.Controls.Add(btnSend)
+
+            AddHandler txt.KeyDown,
+                Sub(s As Object, ke As KeyEventArgs)
+                    If ke.KeyCode = Keys.Enter Then
+                        ke.SuppressKeyPress = True
+                        btnSend.PerformClick()
+                    End If
+                End Sub
+
+            dlg.ShowDialog(Me)
+        End Using
     End Sub
 
     ' ===== CENTER PANEL =====

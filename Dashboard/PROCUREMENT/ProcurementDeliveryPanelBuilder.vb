@@ -268,18 +268,6 @@ Public Class ProcurementDeliveryPanelBuilder
         AddHandler card.Paint,
             Sub(s, e)
                 PaintCard(CType(s, Panel), e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim accentClr As Color = If(GroupOf(po) = "Overdue", NegativeClr,
-                                         If(GroupOf(po) = "Due Today", WarningClr,
-                                         If(GroupOf(po) = "Due This Week", MintPrimary, MintDeep)))
-                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
-                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
-                    e.Graphics.SetClip(clipPath)
-                    Using br As New SolidBrush(accentClr)
-                        e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, cardH - 28))
-                    End Using
-                    e.Graphics.ResetClip()
-                End Using
             End Sub
 
         Dim lblPo As New Label With {

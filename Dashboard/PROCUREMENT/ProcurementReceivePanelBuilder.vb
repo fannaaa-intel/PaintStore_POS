@@ -210,20 +210,9 @@ Public Class ProcurementReceivePanelBuilder
         Dim cardH As Integer = 138
         Dim card As New BufferedPanel With {.Height = cardH, .BackColor = CardBg, .Cursor = Cursors.Hand}
 
-        ' ── Paint: PanelRenderer + clipped left accent bar ───────────────────────
         AddHandler card.Paint,
             Sub(s, e)
                 PaintCard(CType(s, Panel), e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim accentClr As Color = If(po.Status = "Partially Received", WarningClr, MintDeep)
-                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
-                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
-                    e.Graphics.SetClip(clipPath)
-                    Using br As New SolidBrush(accentClr)
-                        e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, cardH - 28))
-                    End Using
-                    e.Graphics.ResetClip()
-                End Using
             End Sub
 
         ' ── Text ─────────────────────────────────────────────────────────────────
@@ -451,15 +440,6 @@ Public Class ProcurementReceivePanelBuilder
         AddHandler linesCard.Paint,
               Sub(s, e)
                   PaintCard(CType(s, Panel), e)
-                  e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                  Dim clipRect As New Rectangle(1, 1, linesCard.Width - 2, linesCard.Height - 2)
-                  Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
-                      e.Graphics.SetClip(clipPath)
-                      Using br As New SolidBrush(MintDeep)
-                          e.Graphics.FillRectangle(br, New Rectangle(1, 14, 5, linesCard.Height - 28))
-                      End Using
-                      e.Graphics.ResetClip()
-                  End Using
               End Sub
 
         Dim lblHead As New Label With {

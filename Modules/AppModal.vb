@@ -223,7 +223,7 @@ Public Module AppModal
         Dim accentLocal As Color = accent
         Dim dividerYLocal As Integer = dividerY
 
-        ' Draw card border + accent top bar + divider
+        ' Draw card border + divider
         AddHandler f.Paint,
             Sub(s As Object, e As PaintEventArgs)
                 Dim g = e.Graphics

@@ -594,9 +594,6 @@ Public Class AccountantDashPanelBuilder
                         End Using
                     End Using
                 End If
-                Using br As New SolidBrush(MintPrimary)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 14, 3, height - 28))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 16, row.Height - 1, row.Width - 16, row.Height - 1)
                 End Using
@@ -743,9 +740,6 @@ Public Class AccountantDashPanelBuilder
                         End Using
                     End Using
                 End If
-                Using br As New SolidBrush(AccentOrange)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 14, 3, height - 28))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 16, row.Height - 1, row.Width - 16, row.Height - 1)
                 End Using

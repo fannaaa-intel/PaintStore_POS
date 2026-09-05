@@ -56,6 +56,45 @@ Public Class AdminRolesPanelBuilder
         (Color.FromArgb(90, 114, 107), Color.FromArgb(238, 242, 240))
 
     ' ── DATA MODEL ────────────────────────────────────────────────────────────
+    ' Set by ADMIN_STAFF so a role row can hand the admin straight to the
+    ' matching filter in User Management.
+    Public Shared NavigateToUsers As Action(Of Integer)
+
+    ' The roles the login screen can actually route. RouteByRole in LogIn.vb is
+    ' a Select Case over these exact names, so a role NOT in this set exists in
+    ' the database but can never sign in - the login lands on "Unknown role".
+    ' Listing them here lets the panel say so instead of showing the row as if
+    ' it were usable.
+    Private Shared ReadOnly RoutableRoles As String() =
+        {"Admin", "Cashier", "Inventory", "Accountant", "Procurement"}
+
+    ' What each role reaches, derived from the dashboard each one is routed to.
+    ' Kept beside RoutableRoles so the two are read - and updated - together.
+    Private Shared Function ModulesFor(roleName As String) As String
+        Select Case roleName
+            Case "Admin"
+                Return "Users, Roles, Store Settings, Categories, Suppliers, " &
+                       "Color Formulas, all Oversight reports, Activity Log"
+            Case "Cashier"
+                Return "POS terminal, Returns, Cash drawer, Shift reports"
+            Case "Inventory"
+                Return "Item list, Stock levels, Adjustments, Put-away, Low stock"
+            Case "Accountant"
+                Return "Income, Ledger, Payables, Sales history, Financial reports"
+            Case "Procurement"
+                Return "Suppliers, Purchase orders, Quotations, Receiving, Deliveries"
+            Case Else
+                Return ""
+        End Select
+    End Function
+
+    Private Shared Function IsRoutable(roleName As String) As Boolean
+        For Each n In RoutableRoles
+            If String.Equals(n, roleName, StringComparison.OrdinalIgnoreCase) Then Return True
+        Next
+        Return False
+    End Function
+
     Private Class RoleRecord
         Public RoleId As Integer
         Public RoleName As String
@@ -121,6 +160,9 @@ Public Class AdminRolesPanelBuilder
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
+
+    ' One ToolTip for the whole panel; a per-row instance would leak.
+    Private Shared ReadOnly _tips As New ToolTip()
 
     Private Shared Function SafeInt(o As Object) As Integer
         If o Is Nothing OrElse IsDBNull(o) Then Return 0
@@ -295,8 +337,8 @@ Public Class AdminRolesPanelBuilder
         Dim hdr As New Panel With {.Height = HDR_H, .BackColor = Color.Transparent}
 
         Dim labels As Label() = {
-            MakeColLabel("ROLE", New Point(72, 13)),
-            MakeColLabel("DESCRIPTION", New Point(0, 13)),
+            MakeColLabel("ROLE", New Point(28, 13)),
+            MakeColLabel("WHAT IT REACHES", New Point(0, 13)),
             MakeColLabel("USERS", New Point(0, 13))
         }
         hdr.Controls.AddRange(labels)
@@ -304,7 +346,7 @@ Public Class AdminRolesPanelBuilder
         AddHandler hdr.Resize,
             Sub()
                 Dim w = hdr.Width
-                labels(0).Left = 72
+                labels(0).Left = 28
                 labels(1).Left = CInt(w * 0.26)
                 labels(2).Left = CInt(w * 0.72)
             End Sub
@@ -380,8 +422,6 @@ Public Class AdminRolesPanelBuilder
             .Height = height, .BackColor = Color.Transparent
         }
 
-        Dim tint = TintFor(r.RoleId)
-
         AddHandler p.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
@@ -391,67 +431,93 @@ Public Class AdminRolesPanelBuilder
                         e.Graphics.FillRoundedRectangle(br, rect, 10)
                     End Using
                 End If
-                Using br As New SolidBrush(tint.fore)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 12, 3, height - 24))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
                 End Using
             End Sub
 
-        ' Initial-letter badge, tinted per role
-        Dim badge As New Label With {
-            .Text = If(r.RoleName = "", "?", r.RoleName.Substring(0, 1).ToUpper()),
-            .Font = New Font("Segoe UI", 12, FontStyle.Bold),
-            .ForeColor = tint.fore,
-            .BackColor = tint.back,
-            .Size = New Size(34, 34),
-            .TextAlign = ContentAlignment.MiddleCenter,
-            .Location = New Point(24, (height - 34) \ 2)
-        }
-        RoundLabel(badge, 17)
-
+        ' No initial-letter avatar. There are five fixed roles with distinct
+        ' names, so a coloured "A" adds a second thing to decode and invents a
+        ' colour language the rest of the screen does not use. The name is the
+        ' identifier.
         Dim lblName As New Label With {
             .Text = If(r.RoleName = "", "—", r.RoleName),
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 12, FontStyle.Bold),
             .ForeColor = MintDark,
             .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' The modules this role actually reaches, derived from the routing rather
+        ' than from roles.description - a free-text column that can drift out of
+        ' step with what the code really allows. Falls back to the stored
+        ' description for any role the routing does not know.
+        Dim routable As Boolean = IsRoutable(r.RoleName)
+        Dim reachText As String = ModulesFor(r.RoleName)
+        If reachText = "" Then reachText = If(r.Description = "", "—", r.Description)
+
         Dim lblDesc As New Label With {
-            .Text = If(r.Description = "", "—", r.Description),
+            .Text = reachText,
             .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = If(r.Description = "", FaintText, SubText),
+            .ForeColor = If(routable, SubText, FaintText),
             .AutoSize = False,
             .AutoEllipsis = True,
             .Height = 20,
             .BackColor = Color.Transparent
         }
+        _tips.SetToolTip(lblDesc, reachText)
 
-        ' "X active" pill + "of Y total"
+        ' "3 users" when every holder is enabled; "3 of 5 active" only when the
+        ' two numbers actually differ. Printing "1 active of 1 total" on every
+        ' row was two numbers saying one thing.
+        Dim pillText As String
+        If r.TotalCount = 0 Then
+            pillText = "None"
+        ElseIf r.ActiveCount = r.TotalCount Then
+            pillText = r.TotalCount.ToString("N0") & If(r.TotalCount = 1, " user", " users")
+        Else
+            pillText = r.ActiveCount.ToString("N0") & " of " & r.TotalCount.ToString("N0") & " active"
+        End If
+
         Dim activePill As New Label With {
-            .Text = r.ActiveCount.ToString("N0") & " active",
+            .Text = pillText,
             .Font = New Font("Segoe UI Semibold", 9.0F),
             .ForeColor = If(r.ActiveCount > 0, TintMint.fore, FaintText),
             .BackColor = If(r.ActiveCount > 0, TintMint.back, Color.FromArgb(238, 242, 240)),
             .AutoSize = True,
-            .Padding = New Padding(10, 4, 10, 4)
+            .Padding = New Padding(10, 4, 10, 4),
+            .Cursor = If(r.TotalCount > 0, Cursors.Hand, Cursors.Default)
         }
         RoundLabel(activePill, 10)
 
+        If r.TotalCount > 0 Then
+            _tips.SetToolTip(activePill, "Show these users in User Management")
+            AddHandler activePill.Click,
+                Sub()
+                    If NavigateToUsers IsNot Nothing Then NavigateToUsers(r.RoleId)
+                End Sub
+        End If
+
+        ' A role the login screen cannot route is a real defect, not a style
+        ' point: someone holding it would be refused at sign-in with
+        ' "Unknown role". Say so on the row rather than leaving it to be found
+        ' by a member of staff who cannot get in.
         Dim lblTotal As New Label With {
-            .Text = "of " & r.TotalCount.ToString("N0") & " total",
-            .Font = New Font("Segoe UI", 10),
-            .ForeColor = FaintText,
+            .Text = If(routable, "", "⚠ cannot sign in"),
+            .Font = New Font("Segoe UI Semibold", 9),
+            .ForeColor = Color.FromArgb(198, 40, 40),
             .AutoSize = True, .BackColor = Color.Transparent
         }
+        If Not routable Then
+            _tips.SetToolTip(lblTotal,
+                "No login route exists for this role name, so anyone assigned it " &
+                "would be refused at sign-in.")
+        End If
 
-        p.Controls.AddRange({badge, lblName, lblDesc, activePill, lblTotal})
+        p.Controls.AddRange({lblName, lblDesc, activePill, lblTotal})
 
         AddHandler p.Resize,
             Sub()
                 Dim w = p.Width
-                badge.Left = 24 : badge.Top = (height - badge.Height) \ 2
-                lblName.Left = 72 : lblName.Top = (height - lblName.Height) \ 2
+                lblName.Left = 28 : lblName.Top = (height - lblName.Height) \ 2
 
                 Dim descX As Integer = CInt(w * 0.26)
                 Dim usersX As Integer = CInt(w * 0.72)
@@ -469,16 +535,6 @@ Public Class AdminRolesPanelBuilder
         Return p
     End Function
 
-    Private Shared Function TintFor(roleId As Integer) As (fore As Color, back As Color)
-        Select Case roleId
-            Case 1 : Return TintMint      ' Admin
-            Case 2 : Return TintBlue      ' Cashier
-            Case 3 : Return TintAmber     ' Inventory
-            Case 4 : Return TintPlum      ' Accountant
-            Case 5 : Return TintGrey      ' Procurement
-            Case Else : Return TintGrey
-        End Select
-    End Function
 
     Private Shared Function BuildEmptyRow(message As String) As Panel
         Dim p As New Panel With {

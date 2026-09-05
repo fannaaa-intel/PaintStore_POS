@@ -255,7 +255,6 @@ Public Class ProcurementSuppliersPanelBuilder
     ' ── SUPPLIER CARD (REDESIGNED) ────────────────────────────────────────────────
     '   • PanelRenderer for card shadow/border
     '   • Gradient-initial avatar on the left
-    '   • Mint accent bar along the left edge (clipped)
     '   • Name / contact line / address line (darker, clearly readable)
     '   • PO pill top-right, chevron icon circle pill bottom-right
     '   • Subtle hover tint
@@ -265,24 +264,9 @@ Public Class ProcurementSuppliersPanelBuilder
             .Height = cardH, .BackColor = CardBg, .Cursor = Cursors.Hand
         }
 
-        ' ── Paint: PanelRenderer + clipped left accent bar ───────────────────────
         AddHandler card.Paint,
             Sub(s, e)
                 PaintCard(CType(s, Panel), e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                ' Clip to card rounded rect so accent doesn't bleed into corners
-                Dim clipRect As New Rectangle(1, 1, card.Width - 2, card.Height - 2)
-                Using clipPath As GraphicsPath = RoundRect(clipRect, 14)
-                    e.Graphics.SetClip(clipPath)
-                    Dim aY As Integer = 14
-                    Dim aH As Integer = cardH - 28
-                    Using br As New LinearGradientBrush(
-                        New Point(1, aY), New Point(1, aY + aH),
-                        MintPrimary, MintDeep)
-                        e.Graphics.FillRectangle(br, New Rectangle(1, aY, 5, aH))
-                    End Using
-                    e.Graphics.ResetClip()
-                End Using
             End Sub
 
         ' ── Avatar bubble ────────────────────────────────────────────────────────

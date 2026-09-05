@@ -49,6 +49,27 @@ q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.address,s.is_a
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active ORDER BY s.name ASC" "admin supplier grid (no image column)"
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path ORDER BY s.name ASC" "admin supplier grid (with image column)"
 
+# ── Sign-up approval + password reset (migrations.sql sections 6 and 7) ──────
+# These are optional: the app probes for them and falls back when absent, so a
+# missing column is reported as NOT APPLIED rather than counted as a failure.
+HASAPP=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='users' AND column_name IN ('status','requested_role_id','reviewed_by','reviewed_at','reject_reason','must_change_password');" 2>/dev/null)
+HASPRR=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='password_reset_requests';" 2>/dev/null)
+
+if [ "$HASAPP" = "6" ]; then
+    q "SELECT u.user_id,u.full_name,u.username,u.is_active,u.created_at,u.sales_quota,u.role_id,r.role_name,u.status,u.requested_role_id,u.reject_reason,rq.role_name AS requested_role_name FROM users u JOIN roles r ON u.role_id=r.role_id LEFT JOIN roles rq ON u.requested_role_id=rq.role_id ORDER BY u.full_name" "user list incl. approval columns"
+    q "SELECT COUNT(*) FROM users WHERE status IN ('Pending','Approved','Rejected')" "status enum accepts all three states"
+    q "SELECT u.user_id,u.full_name,u.username,u.password_hash,u.is_active,u.status,r.role_name FROM users u JOIN roles r ON u.role_id=r.role_id WHERE u.username='__nobody__' LIMIT 1" "login query incl. status"
+else
+    echo "  SKIP  approval columns not applied ($HASAPP/6) - app falls back"
+fi
+
+if [ "$HASPRR" = "1" ]; then
+    q "SELECT p.request_id,p.user_id,p.username_typed,p.requested_at,u.full_name,r.role_name FROM password_reset_requests p LEFT JOIN users u ON p.user_id=u.user_id LEFT JOIN roles r ON u.role_id=r.role_id WHERE p.status='Pending' ORDER BY p.requested_at DESC" "password request list query"
+    q "SELECT COUNT(*) FROM password_reset_requests WHERE status IN ('Pending','Handled','Dismissed')" "reset request status enum"
+else
+    echo "  SKIP  password_reset_requests not created - forgot-password falls back"
+fi
+
 echo ""; echo "[4] Current state"
 HAS=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='purchase_orders' AND column_name='paid_at';" 2>/dev/null)
 if [ "$HAS" = "1" ]; then echo "  paid_at APPLIED    -> Payables shows received-but-unpaid orders"
@@ -59,6 +80,17 @@ if [ "$HASIMG" = "4" ]; then
     "$MYSQL" -u root -D $DB -e "SELECT s.supplier_id,s.name,s.image_path,(SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos FROM suppliers s ORDER BY s.name ASC;" 2>/dev/null
 else
     echo "  supplier columns PARTIAL ($HASIMG/4) -> missing ones are simply not offered (safe default)"
+fi
+if [ "$HASAPP" = "6" ]; then
+    echo "  sign-up approval APPLIED (6/6) -> pending queue live in User Management"
+    "$MYSQL" -u root -D $DB -e "SELECT status, COUNT(*) AS n FROM users GROUP BY status;" 2>/dev/null
+else
+    echo "  sign-up approval NOT applied ($HASAPP/6) -> sign-up creates a disabled account"
+fi
+if [ "$HASPRR" = "1" ]; then
+    echo "  password_reset_requests APPLIED -> Forgot password files a request"
+else
+    echo "  password_reset_requests NOT applied -> Forgot password shows the old notice"
 fi
 "$MYSQL" -u root -D $DB -e "SELECT vat_rate, IF(vat_inclusive,'inclusive','EXCLUSIVE') AS vat_mode FROM store_settings;" 2>/dev/null
 

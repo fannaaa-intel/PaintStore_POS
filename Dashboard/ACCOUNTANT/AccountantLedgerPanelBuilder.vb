@@ -1182,9 +1182,6 @@ Public Class AccountantLedgerPanelBuilder
                         End Using
                     End Using
                 End If
-                Using br As New SolidBrush(srcColors.fore)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 6, 3, totalH - 12))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, totalH - 1, block.Width - 20, totalH - 1)
                 End Using

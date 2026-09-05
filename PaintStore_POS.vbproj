@@ -269,6 +269,7 @@
     </Compile>
     <Compile Include="Modules\AppModal.vb" />
     <Compile Include="Modules\POS\ConfirmSaleModal.vb" />
+    <Compile Include="Modules\AccountRequests.vb" />
     <Compile Include="Modules\ActivityLog.vb" />
     <Compile Include="Modules\Db.vb" />
     <Compile Include="Modules\DocNumber.vb" />

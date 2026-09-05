@@ -965,7 +965,7 @@ Public Class AdminProcurementOverviewPanelBuilder
         Next
     End Sub
 
-    ' Shared row chrome: hover pill, accent bar, bottom divider.
+    ' Shared row chrome: hover pill and bottom divider.
     Private Shared Function NewRowShell(height As Integer, accent As Color) As BufferedPanel
         Dim p As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
         AddHandler p.Paint,
@@ -977,9 +977,6 @@ Public Class AdminProcurementOverviewPanelBuilder
                         e.Graphics.FillRoundedRectangle(br, rect, 10)
                     End Using
                 End If
-                Using br As New SolidBrush(accent)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 14, 3, height - 28))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
                 End Using

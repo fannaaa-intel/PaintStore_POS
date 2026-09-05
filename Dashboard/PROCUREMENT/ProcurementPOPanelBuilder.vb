@@ -526,14 +526,6 @@ Public Class ProcurementPOPanelBuilder
         AddHandler card.Paint,
             Sub(s, e)
                 PaintCard(CType(s, Panel), e)
-                ' Left accent bar tinted by status
-                Dim st2 = StatusInfo(po.Status)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using br As New SolidBrush(st2.fore)
-                    Using path = RoundRect(New Rectangle(0, 18, 6, card.Height - 36), 3)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
             End Sub
 
         ' ════════ LEFT COLUMN — identity + meta ════════

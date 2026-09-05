@@ -261,8 +261,11 @@ Public Class AdminStoreSettingsPanelBuilder
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
+        ' "&&" renders as one ampersand. WinForms treats a lone & in a Label as a
+        ' mnemonic prefix: it swallows the & and underlines the next character,
+        ' so this title read "Store Information Tax" on screen.
         card.Controls.Add(New Label With {
-            .Text = "Store Information & Tax",
+            .Text = "Store Information && Tax",
             .Font = New Font("Segoe UI Semibold", 13),
             .ForeColor = MintDark,
             .AutoSize = True,
@@ -539,9 +542,6 @@ Public Class AdminStoreSettingsPanelBuilder
                         e.Graphics.FillRoundedRectangle(br, rect, 10)
                     End Using
                 End If
-                Using br As New SolidBrush(MintPrimary)
-                    e.Graphics.FillRectangle(br, New Rectangle(0, 12, 3, height - 24))
-                End Using
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 10, p.Height - 1, p.Width - 10, p.Height - 1)
                 End Using
@@ -587,8 +587,9 @@ Public Class AdminStoreSettingsPanelBuilder
         Dim name As String = AppModal.Prompt("Name of the new payment method:", "Add Payment Method")
         If name Is Nothing Then Return
         name = name.Trim()
-        If name = "" Then
-            AppModal.Show("The name cannot be empty.", "Add Payment Method",
+        Dim nameErr As String = ValidateMethodName(name)
+        If nameErr <> "" Then
+            AppModal.Show(nameErr, "Add Payment Method",
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
@@ -630,8 +631,9 @@ Public Class AdminStoreSettingsPanelBuilder
                                              "Rename Payment Method", m.Name)
         If name Is Nothing Then Return
         name = name.Trim()
-        If name = "" Then
-            AppModal.Show("The name cannot be empty.", "Rename Payment Method",
+        Dim nameErr As String = ValidateMethodName(name)
+        If nameErr <> "" Then
+            AppModal.Show(nameErr, "Rename Payment Method",
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
@@ -668,6 +670,18 @@ Public Class AdminStoreSettingsPanelBuilder
         LoadStoreSettings(_container)
     End Sub
 
+    ' payment_methods.name is VARCHAR(30) UNIQUE. Checking the length here turns
+    ' a raw MySQL truncation error — surfaced as an unactionable "Database
+    ' Error" — into something the admin can actually fix.
+    Private Shared Function ValidateMethodName(name As String) As String
+        If String.IsNullOrWhiteSpace(name) Then Return "The name cannot be empty."
+        If name.Length > 30 Then
+            Return "Use 30 characters or fewer (that name is " &
+                   name.Length.ToString() & ")."
+        End If
+        Return ""
+    End Function
+
     Private Shared Sub RemoveMethod(m As PayMethod)
         ' A method referenced by sales cannot be deleted — removing it would
         ' orphan historical rows and break every sales report that joins on it.
@@ -697,7 +711,39 @@ Public Class AdminStoreSettingsPanelBuilder
             Return
         End If
 
-        If AppModal.Show("Remove the payment method """ & m.Name & """?", "Confirm",
+        ' The POS tender list IS this table. Emptying it leaves the till with
+        ' nothing to take payment with, and nothing else in the system warns
+        ' about that.
+        If _methods.Count <= 1 Then
+            AppModal.Show("At least one payment method is required." & vbCrLf & vbCrLf &
+                          "The POS builds its tender list from this table, so removing " &
+                          "the last one would leave the till unable to complete a sale.",
+                          "Cannot Remove", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
+        ' CashPanelBuilder finds the drawer's method with LIKE '%cash%'. With no
+        ' such row the shift's cash total silently reads zero, so losing the last
+        ' cash-like method deserves a deliberate confirmation rather than the
+        ' generic one.
+        Dim isCashLike As Boolean = m.Name.ToLowerInvariant().Contains("cash")
+        Dim otherCashLike As Boolean = False
+        For Each other In _methods
+            If other.MethodId <> m.MethodId AndAlso
+               other.Name.ToLowerInvariant().Contains("cash") Then
+                otherCashLike = True
+                Exit For
+            End If
+        Next
+
+        Dim warn As String = "Remove the payment method """ & m.Name & """?"
+        If isCashLike AndAlso Not otherCashLike Then
+            warn &= vbCrLf & vbCrLf &
+                    "This is the only method the cash drawer recognises. Without it " &
+                    "the shift's cash total will read zero."
+        End If
+
+        If AppModal.Show(warn, "Confirm",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If

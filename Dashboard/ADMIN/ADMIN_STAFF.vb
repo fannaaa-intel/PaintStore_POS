@@ -241,6 +241,18 @@ Public Class ADMIN_STAFF
                     Case "procurement" : procurementOverview.PerformClick()
                 End Select
             End Sub
+        ' Roles is read-only, so its user count is the one actionable thing on
+        ' the screen: clicking it opens User Management filtered to that role.
+        AdminRolesPanelBuilder.NavigateToUsers =
+            Sub(roleId As Integer)
+                SetActive(userMgmt)
+                MainContainer.SuspendLayout()
+                MainContainer.Controls.Clear()
+                AdminUserPanelBuilder.LoadUsersForRole(MainContainer, roleId)
+                MainContainer.ResumeLayout()
+                MainContainer.Refresh()
+            End Sub
+
         AdminDashPanelBuilder.LoadDashboard(MainContainer)
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
         btnHamburger.BringToFront()
@@ -272,12 +284,17 @@ Public Class ADMIN_STAFF
     ' only its caption is dropped. Text-only chrome (logo wordmark, "MENU") hides.
     Private Sub ApplyNavState()
         Nav.SuspendLayout()
+        NavList.SuspendLayout()
 
         Dim width As Integer = If(navIsOpen, NAV_OPEN_WIDTH, NAV_CLOSED_WIDTH)
         Nav.Width = width
 
+        ' NavList is a child panel, so it does not follow Nav.Width on its own.
+        ' Leave the last pixel column free for the divider Nav paints there.
+        NavList.Width = width - 1
+
         For Each ctrl As Control In Nav.Controls
-            If ctrl Is btnHamburger Then Continue For
+            If ctrl Is btnHamburger OrElse ctrl Is NavList Then Continue For
             ' Any button in the rail is navigation and must survive the collapse.
             ctrl.Visible = navIsOpen OrElse TypeOf ctrl Is Button
         Next
@@ -288,14 +305,37 @@ Public Class ADMIN_STAFF
             If btn IsNot Nothing Then ApplyNavButtonState(btn, width)
         Next
 
+        ' Admin groups its 12 nav buttons inside NavList rather than parenting
+        ' them straight onto Nav (the other dashboards have few enough to skip
+        ' the scroll panel). Walking only Nav.Controls above therefore misses
+        ' every one of them, which is why the collapsed rail came up blank:
+        ' the buttons kept their full open width and were clipped out of view.
+        For Each ctrl As Control In NavList.Controls
+            Dim btn = TryCast(ctrl, Button)
+            If btn IsNot Nothing Then
+                ApplyNavButtonState(btn, width)
+            Else
+                ' Section captions ("OVERVIEW", "ADMINISTRATION", ...) are text
+                ' only — there is no room for them on a 56px rail.
+                ctrl.Visible = navIsOpen
+            End If
+        Next
+
+        ' Collapsed, the icons are the only content and they fit without
+        ' scrolling; leaving AutoScroll on would add a horizontal bar for the
+        ' brief moment the buttons are still at their old width.
+        NavList.AutoScroll = navIsOpen
+
         btnHamburger.BackColor = If(navIsOpen, Color.White, Color.Transparent)
         btnHamburger.Location = If(navIsOpen,
                                    New Point(NAV_OPEN_WIDTH - 46, 18),
                                    New Point((NAV_CLOSED_WIDTH - btnHamburger.Width) \ 2, 18))
         btnHamburger.BringToFront()
 
+        NavList.ResumeLayout()
         Nav.ResumeLayout()
         Nav.Invalidate()
+        NavList.Invalidate()
         MainContainer.PerformLayout()
         MainContainer.Refresh()
     End Sub
@@ -305,10 +345,15 @@ Public Class ADMIN_STAFF
     Private Sub ApplyNavButtonState(btn As Button, navWidth As Integer)
         If btn Is Nothing Then Return
 
+        ' Buttons inside the scrolling NavList keep an extra 18px clear on the
+        ' right so the scrollbar never sits on top of one. Logout is parented
+        ' straight onto Nav and has no scrollbar to avoid.
+        Dim inList As Boolean = (btn.Parent Is NavList)
+
         If navIsOpen Then
             btn.Text = NavCaption(btn)
             btn.Left = 14
-            btn.Width = navWidth - 28
+            btn.Width = navWidth - If(inList, 46, 28)
             btn.TextImageRelation = TextImageRelation.ImageBeforeText
             btn.ImageAlign = ContentAlignment.MiddleLeft
             btn.TextAlign = ContentAlignment.MiddleLeft
