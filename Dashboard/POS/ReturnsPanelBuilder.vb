@@ -1380,7 +1380,9 @@ Public Class ReturnsPanelBuilder
     ' =========================================================================
     Private Shared Sub PrintSlip()
         Dim lines As New List(Of ReceiptPrinter.RLine)
-        lines.Add(New ReceiptPrinter.RLine("PAINT STORE POS", , ReceiptPrinter.LineStyle.Title))
+        ' Store identity comes from settings, exactly as the sales receipt does;
+        ' a hardcoded name meant a renamed store still printed the old one.
+        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreName, , ReceiptPrinter.LineStyle.Title))
         lines.Add(New ReceiptPrinter.RLine("Return / Refund Slip", , ReceiptPrinter.LineStyle.Muted))
         lines.Add(ReceiptPrinter.Divider())
 

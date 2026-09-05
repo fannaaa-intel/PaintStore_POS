@@ -394,15 +394,34 @@ Public Class POS_STAFF
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' Reuse the cashier's open shift if there is one. Starting a new
+                ' shift unconditionally meant logging out and back in orphaned the
+                ' previous shift: it stayed Open forever, its cash was never
+                ' reconciled, and the Cash screen (which takes the most recent
+                ' open shift) silently stopped reporting against it.
+                Session.ShiftId = 0
                 Using cmd As New MySqlCommand(
-                    "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status) " &
-                    "VALUES (@uid, '01', 0, NOW(), 'Open')", conn)
+                    "SELECT shift_id FROM shifts " &
+                    "WHERE user_id=@uid AND status='Open' AND ended_at IS NULL " &
+                    "ORDER BY started_at DESC LIMIT 1", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
-                    cmd.ExecuteNonQuery()
+                    Dim existing = cmd.ExecuteScalar()
+                    If existing IsNot Nothing AndAlso Not IsDBNull(existing) Then
+                        Session.ShiftId = CInt(existing)
+                    End If
                 End Using
-                Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
-                    Session.ShiftId = CInt(cmd.ExecuteScalar())
-                End Using
+
+                If Session.ShiftId = 0 Then
+                    Using cmd As New MySqlCommand(
+                        "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status) " &
+                        "VALUES (@uid, '01', 0, NOW(), 'Open')", conn)
+                        cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
+                        Session.ShiftId = CInt(cmd.ExecuteScalar())
+                    End Using
+                End If
                 ' Load quota for this user
                 Using cmd As New MySqlCommand(
                     "SELECT sales_quota FROM users WHERE user_id=@uid", conn)
@@ -711,8 +730,38 @@ Public Class POS_STAFF
         MainContainer.Refresh()
     End Sub
 
+    ' True once a cash count has been recorded against the shift.
+    Private Function ShiftHasBeenCounted(shiftId As Integer) As Boolean
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT counted_cash FROM shifts WHERE shift_id=@sid", conn)
+                    cmd.Parameters.AddWithValue("@sid", shiftId)
+                    Dim o = cmd.ExecuteScalar()
+                    Return o IsNot Nothing AndAlso Not IsDBNull(o)
+                End Using
+            End Using
+        Catch
+            ' Unreachable database: don't add a scary warning on top of it.
+            Return True
+        End Try
+    End Function
+
     Private Sub logout_Click(sender As Object, e As EventArgs) Handles logout.Click
-        If AppModal.Show("Are you sure you want to log out?", "Logout",
+        ' Logging out ends the shift. If it was never counted on the Cash screen
+        ' it closes with no counted/expected/variance figures, so say that plainly
+        ' instead of discarding the reconciliation silently.
+        Dim msg As String = "Are you sure you want to log out?"
+        If Session.ShiftId > 0 AndAlso Not ShiftHasBeenCounted(Session.ShiftId) Then
+            msg &= Environment.NewLine & Environment.NewLine &
+                   "Your drawer has not been counted yet. Logging out now closes " &
+                   "this shift without a cash count or variance on record." &
+                   Environment.NewLine & Environment.NewLine &
+                   "Use CASH > Close Drawer first if you want it reconciled."
+        End If
+
+        If AppModal.Show(msg, "Logout",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
@@ -724,9 +773,12 @@ Public Class POS_STAFF
             Try
                 Using conn = Db.GetConnection()
                     conn.Open()
+                    ' AND status='Open' protects a shift that was already closed
+                    ' properly from the Cash screen: without it, logging out wiped
+                    ' the counted/expected/variance figures recorded there.
                     Using cmd As New MySqlCommand(
                         "UPDATE shifts SET ended_at=NOW(), status='Closed' " &
-                        "WHERE shift_id=@sid", conn)
+                        "WHERE shift_id=@sid AND status='Open'", conn)
                         cmd.Parameters.AddWithValue("@sid", Session.ShiftId)
                         cmd.ExecuteNonQuery()
                     End Using
@@ -736,6 +788,10 @@ Public Class POS_STAFF
             End Try
             Session.ShiftId = 0
         End If
+
+        ' Drop the signed-in identity before returning to the login screen, so
+        ' nothing done afterwards is attributed to the user who just left.
+        Session.Clear()
 
         Dim loginForm As New LogIn()
         loginForm.Show()

@@ -670,6 +670,10 @@ Public Class ADMIN_STAFF
             Return
         End If
         ActivityLog.Record("LOGOUT")
+        ' Drop the signed-in identity before returning to the login screen, so
+        ' nothing done afterwards is attributed to the user who just left.
+        Session.Clear()
+
         Dim loginForm As New LogIn()
         loginForm.Show()
         Me.Close()

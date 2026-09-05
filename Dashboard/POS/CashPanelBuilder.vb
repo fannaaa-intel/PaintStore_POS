@@ -887,16 +887,27 @@ Public Class CashPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' AND status='Open' makes the close idempotent. Without it a
+                ' second close (another window, or a stale screen) overwrote
+                ' ended_at and the recorded variance of a shift already closed.
+                Dim affected As Integer
                 Using cmd As New MySqlCommand(
                     "UPDATE shifts SET ended_at=NOW(), expected_cash=@exp, " &
                     "counted_cash=@cnt, variance=@var, status='Closed' " &
-                    "WHERE shift_id=@sid", conn)
+                    "WHERE shift_id=@sid AND status='Open'", conn)
                     cmd.Parameters.AddWithValue("@exp", expected)
                     cmd.Parameters.AddWithValue("@cnt", counted)
                     cmd.Parameters.AddWithValue("@var", variance)
                     cmd.Parameters.AddWithValue("@sid", _shiftId)
-                    cmd.ExecuteNonQuery()
+                    affected = cmd.ExecuteNonQuery()
                 End Using
+                If affected = 0 Then
+                    AppModal.Show("This shift has already been closed." & vbCrLf &
+                                  "Its recorded count was left untouched.",
+                                  "Already Closed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)
+                    Return
+                End If
             End Using
 
             AppModal.Show("Shift closed." & vbCrLf & "Variance: ₱ " & variance.ToString("N2"),
@@ -916,7 +927,7 @@ Public Class CashPanelBuilder
         Dim variance As Decimal = counted - expected
 
         Dim lines As New List(Of ReceiptPrinter.RLine)
-        lines.Add(New ReceiptPrinter.RLine("PAINT STORE POS", , ReceiptPrinter.LineStyle.Title))
+        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreName, , ReceiptPrinter.LineStyle.Title))
         lines.Add(New ReceiptPrinter.RLine("Cash Drawer Count", , ReceiptPrinter.LineStyle.Muted))
         lines.Add(ReceiptPrinter.Divider())
         lines.Add(New ReceiptPrinter.RLine("Session:", If(_shiftId > 0, "DR-" & _shiftId.ToString("D4"), "—")))
