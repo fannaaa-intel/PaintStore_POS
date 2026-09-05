@@ -26,6 +26,7 @@ Partial Class PROCUREMENT_STAFF
         Me.dashboard = New System.Windows.Forms.Button()
         Me.purchaseOrders = New System.Windows.Forms.Button()
         Me.suppliers = New System.Windows.Forms.Button()
+        Me.quotations = New System.Windows.Forms.Button()
         Me.receiveGoods = New System.Windows.Forms.Button()
         Me.deliveryTracking = New System.Windows.Forms.Button()
         Me.logout = New System.Windows.Forms.Button()
@@ -37,6 +38,7 @@ Partial Class PROCUREMENT_STAFF
         Me.Nav.Controls.Add(Me.logout)
         Me.Nav.Controls.Add(Me.deliveryTracking)
         Me.Nav.Controls.Add(Me.receiveGoods)
+        Me.Nav.Controls.Add(Me.quotations)
         Me.Nav.Controls.Add(Me.suppliers)
         Me.Nav.Controls.Add(Me.purchaseOrders)
         Me.Nav.Controls.Add(Me.dashboard)
@@ -72,6 +74,15 @@ Partial Class PROCUREMENT_STAFF
         Me.suppliers.TabIndex = 2
         Me.suppliers.Text = "Suppliers"
         Me.suppliers.UseVisualStyleBackColor = True
+        '
+        'quotations
+        '
+        Me.quotations.Location = New System.Drawing.Point(4, 235)
+        Me.quotations.Name = "quotations"
+        Me.quotations.Size = New System.Drawing.Size(100, 23)
+        Me.quotations.TabIndex = 3
+        Me.quotations.Text = "Quotations"
+        Me.quotations.UseVisualStyleBackColor = True
         '
         'receiveGoods
         '
@@ -119,6 +130,7 @@ Partial Class PROCUREMENT_STAFF
     Friend WithEvents dashboard As Button
     Friend WithEvents purchaseOrders As Button
     Friend WithEvents suppliers As Button
+    Friend WithEvents quotations As Button
     Friend WithEvents receiveGoods As Button
     Friend WithEvents deliveryTracking As Button
     Friend WithEvents logout As Button

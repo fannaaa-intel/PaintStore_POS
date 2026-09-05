@@ -53,6 +53,7 @@ Public Class TransactionPanelBuilder
     Private Class ProductInfo
         Public Id As Integer
         Public Name As String
+        Public Sku As String
         Public Subtitle As String
         Public Category As String      ' mapped tab category
         Public UnitPrice As Decimal
@@ -79,6 +80,9 @@ Public Class TransactionPanelBuilder
     Private Shared _allProducts As New List(Of ProductInfo)
     Private Shared _cart As New Dictionary(Of Integer, CartLine)
     Private Shared _searchText As String = ""
+    ' Rebuilding the whole catalog on every keystroke made typing stutter on a
+    ' large product list; the timer coalesces a burst of keys into one render.
+    Private Shared _searchDebounce As Timer
     Private Shared _activeCategory As String = "All"
 
     Private Shared _catalogHost As FlowLayoutPanel
@@ -102,6 +106,9 @@ Public Class TransactionPanelBuilder
     ' Summary labels
     Private Shared _lblItems As Label
     Private Shared _lblSubtotal As Label
+    ' Cart-dependent actions, disabled while the cart is empty.
+    Private Shared _btnDiscount As Button
+    Private Shared _btnHold As Button
     Private Shared _lblDiscount As Label
     Private Shared _lblVat As Label
     Private Shared _lblGrandTotal As Label
@@ -131,8 +138,13 @@ Public Class TransactionPanelBuilder
         _activePayBtn = Nothing
         _activePayNormalClr = Color.Transparent
         _lblItems = Nothing : _lblSubtotal = Nothing
+        _btnDiscount = Nothing : _btnHold = Nothing
         _lblDiscount = Nothing : _lblVat = Nothing : _lblGrandTotal = Nothing
         _catalogHost = Nothing : _cartHost = Nothing : _lblCatalogCount = Nothing
+
+        ' The search box is rebuilt showing its placeholder, so the filter must
+        ' start empty too - otherwise the catalog renders against a stale term.
+        _searchText = ""
 
         ' Drop cached thumbnails so freshly-set images show immediately.
         _thumbCache.Clear()
@@ -176,7 +188,7 @@ Public Class TransactionPanelBuilder
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
                 Dim sql As String =
-                    "SELECT p.product_id, p.name, p.paint_type, p.size_label, p.color_hex, p.image_path, " &
+                    "SELECT p.product_id, p.name, p.sku, p.paint_type, p.size_label, p.color_hex, p.image_path, " &
                     "       p.unit_price, p.stock_qty, c.name AS category_name " &
                     "FROM products p JOIN categories c ON c.category_id = p.category_id " &
                     "WHERE p.is_active = 1 ORDER BY c.name, p.name"
@@ -199,6 +211,7 @@ Public Class TransactionPanelBuilder
                             _allProducts.Add(New ProductInfo With {
                                 .Id = rdr.GetInt32("product_id"),
                                 .Name = rdr.GetString("name"),
+                                .Sku = If(rdr.IsDBNull(rdr.GetOrdinal("sku")), "", rdr.GetString("sku")),
                                 .Subtitle = sub_,
                                 .Category = MapToTabCategory(catName),
                                 .UnitPrice = rdr.GetDecimal("unit_price"),
@@ -549,29 +562,65 @@ Public Class TransactionPanelBuilder
                     g.DrawLine(pen, 21, rect.Height \ 2 + 4, 26, rect.Height \ 2 + 9)
                 End Using
             End Sub
+        Dim showingPlaceholder As Boolean = True
         Dim txtSearch As New TextBox With {
             .Font = New Font("Segoe UI", 10.5F), .BorderStyle = BorderStyle.None,
-            .BackColor = TileBg, .ForeColor = SubText, .Text = "Search products by name...",
+            .BackColor = TileBg, .ForeColor = SubText, .Text = "Search products by name or SKU...",
             .Location = New Point(38, 9), .Width = 300}
+        ' The placeholder is drawn by writing it into the TextBox itself, so every
+        ' handler below must keep _searchText in sync with the REAL query only -
+        ' otherwise the placeholder string leaks into the filter and hides every
+        ' product (and a stale term survives after the box is cleared).
         AddHandler txtSearch.Enter,
             Sub()
                 focused = True
-                If txtSearch.Text = "Search products by name..." Then txtSearch.Text = "" : txtSearch.ForeColor = TextDark
+                If showingPlaceholder Then
+                    showingPlaceholder = False
+                    txtSearch.Text = "" : txtSearch.ForeColor = TextDark
+                End If
                 searchBox.Invalidate()
             End Sub
         AddHandler txtSearch.Leave,
             Sub()
                 focused = False
                 If String.IsNullOrWhiteSpace(txtSearch.Text) Then
-                    txtSearch.Text = "Search products by name..." : txtSearch.ForeColor = SubText
+                    ' Clear the filter first, then restore the placeholder text.
+                    ' Any keystroke still sitting in the debounce window is dropped,
+                    ' otherwise it would re-render over this cleared state.
+                    If _searchDebounce IsNot Nothing Then _searchDebounce.Stop()
+                    _searchText = ""
+                    showingPlaceholder = True
+                    txtSearch.Text = "Search products by name or SKU..." : txtSearch.ForeColor = SubText
+                    RenderCatalog()
                 End If
                 searchBox.Invalidate()
             End Sub
+        If _searchDebounce Is Nothing Then
+            _searchDebounce = New Timer With {.Interval = 180}
+            AddHandler _searchDebounce.Tick,
+                Sub()
+                    _searchDebounce.Stop()
+                    RenderCatalog()
+                End Sub
+        End If
         AddHandler txtSearch.TextChanged,
             Sub()
-                If txtSearch.ForeColor = SubText Then Return ' placeholder showing
+                If showingPlaceholder Then Return ' placeholder showing, not a real query
                 _searchText = txtSearch.Text.Trim()
-                RenderCatalog()
+                ' Restart the window on each key: render once the typing pauses.
+                _searchDebounce.Stop()
+                _searchDebounce.Start()
+            End Sub
+        ' Enter renders immediately -- a barcode scanner sends its terminator at
+        ' speed and should not wait out the debounce window.
+        AddHandler txtSearch.KeyDown,
+            Sub(s2 As Object, ke As KeyEventArgs)
+                If ke.KeyCode = Keys.Enter Then
+                    ke.SuppressKeyPress = True
+                    _searchDebounce.Stop()
+                    _searchText = txtSearch.Text.Trim()
+                    RenderCatalog()
+                End If
             End Sub
         AddHandler searchBox.Resize, Sub() txtSearch.Location = New Point(38, (searchBox.Height - txtSearch.Height) \ 2)
         AddHandler searchBox.Click, Sub() txtSearch.Focus()
@@ -677,7 +726,11 @@ Public Class TransactionPanelBuilder
         Dim n As Integer = 1
         For Each p In _allProducts
             If _activeCategory <> "All" AndAlso p.Category <> _activeCategory Then Continue For
-            If q <> "" AndAlso Not (p.Name.ToLower().Contains(q) OrElse p.Subtitle.ToLower().Contains(q)) Then Continue For
+            ' SKU is matched as well as the name so a scanned or typed barcode
+            ' finds the item -- searching name-only made the scanner useless.
+            If q <> "" AndAlso Not (p.Name.ToLower().Contains(q) OrElse
+                                    p.Subtitle.ToLower().Contains(q) OrElse
+                                    If(p.Sku, "").ToLower().Contains(q)) Then Continue For
             _catalogHost.Controls.Add(CreateCatalogRow(p, n))
             n += 1 : shown += 1
         Next
@@ -726,11 +779,16 @@ Public Class TransactionPanelBuilder
             .Text = p.Name, .Font = New Font("Segoe UI Semibold", 10.5F),
             .ForeColor = If(outOfStock, MutedFore, MintDark), .AutoSize = False,
             .BackColor = Color.Transparent, .Location = New Point(60, 16), .Size = New Size(260, 22)}
-        Dim subTxt As String = p.Subtitle & "   .   Stock: " & p.Stock
+        ' SKU is searchable, so it is shown on the row too -- same "   .   "
+        ' separator and 8.5pt SubText treatment as the rest of the subtitle,
+        ' and simply omitted when the product has no SKU.
+        Dim subTxt As String = p.Subtitle
+        If Not String.IsNullOrEmpty(p.Sku) Then subTxt &= "   .   " & p.Sku
+        subTxt &= "   .   Stock: " & p.Stock
         Dim lblSub As New Label With {
             .Text = subTxt, .Font = New Font("Segoe UI", 8.5F),
             .ForeColor = If(outOfStock, MutedFore, SubText), .AutoSize = False,
-            .BackColor = Color.Transparent, .Location = New Point(60, 40), .Size = New Size(260, 16)}
+            .BackColor = Color.Transparent, .Location = New Point(60, 40), .Size = New Size(330, 16)}
 
         Dim lblPrice As New Label With {
             .Text = "P " & p.UnitPrice.ToString("N2"), .Font = New Font("Segoe UI Semibold", 10.5F),
@@ -912,7 +970,7 @@ Public Class TransactionPanelBuilder
         _lblItems = MakeStat(sgrid, 0, "TOTAL ITEMS", "0")
         _lblSubtotal = MakeStat(sgrid, 1, "SUBTOTAL", "P 0.00")
         _lblDiscount = MakeStat(sgrid, 2, "DISCOUNT", "P 0.00")
-        _lblVat = MakeStat(sgrid, 3, "VAT (12%)", "P 0.00")
+        _lblVat = MakeStat(sgrid, 3, StoreSettings.VatLabel, "P 0.00")
 
         Dim totalBlock As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0, 8, 0, 0)}
         Dim totalCard As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
@@ -995,13 +1053,24 @@ Public Class TransactionPanelBuilder
         Dim disc As Decimal = _discountAmount
         If disc < 0 Then disc = 0
         If disc > subtotal Then disc = subtotal
-        Dim grand As Decimal = subtotal - disc
-        Dim vat As Decimal = StoreSettings.ComputeVat(grand)
+        ' VAT-exclusive pricing adds the tax on top of the net amount; inclusive
+        ' pricing already contains it. ComputeTotalDue keeps the displayed total,
+        ' the amount charged and the receipt in agreement under both settings.
+        Dim net As Decimal = subtotal - disc
+        Dim vat As Decimal = StoreSettings.ComputeVat(net)
+        Dim grand As Decimal = StoreSettings.ComputeTotalDue(net)
         If _lblItems IsNot Nothing Then _lblItems.Text = items.ToString()
         If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "P " & subtotal.ToString("N2")
         If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- P " & disc.ToString("N2")
         If _lblVat IsNot Nothing Then _lblVat.Text = "P " & vat.ToString("N2")
         If _lblGrandTotal IsNot Nothing Then _lblGrandTotal.Text = "P " & grand.ToString("N2")
+
+        ' HOLD and DISCOUNT only mean something with a cart behind them. Greying
+        ' them out shows that up front rather than answering a click with a
+        ' warning dialog.
+        Dim hasCart As Boolean = (items > 0)
+        If _btnDiscount IsNot Nothing Then _btnDiscount.Enabled = hasCart
+        If _btnHold IsNot Nothing Then _btnHold.Enabled = hasCart
     End Sub
 
     Private Shared Function CreateCartRow(line As CartLine) As Panel
@@ -1280,7 +1349,8 @@ Public Class TransactionPanelBuilder
                 Dim disc As Decimal = _discountAmount
                 If disc < 0 Then disc = 0
                 If disc > subtotal Then disc = subtotal
-                Dim grand As Decimal = subtotal - disc
+                ' Charge the VAT-adjusted total, not the net -- see ComputeTotalDue.
+                Dim grand As Decimal = StoreSettings.ComputeTotalDue(subtotal - disc)
 
                 ' Per-method capture: Cash needs amount tendered (-> change);
                 ' Card / E-Wallet need a reference number (no change given).
@@ -1344,6 +1414,8 @@ Public Class TransactionPanelBuilder
         Dim btnHold = MakeActionBtn("HOLD", Color.FromArgb(232, 238, 237), SubText, 6)
         Dim btnRetrieve = MakeActionBtn("RETRIEVE", Color.FromArgb(232, 238, 237), SubText, 6)
         Dim btnPrint = MakePrimaryBtn("REPRINT", 6)
+        _btnDiscount = btnDiscount
+        _btnHold = btnHold
         AddHandler btnVoid.Click, Sub() VoidSale()
         AddHandler btnDiscount.Click, Sub() ApplyDiscount()
         AddHandler btnHold.Click, Sub() HoldSale()
@@ -1366,20 +1438,33 @@ Public Class TransactionPanelBuilder
             Sub(s, e)
                 Dim b = CType(s, Button) : Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(b.BackColor) : g.FillRoundedRectangle(br, rect, 8) : End Using
-                Using p As New Pen(Color.FromArgb(40, foreClr.R, foreClr.G, foreClr.B), 1.0F) : g.DrawRoundedRectangle(p, rect, 8) : End Using
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
+                ' Disabled actions use the existing Muted tokens, so an unavailable
+                ' button is legible at a glance instead of only failing on click.
+                Dim fill As Color = If(b.Enabled, b.BackColor, MutedBg)
+                Dim fore As Color = If(b.Enabled, b.ForeColor, MutedFore)
+                Using br As New SolidBrush(fill) : g.FillRoundedRectangle(br, rect, 8) : End Using
+                Using p As New Pen(Color.FromArgb(40, fore.R, fore.G, fore.B), 1.0F) : g.DrawRoundedRectangle(p, rect, 8) : End Using
+                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, fore,
                     TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
         Dim orig = backClr
         Dim hover = Color.FromArgb(Math.Max(0, orig.R - 18), Math.Max(0, orig.G - 18), Math.Max(0, orig.B - 18))
         AddHandler btn.MouseEnter,
             Sub()
+                If Not btn.Enabled Then Return
                 btn.BackColor = hover
                 btn.Invalidate()
             End Sub
         AddHandler btn.MouseLeave,
             Sub()
+                If Not btn.Enabled Then Return
+                btn.BackColor = orig
+                btn.Invalidate()
+            End Sub
+        ' Repaint on enable/disable and switch the cursor with it.
+        AddHandler btn.EnabledChanged,
+            Sub()
+                btn.Cursor = If(btn.Enabled, Cursors.Hand, Cursors.Default)
                 btn.BackColor = orig
                 btn.Invalidate()
             End Sub
@@ -1394,17 +1479,30 @@ Public Class TransactionPanelBuilder
             Sub(s, e)
                 Dim b = CType(s, Button) : Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New LinearGradientBrush(rect, MintPrimary, MintDark, 90.0F) : g.FillRoundedRectangle(br, rect, 8) : End Using
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, Color.White,
+                If b.Enabled Then
+                    Using br As New LinearGradientBrush(rect, MintPrimary, MintDark, 90.0F) : g.FillRoundedRectangle(br, rect, 8) : End Using
+                Else
+                    Using br As New SolidBrush(MutedBg) : g.FillRoundedRectangle(br, rect, 8) : End Using
+                End If
+                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle,
+                    If(b.Enabled, Color.White, MutedFore),
                     TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
         AddHandler btn.MouseEnter,
             Sub()
+                If Not btn.Enabled Then Return
                 btn.BackColor = MintDark
                 btn.Invalidate()
             End Sub
         AddHandler btn.MouseLeave,
             Sub()
+                If Not btn.Enabled Then Return
+                btn.BackColor = MintPrimary
+                btn.Invalidate()
+            End Sub
+        AddHandler btn.EnabledChanged,
+            Sub()
+                btn.Cursor = If(btn.Enabled, Cursors.Hand, Cursors.Default)
                 btn.BackColor = MintPrimary
                 btn.Invalidate()
             End Sub
@@ -1485,7 +1583,22 @@ Public Class TransactionPanelBuilder
         Dim discount As Decimal = _discountAmount
         If discount < 0 Then discount = 0
         If discount > subtotal Then discount = subtotal
-        Dim total As Decimal = subtotal - discount
+        ' The customer agreed to grandTotal at the confirmation dialog and, for
+        ' cash, the change was computed from it. That figure is therefore the
+        ' authoritative one to store -- recomputing here instead would let the
+        ' recorded sale drift from what was actually collected if the cart or
+        ' the VAT settings changed between confirming and committing.
+        Dim netAmount As Decimal = subtotal - discount
+        Dim total As Decimal = grandTotal
+
+        ' A mismatch means the cart moved under the cashier after they confirmed;
+        ' abandon rather than charge one amount and record another.
+        If Math.Abs(total - StoreSettings.ComputeTotalDue(netAmount)) > 0.01D Then
+            AppModal.Show("The cart changed while the payment was being confirmed." & Environment.NewLine &
+                          "The sale was not completed. Please review the cart and try again.",
+                          "Sale Not Completed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
 
         Try
             Using conn As MySqlConnection = Db.GetConnection()
@@ -1513,7 +1626,10 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
-                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(total))
+                            ' VAT is always derived from the NET amount. With exclusive
+                            ' pricing `total` already carries the tax, so computing from
+                            ' it would report VAT on top of VAT.
+                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(netAmount))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.Parameters.AddWithValue("@tendered", amountTendered)
                             cmd.Parameters.AddWithValue("@change", changeDue)
@@ -1572,7 +1688,7 @@ Public Class TransactionPanelBuilder
             _lastSalePay = _payMethodName
             _lastSaleSubtotal = subtotal
             _lastSaleDiscount = discount
-            _lastSaleVat = StoreSettings.ComputeVat(total)
+            _lastSaleVat = StoreSettings.ComputeVat(netAmount)
             _lastSaleTotal = total
             _lastSaleTendered = amountTendered
             _lastSaleChange = changeDue
@@ -1683,7 +1799,10 @@ Public Class TransactionPanelBuilder
         Dim discount As Decimal = _discountAmount
         If discount < 0 Then discount = 0
         If discount > subtotal Then discount = subtotal
-        Dim total As Decimal = subtotal - discount
+        ' Mirror the checkout maths so the parked figures match what the sale will
+        ' actually charge when it is retrieved.
+        Dim netAmount As Decimal = subtotal - discount
+        Dim total As Decimal = StoreSettings.ComputeTotalDue(netAmount)
         Dim saleNo As String = "HOLD-" & DateTime.Now.ToString("yyyyMMddHHmmss")
         Try
             Using conn As MySqlConnection = Db.GetConnection()
@@ -1700,7 +1819,7 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
-                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(total))
+                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(netAmount))
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.ExecuteNonQuery()
                         End Using
@@ -1766,21 +1885,64 @@ Public Class TransactionPanelBuilder
             held.Select(Function(h) (h.id, h.no & "   P " & h.total.ToString("N2") & "   " & h.dt.ToString("MMM d, h:mm tt"))).ToList())
         If chosenId <= 0 Then Return
 
+        ' The held row carries the discount that was in force when it was parked;
+        ' dropping it here silently re-prices the sale at full price.
         Dim qtyByPid As New Dictionary(Of Integer, Integer)
+        Dim heldDiscount As Decimal = 0
+        Dim heldDiscountType As String = "None"
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand("SELECT product_id, qty FROM sale_items WHERE sale_id = @sid AND product_id IS NOT NULL", conn)
-                    cmd.Parameters.AddWithValue("@sid", chosenId)
-                    Using rdr = cmd.ExecuteReader()
-                        While rdr.Read()
-                            qtyByPid(rdr.GetInt32("product_id")) = rdr.GetInt32("qty")
-                        End While
-                    End Using
-                End Using
-                Using cmd As New MySqlCommand("DELETE FROM sales WHERE sale_id = @sid", conn)
-                    cmd.Parameters.AddWithValue("@sid", chosenId)
-                    cmd.ExecuteNonQuery()
+                ' One transaction: the row is only deleted once its lines have been
+                ' read back. Reading and deleting on separate statements meant a
+                ' failure between the two destroyed the held sale with nothing to
+                ' restore it from.
+                Using txn As MySqlTransaction = conn.BeginTransaction()
+                    Try
+                        ' Lock the row and confirm it is still on hold — the picker
+                        ' list was built before the dialog, so another till may have
+                        ' already retrieved or voided this sale.
+                        Using cmd As New MySqlCommand(
+                            "SELECT status, discount_amount, discount_type FROM sales " &
+                            "WHERE sale_id = @sid FOR UPDATE", conn, txn)
+                            cmd.Parameters.AddWithValue("@sid", chosenId)
+                            Using rdr = cmd.ExecuteReader()
+                                If Not rdr.Read() Then
+                                    Throw New Exception("That held sale no longer exists.")
+                                End If
+                                Dim liveStatus As String = rdr.GetString("status")
+                                If liveStatus <> "OnHold" Then
+                                    Throw New Exception(
+                                        "That sale is now marked '" & liveStatus &
+                                        "' and can no longer be retrieved.")
+                                End If
+                                If Not rdr.IsDBNull(rdr.GetOrdinal("discount_amount")) Then
+                                    heldDiscount = rdr.GetDecimal("discount_amount")
+                                End If
+                                If Not rdr.IsDBNull(rdr.GetOrdinal("discount_type")) Then
+                                    heldDiscountType = rdr.GetString("discount_type")
+                                End If
+                            End Using
+                        End Using
+
+                        Using cmd As New MySqlCommand("SELECT product_id, qty FROM sale_items WHERE sale_id = @sid AND product_id IS NOT NULL", conn, txn)
+                            cmd.Parameters.AddWithValue("@sid", chosenId)
+                            Using rdr = cmd.ExecuteReader()
+                                While rdr.Read()
+                                    qtyByPid(rdr.GetInt32("product_id")) = rdr.GetInt32("qty")
+                                End While
+                            End Using
+                        End Using
+
+                        Using cmd As New MySqlCommand("DELETE FROM sales WHERE sale_id = @sid", conn, txn)
+                            cmd.Parameters.AddWithValue("@sid", chosenId)
+                            cmd.ExecuteNonQuery()
+                        End Using
+                        txn.Commit()
+                    Catch
+                        txn.Rollback()
+                        Throw
+                    End Try
                 End Using
             End Using
         Catch ex As Exception
@@ -1789,21 +1951,43 @@ Public Class TransactionPanelBuilder
         End Try
 
         ' Rebuild the cart from the held quantities (clamped to current stock).
+        ' Stock can have been sold down while the sale sat on hold, so anything
+        ' that no longer fits is reported rather than silently dropped.
         _cart = New Dictionary(Of Integer, CartLine)
+        Dim shortfalls As New List(Of String)
         For Each kv In qtyByPid
             Dim p = _allProducts.FirstOrDefault(Function(x) x.Id = kv.Key)
-            If p IsNot Nothing Then
-                Dim qn As Integer = kv.Value
-                If qn > p.Stock Then qn = p.Stock
-                If qn > 0 Then
-                    _cart(kv.Key) = New CartLine With {.ProductId = kv.Key, .Name = p.Name, .UnitPrice = p.UnitPrice, .Qty = qn, .Stock = p.Stock}
-                End If
+            If p Is Nothing Then
+                shortfalls.Add("Product #" & kv.Key & " is no longer available (" & kv.Value & " dropped)")
+                Continue For
+            End If
+            Dim qn As Integer = kv.Value
+            If qn > p.Stock Then
+                shortfalls.Add(p.Name & ": held " & kv.Value & ", only " & p.Stock & " in stock")
+                qn = p.Stock
+            End If
+            If qn > 0 Then
+                _cart(kv.Key) = New CartLine With {.ProductId = kv.Key, .Name = p.Name, .UnitPrice = p.UnitPrice, .Qty = qn, .Stock = p.Stock}
             End If
         Next
-        _discountAmount = 0
-        _discountType = "None"
+
+        ' Restore the parked discount, re-clamped to the cart it now applies to.
+        Dim newSubtotal As Decimal = 0
+        For Each kv In _cart : newSubtotal += kv.Value.Qty * kv.Value.UnitPrice : Next
+        If heldDiscount < 0 Then heldDiscount = 0
+        If heldDiscount > newSubtotal Then heldDiscount = newSubtotal
+        _discountAmount = heldDiscount
+        _discountType = If(heldDiscount > 0, heldDiscountType, "None")
+
         LoadTransaction(_mainContainer)
-        AppModal.Show("Held sale loaded into the cart.", "Retrieved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+
+        If shortfalls.Count > 0 Then
+            AppModal.Show("Held sale loaded, but stock changed while it was on hold:" &
+                Environment.NewLine & Environment.NewLine & String.Join(Environment.NewLine, shortfalls),
+                "Retrieved with Changes", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Else
+            AppModal.Show("Held sale loaded into the cart.", "Retrieved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+        End If
     End Sub
 
     Private Shared Sub VoidSale()
@@ -1840,7 +2024,27 @@ Public Class TransactionPanelBuilder
                 conn.Open()
                 Using txn As MySqlTransaction = conn.BeginTransaction()
                     Try
-                        If chosen.status = "Completed" Then
+                        ' Re-read the status from the LOCKED row. chosen.status was
+                        ' captured before the confirmation prompt; if the sale was
+                        ' refunded or voided in the meantime, restoring stock again
+                        ' here would inflate inventory for the same sale twice.
+                        Dim liveStatus As String = ""
+                        Using cmd As New MySqlCommand(
+                            "SELECT status FROM sales WHERE sale_id = @sid FOR UPDATE", conn, txn)
+                            cmd.Parameters.AddWithValue("@sid", chosenId)
+                            Dim o = cmd.ExecuteScalar()
+                            If o Is Nothing OrElse IsDBNull(o) Then
+                                Throw New Exception("That sale no longer exists.")
+                            End If
+                            liveStatus = o.ToString()
+                        End Using
+                        If liveStatus <> "Completed" AndAlso liveStatus <> "OnHold" Then
+                            Throw New Exception(
+                                "Sale " & chosen.no & " is now marked '" & liveStatus &
+                                "' and can no longer be voided.")
+                        End If
+
+                        If liveStatus = "Completed" Then
                             Dim lines As New List(Of (pid As Integer, qty As Integer))
                             Using cmd As New MySqlCommand("SELECT product_id, qty FROM sale_items WHERE sale_id = @sid AND product_id IS NOT NULL", conn, txn)
                                 cmd.Parameters.AddWithValue("@sid", chosenId)
@@ -1937,7 +2141,7 @@ Public Class TransactionPanelBuilder
             lines.Add(ReceiptPrinter.Divider())
             lines.Add(New ReceiptPrinter.RLine("Subtotal", "P " & _lastSaleSubtotal.ToString("N2")))
             If _lastSaleDiscount > 0 Then lines.Add(New ReceiptPrinter.RLine("Discount", "- P " & _lastSaleDiscount.ToString("N2")))
-            lines.Add(New ReceiptPrinter.RLine("VAT (12%)", "P " & _lastSaleVat.ToString("N2")))
+            lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, "P " & _lastSaleVat.ToString("N2")))
             lines.Add(New ReceiptPrinter.RLine("TOTAL", "P " & _lastSaleTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
             If String.Equals(_lastSalePay, "Cash", StringComparison.OrdinalIgnoreCase) Then
                 lines.Add(New ReceiptPrinter.RLine("Tendered", "P " & _lastSaleTendered.ToString("N2")))

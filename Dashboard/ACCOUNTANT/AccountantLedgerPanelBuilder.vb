@@ -181,7 +181,7 @@ Public Class AccountantLedgerPanelBuilder
                         ' Back VAT out of the VAT-inclusive total when the stored
                         ' amount is missing/zero (older seeded sales).
                         If vat <= 0D AndAlso total > 0D Then
-                            vat = Math.Round(total * 12D / 112D, 2)
+                            vat = StoreSettings.ExtractInclusiveVat(total)
                         End If
 
                         Dim txn As New LedgerTxn With {
@@ -257,8 +257,10 @@ Public Class AccountantLedgerPanelBuilder
 
                         Dim cost As Decimal = Convert.ToDecimal(rdr("total_cost"))
                         ' Supplier invoice total is VAT-inclusive: split into net
-                        ' inventory cost + recoverable Input VAT (12%).
-                        Dim inputVat As Decimal = Math.Round(cost * 12D / 112D, 2)
+                        ' inventory cost + recoverable Input VAT. The rate comes
+                        ' from store settings -- hardcoding 12/112 mis-stated the
+                        ' ledger for any store on a different rate.
+                        Dim inputVat As Decimal = StoreSettings.ExtractInclusiveVat(cost)
                         Dim netCost As Decimal = cost - inputVat
                         Dim txn As New LedgerTxn With {
                             .TxnDate = Convert.ToDateTime(rdr("received_at")),
@@ -408,7 +410,7 @@ Public Class AccountantLedgerPanelBuilder
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             Dim cost As Decimal = Convert.ToDecimal(rdr("total_cost"))
-                            Dim inputVat As Decimal = Math.Round(cost * 12D / 112D, 2)
+                            Dim inputVat As Decimal = StoreSettings.ExtractInclusiveVat(cost)
                             postDr("Inventory", cost - inputVat)
                             postDr("Input VAT", inputVat)
                             postCr("Accounts Payable", cost)

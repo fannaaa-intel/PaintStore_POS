@@ -21,6 +21,15 @@ Public Class POS_STAFF
     Private navIsOpen As Boolean = True
     Private btnHamburger As Button          ' always-visible toggle button
 
+    ' Captions are cleared from the buttons when the rail collapses, so the real
+    ' label has to live somewhere else. Icons are cached in both layouts:
+    ' "padded" = 40x24 with the glyph left-aligned (caption sits beside it),
+    ' "bare"   = 24x24 for the centred icon-only rail.
+    Private navCaptions As New Dictionary(Of Button, String)
+    Private navIconPadded As New Dictionary(Of Button, Image)
+    Private navIconBare As New Dictionary(Of Button, Image)
+    Private NavTips As New ToolTip()
+
     ' ── Shift overlay references ────────────────────────────────────────────────
     Private ShiftOverlay As Panel
     Private ShiftBox As Panel
@@ -49,6 +58,10 @@ Public Class POS_STAFF
             pe.Graphics.DrawLine(pen, Nav.Width - 1, 0, Nav.Width - 1, Nav.Height)
         End Using
     End Sub
+        ' Without this the divider keeps the x it was painted at for the previous
+        ' width, so after the nav is resized the line is stranded INSIDE the panel
+        ' and runs straight through the icon column.
+        AddHandler Nav.Resize, Sub() Nav.Invalidate()
 
         ' ── MAIN CONTAINER ──────────────────────────────────────────────────────
         MainContainer = New Panel With {
@@ -205,30 +218,68 @@ Public Class POS_STAFF
     ' ===========================================================================
     Private Sub ToggleNav(sender As Object, e As EventArgs)
         navIsOpen = Not navIsOpen
+        ApplyNavState()
+    End Sub
 
-        If navIsOpen Then
-            Nav.Width = NAV_OPEN_WIDTH
-            Nav.Controls.Add(btnHamburger)
-            btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
-            btnHamburger.BackColor = Color.White
-            ' Show all nav contents
-            For Each ctrl As Control In Nav.Controls
-                If ctrl IsNot btnHamburger Then ctrl.Visible = True
-            Next
-        Else
-            Nav.Width = NAV_CLOSED_WIDTH
-            Nav.Controls.Add(btnHamburger)
-            btnHamburger.Location = New Point((NAV_CLOSED_WIDTH - btnHamburger.Width) \ 2, 18)
-            btnHamburger.BackColor = Color.Transparent
-            ' Hide all nav contents except burger
-            For Each ctrl As Control In Nav.Controls
-                If ctrl IsNot btnHamburger Then ctrl.Visible = False
-            Next
-        End If
+    ' Collapsed nav is an ICON RAIL: the nav buttons stay visible and clickable,
+    ' only their captions are dropped. Labels/logo (which are text-only) hide.
+    Private Sub ApplyNavState()
+        Nav.SuspendLayout()
 
+        Dim navButtons() As Button = {home, transaction, sales, returns, Reports}
+        Dim width As Integer = If(navIsOpen, NAV_OPEN_WIDTH, NAV_CLOSED_WIDTH)
+        Nav.Width = width
+
+        For Each ctrl As Control In Nav.Controls
+            If ctrl Is btnHamburger Then Continue For
+            Dim isNavBtn As Boolean = (Array.IndexOf(navButtons, ctrl) >= 0) OrElse (ctrl Is logout)
+            ' Nav buttons survive the collapse; captions/logo do not.
+            ctrl.Visible = navIsOpen OrElse isNavBtn
+        Next
+
+        For Each btn In navButtons
+            ApplyNavButtonState(btn, width)
+        Next
+        ApplyNavButtonState(logout, width)
+
+        btnHamburger.BackColor = If(navIsOpen, Color.White, Color.Transparent)
+        btnHamburger.Location = If(navIsOpen,
+                                   New Point(NAV_OPEN_WIDTH - 46, 18),
+                                   New Point((NAV_CLOSED_WIDTH - btnHamburger.Width) \ 2, 18))
         btnHamburger.BringToFront()
+
+        Nav.ResumeLayout()
+        Nav.Invalidate()
         MainContainer.PerformLayout()
         MainContainer.Refresh()
+    End Sub
+
+    ' Re-lay one nav button for the current rail width. Collapsed: no caption and
+    ' the icon is centred; expanded: caption returns and the icon sits left.
+    Private Sub ApplyNavButtonState(btn As Button, navWidth As Integer)
+        If btn Is Nothing Then Return
+
+        If navIsOpen Then
+            btn.Text = NavCaption(btn)
+            btn.Left = 14
+            btn.Width = navWidth - 28
+            btn.TextImageRelation = TextImageRelation.ImageBeforeText
+            btn.ImageAlign = ContentAlignment.MiddleLeft
+            btn.TextAlign = ContentAlignment.MiddleLeft
+            btn.Padding = New Padding(20, 0, 14, 0)
+            btn.Image = NavIcon(btn, padded:=True)
+        Else
+            btn.Text = ""
+            btn.Left = 4
+            btn.Width = navWidth - 8
+            btn.ImageAlign = ContentAlignment.MiddleCenter
+            btn.Padding = New Padding(0)
+            btn.Image = NavIcon(btn, padded:=False)
+        End If
+
+        RoundButton(btn, 12)
+        ' Tooltip so a collapsed icon still says what it does.
+        NavTips.SetToolTip(btn, NavCaption(btn))
     End Sub
     ' ===========================================================================
     ' HELPER: reload active panel after nav toggle so content re-layouts
@@ -454,6 +505,10 @@ Public Class POS_STAFF
             Case "logout" : iconPath = "logout.png"
         End Select
 
+        ' Remember the caption before anything can clear it, so the collapsed rail
+        ' can put it back (and show it as a tooltip meanwhile).
+        navCaptions(btn) = btn.Text
+
         If IO.File.Exists(iconPath) Then
             Dim src As Bitmap
             Using img = Image.FromFile(iconPath)
@@ -464,6 +519,8 @@ Public Class POS_STAFF
                 g.InterpolationMode = Drawing2D.InterpolationMode.HighQualityBicubic
                 g.DrawImage(src, 0, 0, 24, 24)
             End Using
+            navIconPadded(btn) = padded
+            navIconBare(btn) = src
             btn.Image = padded
         End If
 
@@ -499,6 +556,19 @@ Public Class POS_STAFF
         btn.Tag = "active"
     End Sub
 
+    Private Function NavCaption(btn As Button) As String
+        Dim caption As String = ""
+        If btn IsNot Nothing AndAlso navCaptions.TryGetValue(btn, caption) Then Return caption
+        Return ""
+    End Function
+
+    Private Function NavIcon(btn As Button, padded As Boolean) As Image
+        Dim img As Image = Nothing
+        Dim store = If(padded, navIconPadded, navIconBare)
+        If btn IsNot Nothing AndAlso store.TryGetValue(btn, img) Then Return img
+        Return Nothing
+    End Function
+
     Private Sub RoundButton(btn As Button, radius As Integer)
         Dim r As Integer = radius
         Dim w As Integer = btn.Width
@@ -528,6 +598,13 @@ Public Class POS_STAFF
         logout.Cursor = Cursors.Hand
         If logout.Image IsNot Nothing Then
             logout.Image = TintLogoutIcon(logout.Image, Color.White)
+            ' Keep the cached variants in step, or the collapsed rail would fall
+            ' back to the untinted (dark-on-red) logout glyph.
+            navIconPadded(logout) = logout.Image
+            Dim bare As Image = Nothing
+            If navIconBare.TryGetValue(logout, bare) AndAlso bare IsNot Nothing Then
+                navIconBare(logout) = TintLogoutIcon(bare, Color.White)
+            End If
         End If
         AddHandler logout.MouseEnter, Sub() logout.BackColor = redHoverBg
         AddHandler logout.MouseLeave, Sub() logout.BackColor = redBg

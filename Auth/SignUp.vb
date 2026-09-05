@@ -329,7 +329,4 @@ Public Class SignUp
         Me.ResumeLayout(False)
     End Sub
 
-    Private Sub SignUp_Load_1(sender As Object, e As EventArgs) Handles MyBase.Load
-
-    End Sub
 End Class

@@ -960,6 +960,35 @@ Public Class InventoryPutAwayPanelBuilder
                                 cmd.ExecuteScalar()
                             End Using
 
+                            ' Re-check the pending amount against the LOCKED po_items row.
+                            ' The guard above this transaction used PendingQty as it was when
+                            ' the screen loaded; if another station shelved the same PO in the
+                            ' meantime that figure is stale, and trusting it would put away
+                            ' more units than were ever received.
+                            Dim shelvedNow As Integer = 0
+                            Using cmd As New MySqlCommand(
+                                "SELECT shelved_qty FROM po_items WHERE po_item_id = @piid FOR UPDATE",
+                                conn, txn)
+                                cmd.Parameters.AddWithValue("@piid", ln.PoItemId)
+                                shelvedNow = Convert.ToInt32(cmd.ExecuteScalar())
+                            End Using
+                            Dim receivedNow As Integer = 0
+                            Using cmd As New MySqlCommand(
+                                "SELECT COALESCE(SUM(sm.qty_change), 0) FROM stock_movements sm " &
+                                "WHERE sm.reference_id = @poid AND sm.reference_type = 'receive' " &
+                                "  AND sm.product_id = @pid AND sm.movement_type = 'Purchase'",
+                                conn, txn)
+                                cmd.Parameters.AddWithValue("@poid", currentPoId)
+                                cmd.Parameters.AddWithValue("@pid", ln.ProductId)
+                                receivedNow = Convert.ToInt32(cmd.ExecuteScalar())
+                            End Using
+                            If ln.ShelveNow > (receivedNow - shelvedNow) Then
+                                Throw New Exception(
+                                    ln.ProductName & ": only " & (receivedNow - shelvedNow).ToString() &
+                                    " unit(s) are still pending put-away (someone else may have " &
+                                    "stocked this PO in already). Reopen Put Away to see current figures.")
+                            End If
+
                             ' Record the put-away movement in the audit ledger
                             Using cmd As New MySqlCommand(
                                 "INSERT INTO stock_movements " &

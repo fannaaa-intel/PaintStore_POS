@@ -22,6 +22,7 @@ Public Class LogIn
     Private txtUser As TextBox
     Private txtPass As TextBox
     Private btnTogglePass As Button
+    Private _btnLogin As Button
 
     Private Sub LogIn_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         Me.FormBorderStyle = FormBorderStyle.None
@@ -341,8 +342,21 @@ Public Class LogIn
                     path.AddArc(rect.Width - r2, rect.Height - r2, r2, r2, 0, 90)
                     path.AddArc(0, rect.Height - r2, r2, r2, 90, 90)
                     path.CloseFigure()
-                    Dim isHover = btn.ClientRectangle.Contains(btn.PointToClient(Cursor.Position))
-                    Dim fillColor = If(isHover, Color.FromArgb(0, 140, 118), MintPrimary)
+                    ' A disabled button is the "signing in" state; it must read as
+                    ' inert rather than still inviting a second click.
+                    Dim isHover = btn.Enabled AndAlso
+                                  btn.ClientRectangle.Contains(btn.PointToClient(Cursor.Position))
+                    Dim fillColor As Color
+                    If Not btn.Enabled Then
+                        ' MintPrimary blended 45% toward white -- derived from the
+                        ' palette rather than picked, so it stays on-brand while
+                        ' reading clearly as unavailable.
+                        fillColor = Color.FromArgb(115, 207, 193)
+                    ElseIf isHover Then
+                        fillColor = Color.FromArgb(0, 140, 118)
+                    Else
+                        fillColor = MintPrimary
+                    End If
                     Using br As New SolidBrush(fillColor)
                         pe.Graphics.FillPath(br, path)
                     End Using
@@ -352,6 +366,7 @@ Public Class LogIn
             End Sub
         AddHandler btnLogin.MouseEnter, Sub() btnLogin.Invalidate()
         AddHandler btnLogin.MouseLeave, Sub() btnLogin.Invalidate()
+        _btnLogin = btnLogin
         AddHandler btnLogin.Click, AddressOf HandleLogin
         loginCard.Controls.Add(btnLogin)
 
@@ -472,17 +487,27 @@ Public Class LogIn
 
     ' ===== LOGIN LOGIC ===== (unchanged from original)
     Private Sub HandleLogin(sender As Object, e As EventArgs)
+        ' Guard against a second submit while the first is still in flight — the
+        ' Enter key repeats happily and each press opened its own connection.
+        If _btnLogin IsNot Nothing AndAlso Not _btnLogin.Enabled Then Return
+
         Dim username = txtUser.Text.Trim()
-        Dim password = txtPass.Text.Trim()
+        ' The password is deliberately NOT trimmed: leading/trailing spaces are
+        ' legal characters, and trimming here rejected passwords that SignUp had
+        ' hashed untrimmed.
+        Dim password = txtPass.Text
         If username.Equals("e.g. jdelacruz", StringComparison.OrdinalIgnoreCase) Then username = ""
         If password = "Enter your password" Then password = ""
 
         If username = "" OrElse password = "" Then
             AppModal.Show("Please enter your username and password.", "Login",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            ' Put the caret where the missing value belongs.
+            If username = "" Then txtUser.Focus() Else txtPass.Focus()
             Return
         End If
 
+        SetBusy(True)
         Try
             Using cn = Db.GetConnection()
                 cn.Open()
@@ -525,10 +550,27 @@ Public Class LogIn
             AppModal.Show("Could not reach the database: " & ex.Message, "Login Error",
                         MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
+        Finally
+            ' Runs on every exit path, including the early Returns above, so the
+            ' form can never be left stuck on "Signing in...".
+            SetBusy(False)
         End Try
 
         ActivityLog.Record("LOGIN")
         RouteByRole(Session.CurrentRole)
+    End Sub
+
+    ' Visual busy state for the sign-in round trip.
+    Private Sub SetBusy(busy As Boolean)
+        If _btnLogin IsNot Nothing Then
+            _btnLogin.Enabled = Not busy
+            _btnLogin.Text = If(busy, "Signing in...", "Sign in")
+            _btnLogin.Cursor = If(busy, Cursors.Default, Cursors.Hand)
+            _btnLogin.Invalidate()
+        End If
+        Me.Cursor = If(busy, Cursors.WaitCursor, Cursors.Default)
+        ' Repaint before the blocking database call starts.
+        If busy Then Application.DoEvents()
     End Sub
 
     ' ===== ROLE ROUTING ===== (CHANGE THIS IF ADMIN IS ON DEVELOPMENT)
@@ -577,7 +619,4 @@ Public Class LogIn
 
     End Sub
 
-    Private Sub LogIn_Load_1(sender As Object, e As EventArgs) Handles MyBase.Load
-
-    End Sub
 End Class

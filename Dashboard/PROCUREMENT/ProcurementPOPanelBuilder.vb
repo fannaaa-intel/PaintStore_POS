@@ -182,6 +182,72 @@ Public Class ProcurementPOPanelBuilder
         LoadNewPOForm(requestId)
     End Sub
 
+    ' Pre-loads the New PO form from an ACCEPTED quotation: the quoted supplier
+    ' is selected and every quoted item becomes a line at the quoted price.
+    ' Called by the Quotations screen's "Convert to PO" action.
+    Public Shared Sub LoadPOFromQuotation(container As Panel, quotationId As Integer)
+        containerRef = container
+        LoadNewPOForm(0)
+
+        Dim supplierId As Integer = 0
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+
+                Using cmd As New MySqlCommand(
+                    "SELECT supplier_id FROM quotations WHERE quotation_id = @id", conn)
+                    cmd.Parameters.AddWithValue("@id", quotationId)
+                    supplierId = SafeInt(cmd.ExecuteScalar())
+                End Using
+
+                Using cmd As New MySqlCommand(
+                    "SELECT qi.product_id, p.name AS pname, p.sku, qi.qty_requested, " &
+                    "qi.unit_price, p.image_path, p.color_hex, q.request_id " &
+                    "FROM quotation_items qi " &
+                    "JOIN quotations q ON q.quotation_id = qi.quotation_id " &
+                    "JOIN products p ON p.product_id = qi.product_id " &
+                    "WHERE qi.quotation_id = @id ORDER BY qi.item_id", conn)
+                    cmd.Parameters.AddWithValue("@id", quotationId)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            newLines.Add(New POLine With {
+                                .ProductId = SafeInt(rdr("product_id")),
+                                .ProductName = rdr("pname").ToString(),
+                                .Sku = rdr("sku").ToString(),
+                                .Qty = SafeInt(rdr("qty_requested")),
+                                .UnitCost = If(IsDBNull(rdr("unit_price")), 0D,
+                                               Convert.ToDecimal(rdr("unit_price"))),
+                                .RequestId = SafeInt(rdr("request_id")),
+                                .ImagePath = If(IsDBNull(rdr("image_path")), "",
+                                                rdr("image_path").ToString()),
+                                .ColorHex = If(IsDBNull(rdr("color_hex")), "",
+                                               rdr("color_hex").ToString())
+                            })
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not load the quotation:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return
+        End Try
+
+        ' Point the PO at the supplier who gave the quote.
+        If supplierId > 0 AndAlso cmbSupplierRef IsNot Nothing Then
+            For i As Integer = 0 To cmbSupplierRef.Items.Count - 1
+                Dim si As SupItem = TryCast(cmbSupplierRef.Items(i), SupItem)
+                If si IsNot Nothing AndAlso si.Id = supplierId Then
+                    cmbSupplierRef.SelectedIndex = i
+                    Exit For
+                End If
+            Next
+        End If
+
+        RebuildLines()
+        RecomputeGrand()
+    End Sub
+
     ' =========================================================================
     '  VIEW 1 — PO LIST
     ' =========================================================================
@@ -1100,11 +1166,16 @@ Public Class ProcurementPOPanelBuilder
         Return host
     End Function
 
+    ' Height of the "Order Details" card itself. The quote panel stacks directly
+    ' below it, so wrapper height must be measured from this exact value — a
+    ' hard-coded 230 here used to leave the quote card clipped by 5px.
+    Private Const CARD_H As Integer = 225
+
     Private Shared Function BuildSettingsCard() As Panel
         ' Outer wrapper — grows when quote panel expands
-        Dim wrapper As New Panel With {.BackColor = Color.Transparent, .Height = 225}
+        Dim wrapper As New Panel With {.BackColor = Color.Transparent, .Height = CARD_H}
 
-        Dim card As New BufferedPanel With {.Height = 225, .BackColor = CardBg, .Dock = DockStyle.Top}
+        Dim card As New BufferedPanel With {.Height = CARD_H, .BackColor = CardBg, .Dock = DockStyle.Top}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
         Dim lblSection As New Label With {
@@ -1285,6 +1356,15 @@ Public Class ProcurementPOPanelBuilder
         quoteMargin.Controls.Add(quoteHostPanelRef)
         quoteHostPanelRef.Dock = DockStyle.Fill
 
+        ' Single source of truth for the expanded height. The margin wrapper pads
+        ' 15 above / 10 below, so the quote card needs its own height plus 25.
+        Dim SyncQuoteHeight As Action =
+            Sub()
+                Dim quoteH As Integer = If(quoteExpanded, quoteHostPanelRef.Height + 25, 0)
+                quoteMargin.Height = quoteH
+                wrapper.Height = CARD_H + quoteH
+            End Sub
+
         AddHandler btnAddQuote.Click,
             Sub()
                 quoteExpanded = Not quoteExpanded
@@ -1299,23 +1379,14 @@ Public Class ProcurementPOPanelBuilder
                     btnAddQuote.Image = iconDown
                     btnAddQuote.BackColor = MintDeep
                 End If
-                Dim quoteH As Integer = If(quoteExpanded, quoteHostPanelRef.Height + 28, 0)
-                quoteMargin.Height = quoteH
-                wrapper.Height = 225 + quoteH
+                SyncQuoteHeight()
             End Sub
 
-        AddHandler quoteHostPanelRef.Resize,
-            Sub()
-                If quoteExpanded Then
-                    Dim quoteH As Integer = quoteHostPanelRef.Height + 28
-                    quoteMargin.Height = quoteH
-                    wrapper.Height = 225 + quoteH
-                End If
-            End Sub
+        AddHandler quoteHostPanelRef.Resize, Sub() SyncQuoteHeight()
 
         wrapper.Controls.Add(quoteMargin)
         wrapper.Controls.Add(card)
-        quoteMargin.Top = 230
+        quoteMargin.Top = CARD_H
         quoteMargin.Left = 0
         quoteMargin.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         AddHandler wrapper.Resize,
@@ -1328,8 +1399,6 @@ Public Class ProcurementPOPanelBuilder
 
     ' ── Inline Quote Panel — appears below Order Details card ───────────────────
     Private Shared Function BuildQuotePanel() As Panel
-        Dim approved As List(Of ApprovedReqLite) = LoadApprovedRequestsLite()
-
         Dim quoteCard As New BufferedPanel With {.Height = 300, .BackColor = CardBg}
         AddHandler quoteCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
@@ -1358,15 +1427,25 @@ Public Class ProcurementPOPanelBuilder
             .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
             .Font = New Font("Segoe UI", 10.5F), .BackColor = CardBg
         }
-        If approved.Count = 0 Then
-            cmbReq.Items.Add("— No approved requests —")
-            cmbReq.SelectedIndex = 0
-            cmbReq.Enabled = False
-        Else
-            cmbReq.Items.Add("— Select a request —")
-            For Each r In approved : cmbReq.Items.Add(r) : Next
-            cmbReq.SelectedIndex = 0
-        End If
+
+        ' Re-queries 'Approved' requests and refills the picker. Called on build
+        ' and again after each save so the list never goes stale.
+        Dim ReloadRequestPicker As Action =
+            Sub()
+                Dim approved As List(Of ApprovedReqLite) = LoadApprovedRequestsLite()
+                cmbReq.Items.Clear()
+                If approved.Count = 0 Then
+                    cmbReq.Items.Add("— No approved requests —")
+                    cmbReq.Enabled = False
+                Else
+                    cmbReq.Items.Add("— Select a request —")
+                    For Each r In approved : cmbReq.Items.Add(r) : Next
+                    cmbReq.Enabled = True
+                End If
+                cmbReq.SelectedIndex = 0
+            End Sub
+        ReloadRequestPicker()
+
         Dim reqField As Panel = MakeField(cmbReq, 340, 44)
 
         Dim dtValid As New DateTimePicker With {
@@ -1438,8 +1517,8 @@ Public Class ProcurementPOPanelBuilder
                     Return
                 End If
                 Dim price As Decimal = 0D
-                If Not Decimal.TryParse(txtPrice.Text, price) OrElse price < 0 Then
-                    AppModal.Show("Please enter a valid unit price.", "Validation",
+                If Not Decimal.TryParse(txtPrice.Text.Trim(), price) OrElse price <= 0D Then
+                    AppModal.Show("Please enter a quoted unit price greater than zero.", "Validation",
                                   MessageBoxButtons.OK, MessageBoxIcon.Warning)
                     Return
                 End If
@@ -1459,11 +1538,11 @@ Public Class ProcurementPOPanelBuilder
                 Dim notes As String = txtNotes.Text.Trim()
                 Dim quotNo As String = "QT-" & DateTime.Now.ToString("yyMMddHHmmss")
 
+                Dim quotId As Integer = 0
                 Try
                     Using conn = Db.GetConnection()
                         conn.Open()
                         Using tx = conn.BeginTransaction()
-                            Dim quotId As Integer
                             Using cmd As New MySqlCommand(
                                 "INSERT INTO quotations (quotation_no, request_id, supplier_id, created_by, " &
                                 "valid_until, status, notes, total_amount) " &
@@ -1500,6 +1579,9 @@ Public Class ProcurementPOPanelBuilder
                         End Using
                     End Using
 
+                    ActivityLog.Record("QUOTE_CREATE", "quotations", quotId,
+                                       quotNo & " " & Peso & total.ToString("N2"))
+
                     ' Auto-add this product as a PO line at the quoted price
                     Dim already As Boolean = False
                     For Each ln In newLines
@@ -1523,8 +1605,11 @@ Public Class ProcurementPOPanelBuilder
                                   "The item has been added to the line items at the quoted price.",
                                   "Quote Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
 
-                    ' Reset quote form for another entry
-                    cmbReq.SelectedIndex = 0
+                    ' Reset quote form for another entry. The request we just quoted
+                    ' is no longer 'Approved', so reload the picker rather than
+                    ' leaving the stale entry selectable (re-saving it would have
+                    ' written a second quote against the same request).
+                    ReloadRequestPicker()
                     txtPrice.Text = "0.00"
                     txtNotes.Clear()
                     updateTotal()
@@ -2104,10 +2189,16 @@ Public Class ProcurementPOPanelBuilder
 
                             ' Mark sourced request as Converted
                             If ln.RequestId > 0 Then
+                                ' A request reaches a PO by two routes: straight from
+                                ' the queue (Pending/Approved), or via a quotation,
+                                ' which parks it at Quoted. Matching only Pending left
+                                ' every quoted request stuck open, free to be pulled
+                                ' into a second PO.
                                 Using cmd As New MySqlCommand(
                                     "UPDATE purchase_requests SET status = 'Converted', " &
                                     "reviewed_by = @uid, reviewed_at = NOW() " &
-                                    "WHERE request_id = @rid AND status = 'Pending'", conn, txn)
+                                    "WHERE request_id = @rid " &
+                                    "AND status IN ('Pending','Approved','Quoted')", conn, txn)
                                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                                     cmd.Parameters.AddWithValue("@rid", ln.RequestId)
                                     cmd.ExecuteNonQuery()

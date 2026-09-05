@@ -115,8 +115,8 @@ Public Class AccountantPayablesPanelBuilder
                 End Using
 
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
-                    "WHERE status NOT IN ('Received','Cancelled')" & statusWhere, conn)
+                    "SELECT COALESCE(SUM(po.total_cost),0) FROM purchase_orders po " &
+                    "WHERE po.status NOT IN ('Received','Cancelled')" & statusWhere, conn)
                     _totalPayable = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
             End Using

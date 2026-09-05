@@ -98,6 +98,36 @@ Public Module StoreSettings
         Return Math.Round(amount * rate / 100D, 2)
     End Function
 
+    ' Grand total payable for a net (post-discount) amount.
+    '
+    ' VAT-inclusive: the shelf price already contains the tax, so the net amount
+    ' IS the total. VAT-exclusive: the tax sits on top and must be added, or the
+    ' customer is charged the ex-VAT figure and the store absorbs the tax.
+    Public Function ComputeTotalDue(netAmount As Decimal) As Decimal
+        If VatInclusive Then Return Math.Round(netAmount, 2)
+        Return Math.Round(netAmount + ComputeVat(netAmount), 2)
+    End Function
+
+    ' VAT contained inside a known VAT-INCLUSIVE amount (e.g. a supplier invoice
+    ' total). Unlike ComputeVat this ignores the store's inclusive/exclusive
+    ' setting, because the caller already knows the amount includes tax.
+    Public Function ExtractInclusiveVat(grossAmount As Decimal) As Decimal
+        Dim rate As Decimal = VatRate
+        If rate <= 0D Then Return 0D
+        Return Math.Round(grossAmount * rate / (100D + rate), 2)
+    End Function
+
+    ' Display label for the VAT line, e.g. "VAT (12%)" or "VAT (12% excl)".
+    ' The rate is configurable, so it must never be hardcoded in the UI.
+    Public ReadOnly Property VatLabel As String
+        Get
+            Dim r As Decimal = VatRate
+            ' Trim a trailing ".00" so 12.00 reads as "12".
+            Dim shown As String = If(r = Math.Truncate(r), CInt(r).ToString(), r.ToString("0.##"))
+            Return "VAT (" & shown & "%" & If(VatInclusive, "", " excl") & ")"
+        End Get
+    End Property
+
     ' ── Loading ──────────────────────────────────────────────────────────────
     Public Sub Reload()
         _loaded = False

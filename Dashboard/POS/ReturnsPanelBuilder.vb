@@ -843,13 +843,59 @@ Public Class ReturnsPanelBuilder
     End Function
 
     ' =========================================================================
+    '  REFUND MATH  (single source of truth)
+    ' =========================================================================
+    '  The restocking fee is quoted to the customer in whole pesos, but each
+    '  return_items row stores centavos. Computing the two independently made
+    '  returns.total_refund disagree with SUM(return_items.refund_amount) - the
+    '  refund handed over did not match its own itemised record.
+    '
+    '  So: the fee is rounded ONCE here, and the per-line refunds are derived
+    '  from that same figure, with the rounding remainder folded into the last
+    '  line. SUM(lines) = total_refund exactly, by construction.
+
+    Private Shared Function RestockFee(subtotal As Decimal) As Decimal
+        Return Decimal.Round(subtotal * (_restockPct / 100D), 0)
+    End Function
+
+    ' Per-line refund amounts, in the order of the list passed in, guaranteed to
+    ' sum to (subtotal - RestockFee(subtotal)).
+    Private Shared Function LineRefunds(sel As List(Of ReturnItem)) As List(Of Decimal)
+        Dim result As New List(Of Decimal)
+        If sel Is Nothing OrElse sel.Count = 0 Then Return result
+
+        Dim subtotal As Decimal = sel.Sum(Function(i) i.SelectedQty * i.UnitPrice)
+        Dim target As Decimal = subtotal - RestockFee(subtotal)
+
+        If subtotal <= 0D Then
+            For Each it In sel : result.Add(0D) : Next
+            Return result
+        End If
+
+        Dim running As Decimal = 0D
+        For idx = 0 To sel.Count - 1
+            Dim gross As Decimal = sel(idx).SelectedQty * sel(idx).UnitPrice
+            Dim amt As Decimal
+            If idx = sel.Count - 1 Then
+                ' Last line absorbs the remainder so the parts match the total.
+                amt = target - running
+            Else
+                amt = Decimal.Round(target * gross / subtotal, 2)
+                running += amt
+            End If
+            result.Add(amt)
+        Next
+        Return result
+    End Function
+
+    ' =========================================================================
     '  RECALC
     ' =========================================================================
     Private Shared Sub Recalc()
         If _items Is Nothing Then Return
         Dim qty As Integer = _items.Sum(Function(i) i.SelectedQty)
         Dim subtotal As Decimal = _items.Sum(Function(i) i.SelectedQty * i.UnitPrice)
-        Dim fee As Decimal = Decimal.Round(subtotal * (_restockPct / 100D), 0)
+        Dim fee As Decimal = RestockFee(subtotal)
         Dim total As Decimal = subtotal - fee
 
         If _lblItems IsNot Nothing Then _lblItems.Text = qty.ToString()
@@ -1130,7 +1176,7 @@ Public Class ReturnsPanelBuilder
         End If
 
         Dim subtotal As Decimal = selectedItems.Sum(Function(i) i.SelectedQty * i.UnitPrice)
-        Dim fee As Decimal = Decimal.Round(subtotal * (_restockPct / 100D), 0)
+        Dim fee As Decimal = RestockFee(subtotal)
         Dim totalRefund As Decimal = subtotal - fee
         Dim reason As String = If(_cmbReason IsNot Nothing AndAlso _cmbReason.SelectedIndex >= 0,
                                    _cmbReason.SelectedItem.ToString(), "Other")
@@ -1151,12 +1197,49 @@ Public Class ReturnsPanelBuilder
         End If
 
         Dim returnNo As String = "RTN-" & DateTime.Now.ToString("yyMMddHHmmss")
+        Dim committed As Boolean = False
 
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Dim tx = conn.BeginTransaction()
                 Try
+                    ' 0. Re-check what is still returnable, with the sale row locked.
+                    '    The list on screen was read before the confirmation dialog,
+                    '    so a refund raised on another till in between would let the
+                    '    same units be refunded twice and restocked twice.
+                    Using cmd As New MySqlCommand(
+                        "SELECT status FROM sales WHERE sale_id = @sid FOR UPDATE", conn, tx)
+                        cmd.Parameters.AddWithValue("@sid", _saleId)
+                        Dim st = cmd.ExecuteScalar()
+                        If st Is Nothing OrElse IsDBNull(st) Then
+                            Throw New Exception("That sale no longer exists.")
+                        End If
+                        Dim liveStatus As String = st.ToString()
+                        If liveStatus <> "Completed" AndAlso liveStatus <> "Partially Refunded" Then
+                            Throw New Exception("Sale #" & _saleNo & " is now marked '" & liveStatus &
+                                                "' and can no longer be refunded.")
+                        End If
+                    End Using
+
+                    For Each chk In selectedItems
+                        Dim stillReturnable As Integer
+                        Using cmd As New MySqlCommand(
+                            "SELECT si.qty - COALESCE(SUM(ri.qty_returned), 0) " &
+                            "FROM sale_items si " &
+                            "LEFT JOIN return_items ri ON ri.sale_item_id = si.sale_item_id " &
+                            "WHERE si.sale_item_id = @siid GROUP BY si.sale_item_id, si.qty", conn, tx)
+                            cmd.Parameters.AddWithValue("@siid", chk.SaleItemId)
+                            Dim o = cmd.ExecuteScalar()
+                            stillReturnable = If(o Is Nothing OrElse IsDBNull(o), 0, Convert.ToInt32(o))
+                        End Using
+                        If chk.SelectedQty > stillReturnable Then
+                            Throw New Exception(
+                                chk.Name & " has already been refunded elsewhere." & vbCrLf &
+                                "Requested " & chk.SelectedQty & ", only " & stillReturnable &
+                                " still returnable. Re-scan the receipt and try again.")
+                        End If
+                    Next
                     ' 1. INSERT into returns
                     Dim returnId As Integer
                     Using cmd As New MySqlCommand(
@@ -1179,8 +1262,10 @@ Public Class ReturnsPanelBuilder
                     End Using
 
                     ' 2. For each selected item: INSERT return_items + restore stock
-                    For Each it In selectedItems
-                        Dim refundAmt As Decimal = Decimal.Round(it.SelectedQty * it.UnitPrice * (1 - _restockPct / 100D), 2)
+                    Dim lineAmounts = LineRefunds(selectedItems)
+                    For itemIdx = 0 To selectedItems.Count - 1
+                        Dim it = selectedItems(itemIdx)
+                        Dim refundAmt As Decimal = lineAmounts(itemIdx)
 
                         Using cmd As New MySqlCommand(
                             "INSERT INTO return_items (return_id, sale_item_id, qty_returned, refund_amount) " &
@@ -1237,6 +1322,7 @@ Public Class ReturnsPanelBuilder
                     End Using
 
                     tx.Commit()
+                    committed = True
 
                     ' Snapshot for PRINT SLIP before the screen resets.
                     _lastRtnNo = returnNo
@@ -1248,9 +1334,12 @@ Public Class ReturnsPanelBuilder
                     _lastRtnFee = fee
                     _lastRtnTotal = totalRefund
                     _lastRtnAt = DateTime.Now
-                    _lastRtnLines = selectedItems.Select(
-                        Function(it) (it.Name, it.SelectedQty,
-                                      Decimal.Round(it.SelectedQty * it.UnitPrice * (1 - _restockPct / 100D), 2))).ToList()
+                    _lastRtnLines.Clear()
+                    For snapIdx = 0 To selectedItems.Count - 1
+                        _lastRtnLines.Add((selectedItems(snapIdx).Name,
+                                           selectedItems(snapIdx).SelectedQty,
+                                           lineAmounts(snapIdx)))
+                    Next
 
                     AppModal.Show(
                         $"Refund #{returnNo} processed successfully!{vbCrLf}Total refunded: ₱{totalRefund:N2}",
@@ -1260,14 +1349,28 @@ Public Class ReturnsPanelBuilder
                     LoadReturns(_mainContainer)
 
                 Catch exInner As Exception
-                    tx.Rollback()
+                    ' Only roll back work that is still open. Once the commit has
+                    ' landed the refund is final, and rolling back here would throw
+                    ' over it and report a successful refund as a failure.
+                    If Not committed Then tx.Rollback()
                     Throw
                 End Try
             End Using
 
         Catch ex As Exception
-            AppModal.Show("Failed to process refund: " & ex.Message, "Refund Error",
-                MessageBoxButtons.OK, MessageBoxIcon.Error)
+            If committed Then
+                ' The money moved and stock was restored; only the follow-up work
+                ' (receipt snapshot, dialog, screen reset) failed. Saying "failed"
+                ' here would invite a second refund for the same items.
+                AppModal.Show(
+                    "Refund " & returnNo & " was processed, but the screen could not be refreshed:" &
+                    Environment.NewLine & ex.Message & Environment.NewLine & Environment.NewLine &
+                    "Do NOT process this refund again - reopen Returns to continue.",
+                    "Refund Processed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Else
+                AppModal.Show("Failed to process refund: " & ex.Message, "Refund Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End If
         End Try
     End Sub
 
@@ -1303,7 +1406,7 @@ Public Class ReturnsPanelBuilder
             ' Draft preview of the current selection (not yet processed).
             Dim sel = _items.Where(Function(i) i.SelectedQty > 0).ToList()
             Dim subtotal As Decimal = sel.Sum(Function(i) i.SelectedQty * i.UnitPrice)
-            Dim fee As Decimal = Decimal.Round(subtotal * (_restockPct / 100D), 0)
+            Dim fee As Decimal = RestockFee(subtotal)
             lines.Add(New ReceiptPrinter.RLine("** DRAFT — NOT PROCESSED **", , ReceiptPrinter.LineStyle.Muted))
             lines.Add(New ReceiptPrinter.RLine("Orig. Receipt:", _saleNo))
             lines.Add(New ReceiptPrinter.RLine("Method:", _selectedRefundMethod))
