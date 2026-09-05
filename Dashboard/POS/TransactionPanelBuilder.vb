@@ -1608,7 +1608,7 @@ Public Class TransactionPanelBuilder
             Return
         End If
 
-        Dim saleNo As String = "TXN-" & DateTime.Now.ToString("yyyyMMddHHmmss")
+        Dim saleNo As String = DocNumber.Generate("TXN-")
         Dim subtotal As Decimal = 0
         For Each it In items : subtotal += it.lineTotal : Next
         Dim discount As Decimal = _discountAmount
@@ -1834,7 +1834,7 @@ Public Class TransactionPanelBuilder
         ' actually charge when it is retrieved.
         Dim netAmount As Decimal = subtotal - discount
         Dim total As Decimal = StoreSettings.ComputeTotalDue(netAmount)
-        Dim saleNo As String = "HOLD-" & DateTime.Now.ToString("yyyyMMddHHmmss")
+        Dim saleNo As String = DocNumber.Generate("HOLD-")
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()

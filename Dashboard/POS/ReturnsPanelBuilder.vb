@@ -1220,7 +1220,7 @@ Public Class ReturnsPanelBuilder
             Return
         End If
 
-        Dim returnNo As String = "RTN-" & DateTime.Now.ToString("yyMMddHHmmss")
+        Dim returnNo As String = DocNumber.Generate("RTN-")
         Dim committed As Boolean = False
 
         Try

@@ -271,6 +271,7 @@
     <Compile Include="Modules\POS\ConfirmSaleModal.vb" />
     <Compile Include="Modules\ActivityLog.vb" />
     <Compile Include="Modules\Db.vb" />
+    <Compile Include="Modules\DocNumber.vb" />
     <Compile Include="Modules\ImageCache.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />
     <Compile Include="Modules\POS\ReceiptPrinter.vb" />

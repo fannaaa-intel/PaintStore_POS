@@ -63,6 +63,14 @@ PaintStore_POS
 <member name="M:PaintStore_POS.CashPanelBuilder.PromptAmount(System.String,System.String)">
  <summary>Modal amount + note prompt. Returns (ok, amount, note).</summary>
 </member>
+<member name="M:PaintStore_POS.DocNumber.Generate(System.String)">
+ <summary>
+ Build a document number: prefix + timestamp + the current user id,
+ e.g. "TXN-260905092300-7". If the column width forces a trim, leading
+ digits come off the timestamp so the user id -- the part that makes the
+ number unique between tills -- is always kept.
+ </summary>
+</member>
 <member name="M:PaintStore_POS.ImageCache.ClearAndDispose(System.Collections.Generic.Dictionary{System.String,System.Drawing.Image},System.Windows.Forms.Control)">
  <summary>
  Empty an image cache and dispose what it held, once the UI thread has

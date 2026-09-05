@@ -1536,7 +1536,7 @@ Public Class ProcurementPOPanelBuilder
 
                 Dim total As Decimal = Math.Round(price * req.QtyRequested, 2)
                 Dim notes As String = txtNotes.Text.Trim()
-                Dim quotNo As String = "QT-" & DateTime.Now.ToString("yyMMddHHmmss")
+                Dim quotNo As String = DocNumber.Generate("QT-")
 
                 Dim quotId As Integer = 0
                 Try
@@ -2146,7 +2146,7 @@ Public Class ProcurementPOPanelBuilder
             grand += ln.LineTotal
         Next
 
-        Dim poNo As String = "PO-" & DateTime.Now.ToString("yyMMddHHmmss")
+        Dim poNo As String = DocNumber.Generate("PO-")
         Dim orderDate As DateTime = dtOrderRef.Value.Date
         Dim expObj As Object = If(dtExpectedRef.Checked,
                                   CType(dtExpectedRef.Value.Date, Object),
