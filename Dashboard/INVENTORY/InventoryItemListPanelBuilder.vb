@@ -1527,7 +1527,10 @@ Public Class InventoryItemListPanelBuilder
             Dim fileName = "PROD_" & Guid.NewGuid().ToString("N").Substring(0, 12) & ext
             Dim dest = Path.Combine(ImageRoot, fileName)
             File.Copy(sourcePath, dest, True)
-            Return dest
+            ' Store it relative to the app folder. Returning the absolute path
+            ' baked the developer's checkout directory into the row, so the
+            ' image resolved to nothing on any other machine or install path.
+            Return ImageCache.ToStoredPath(dest)
         Catch ex As Exception
             AppModal.Show("Could not import the image:" & Environment.NewLine & ex.Message,
                           "Image Error", MessageBoxButtons.OK, MessageBoxIcon.Warning)
@@ -1537,6 +1540,9 @@ Public Class InventoryItemListPanelBuilder
 
     Private Shared Function GetThumb(path As String, maxSize As Integer) As Image
         If String.IsNullOrEmpty(path) Then Return Nothing
+        ' image_path may be relative (current) or an absolute path baked to
+        ' another machine (older rows); resolve both to something openable.
+        path = ImageCache.ToFullPath(path)
         Dim key = path & "|" & maxSize
         If thumbCache.ContainsKey(key) Then Return thumbCache(key)
         Try

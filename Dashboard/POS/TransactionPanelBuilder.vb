@@ -1292,6 +1292,9 @@ Public Class TransactionPanelBuilder
     ' Decode an image without locking the file, scaled and cached.
     Private Shared Function GetThumb(path As String, maxSize As Integer) As Image
         If String.IsNullOrEmpty(path) Then Return Nothing
+        ' image_path may be relative (current) or an absolute path baked to
+        ' another machine (older rows); resolve both to something openable.
+        path = ImageCache.ToFullPath(path)
         Dim key = path & "|" & maxSize
         If _thumbCache.ContainsKey(key) Then Return _thumbCache(key)
         Try

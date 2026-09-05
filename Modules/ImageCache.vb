@@ -1,4 +1,4 @@
-Imports System.Collections.Generic
+﻿Imports System.Collections.Generic
 Imports System.Drawing
 Imports System.Windows.Forms
 
@@ -50,6 +50,66 @@ Public Module ImageCache
             DisposeAll(stale)
         End Try
     End Sub
+
+    ''' <summary>Folder product images are copied into.</summary>
+    Public ReadOnly Property ImageRoot As String
+        Get
+            Return IO.Path.Combine(Application.StartupPath, "ProductImages")
+        End Get
+    End Property
+
+    ''' <summary>
+    ''' Store a product image path in the DB relative to the app folder, e.g.
+    ''' "ProductImages\PROD_x.png", so the row survives the app being installed
+    ''' somewhere else.
+    ''' </summary>
+    Public Function ToStoredPath(fullPath As String) As String
+        If String.IsNullOrWhiteSpace(fullPath) Then Return ""
+        Try
+            Dim root As String = Application.StartupPath
+            If fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) Then
+                Return fullPath.Substring(root.Length).TrimStart(
+                    IO.Path.DirectorySeparatorChar, IO.Path.AltDirectorySeparatorChar)
+            End If
+        Catch
+        End Try
+        Return fullPath
+    End Function
+
+    ''' <summary>
+    ''' Turn a stored image_path back into a path that can actually be opened.
+    '''
+    ''' Rows written before this existed hold an absolute path baked to one
+    ''' machine and one checkout folder. Anywhere else that resolves to nothing
+    ''' and the picture silently disappeared. Such rows are recovered by looking
+    ''' the file name up inside this installation's ProductImages folder.
+    ''' </summary>
+    Public Function ToFullPath(storedPath As String) As String
+        If String.IsNullOrWhiteSpace(storedPath) Then Return ""
+
+        Try
+            ' Relative: anchor it to this installation.
+            If Not IO.Path.IsPathRooted(storedPath) Then
+                Return IO.Path.Combine(Application.StartupPath, storedPath)
+            End If
+
+            ' Absolute and present -- this machine wrote it.
+            If IO.File.Exists(storedPath) Then Return storedPath
+
+            ' Absolute but missing: an old row from another machine or install
+            ' path. The file name is still valid inside our own image folder.
+            Dim name As String = IO.Path.GetFileName(storedPath)
+            If name <> "" Then
+                Dim local As String = IO.Path.Combine(ImageRoot, name)
+                If IO.File.Exists(local) Then Return local
+            End If
+        Catch
+            ' A malformed path must not take the screen down; callers treat an
+            ' unreadable path as "no image".
+        End Try
+
+        Return storedPath
+    End Function
 
     Private Sub DisposeAll(images As List(Of Image))
         For Each img In images

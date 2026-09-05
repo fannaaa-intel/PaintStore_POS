@@ -83,6 +83,26 @@ PaintStore_POS
  is correct because there is no surviving control left to paint them.
  </param>
 </member>
+<member name="P:PaintStore_POS.ImageCache.ImageRoot">
+ <summary>Folder product images are copied into.</summary>
+</member>
+<member name="M:PaintStore_POS.ImageCache.ToStoredPath(System.String)">
+ <summary>
+ Store a product image path in the DB relative to the app folder, e.g.
+ "ProductImages\PROD_x.png", so the row survives the app being installed
+ somewhere else.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.ImageCache.ToFullPath(System.String)">
+ <summary>
+ Turn a stored image_path back into a path that can actually be opened.
+
+ Rows written before this existed hold an absolute path baked to one
+ machine and one checkout folder. Anywhere else that resolves to nothing
+ and the picture silently disappeared. Such rows are recovered by looking
+ the file name up inside this installation's ProductImages folder.
+ </summary>
+</member>
 <member name="M:PaintStore_POS.ReceiptPrinter.DrawBarcode(System.Drawing.Graphics,System.String,System.Int32,System.Int32,System.Int32)">
  <summary>
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.
