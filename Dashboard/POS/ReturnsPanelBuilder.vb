@@ -79,6 +79,30 @@ Public Class ReturnsPanelBuilder
     Private Shared _lastRtnLines As New List(Of (name As String, qty As Integer, amt As Decimal))
 
     ' =========================================================================
+    '  SESSION RESET
+    ' =========================================================================
+    ' The refund snapshot behind PRINT SLIP is Shared and outlives the form, so
+    ' without this the next cashier could reprint the previous cashier's refund
+    ' slip -- stamped with their own name as the processor.
+    Public Shared Sub ResetForNewSession()
+        _saleId = 0
+        _saleNo = ""
+        _selectedRefundMethod = "Cash"
+        _items = New List(Of ReturnItem)
+
+        _lastRtnNo = ""
+        _lastRtnSaleNo = ""
+        _lastRtnMethod = ""
+        _lastRtnReason = ""
+        _lastRtnFeePct = 0
+        _lastRtnSubtotal = 0
+        _lastRtnFee = 0
+        _lastRtnTotal = 0
+        _lastRtnAt = DateTime.MinValue
+        _lastRtnLines.Clear()
+    End Sub
+
+    ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadReturns(mainContainer As Panel)

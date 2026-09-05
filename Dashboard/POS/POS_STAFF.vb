@@ -498,11 +498,13 @@ Public Class POS_STAFF
         endBox.Controls.Add(btnOk)
         btnOk.Location = New Point((endBox.Width - btnOk.Width) \ 2, 160)
         AddHandler btnOk.Click,
-    Sub(sender As Object, e As EventArgs)
-        Dim lf As New LogIn()
-        lf.Show()
-        Me.Close()
-    End Sub
+            Sub(sender As Object, e As EventArgs)
+                ' Same teardown as the sidebar Logout: this used to open LogIn
+                ' directly, leaving the shift Open and the previous cashier's
+                ' session and cart live for whoever signed in next.
+                ActivityLog.Record("LOGOUT")
+                EndSessionAndShowLogin()
+            End Sub
 
     End Sub
 
@@ -767,8 +769,45 @@ Public Class POS_STAFF
         End If
 
         ActivityLog.Record("LOGOUT")
+        EndSessionAndShowLogin()
+    End Sub
 
-        ' Close the active shift on logout
+    ' A hard close -- Alt+F4, the taskbar, Windows shutting down -- bypasses both
+    ' logout paths. Without this the shift stays Open with no ended_at, so the
+    ' next sign-in reopens it and its cash is never reconciled.
+    Private Sub POS_STAFF_FormClosing(sender As Object, e As FormClosingEventArgs) _
+            Handles MyBase.FormClosing
+        ' Logout has already closed the shift and cleared the session by the time
+        ' it calls Me.Close(); ShiftId = 0 is what tells us this is a hard exit.
+        If Session.ShiftId <= 0 Then Return
+
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "UPDATE shifts SET ended_at=NOW(), status='Closed' " &
+                    "WHERE shift_id=@sid AND status='Open'", conn)
+                    cmd.Parameters.AddWithValue("@sid", Session.ShiftId)
+                    cmd.ExecuteNonQuery()
+                End Using
+            End Using
+            ActivityLog.Record("SHIFT_CLOSED_ON_EXIT")
+        Catch ex As Exception
+            ' Nothing useful can be shown while the form is tearing down.
+            System.Diagnostics.Debug.WriteLine("exit shift close error: " & ex.Message)
+        End Try
+
+        Session.ShiftId = 0
+    End Sub
+
+    ' Close the shift, drop the till's Shared state and the signed-in identity,
+    ' then hand back to the login screen.
+    '
+    ' Both ways out of the POS come through here -- the sidebar Logout button and
+    ' the "Shift Ended" overlay. The overlay used to just open LogIn and close the
+    ' form, leaving the shift Open, nothing in the activity log, and the previous
+    ' cashier's session and cart live for whoever signed in next.
+    Private Sub EndSessionAndShowLogin()
         If Session.ShiftId > 0 Then
             Try
                 Using conn = Db.GetConnection()
@@ -788,6 +827,12 @@ Public Class POS_STAFF
             End Try
             Session.ShiftId = 0
         End If
+
+        ' Panel builders keep their working data in Shared fields, which outlive
+        ' this form. Clear the till state too, or the next cashier inherits the
+        ' previous one's cart and can reprint their receipt and refund slip.
+        TransactionPanelBuilder.ResetForNewSession()
+        ReturnsPanelBuilder.ResetForNewSession()
 
         ' Drop the signed-in identity before returning to the login screen, so
         ' nothing done afterwards is attributed to the user who just left.

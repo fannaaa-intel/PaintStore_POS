@@ -127,6 +127,35 @@ Public Class TransactionPanelBuilder
     Private Shared _lastSaleLines As New List(Of (name As String, qty As Integer, price As Decimal, line As Decimal))
 
     ' =========================================================================
+    '  SESSION RESET
+    ' =========================================================================
+    ' The cart, the discount and the last-sale receipt snapshot are Shared, so
+    ' they outlive the form and survive a logout. Without this the next cashier
+    ' inherited the previous one's cart, and REPRINT re-issued the previous
+    ' cashier's receipt with the NEW cashier's name printed on it.
+    Public Shared Sub ResetForNewSession()
+        _cart = New Dictionary(Of Integer, CartLine)
+        _discountAmount = 0
+        _discountType = "None"
+        _searchText = ""
+        _activeCategory = "All"
+
+        _lastSaleNo = ""
+        _lastSaleAt = DateTime.MinValue
+        _lastSalePay = ""
+        _lastSaleSubtotal = 0
+        _lastSaleDiscount = 0
+        _lastSaleVat = 0
+        _lastSaleTotal = 0
+        _lastSaleTendered = 0
+        _lastSaleChange = 0
+        _lastSaleRef = ""
+        _lastSaleLines.Clear()
+
+        ImageCache.ClearAndDispose(_thumbCache, Nothing)
+    End Sub
+
+    ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadTransaction(mainContainer As Panel)
