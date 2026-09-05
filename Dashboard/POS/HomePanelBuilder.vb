@@ -126,7 +126,7 @@ Public Class HomePanelBuilder
                 End Using
                 ' Today's sales total
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn)
+                    "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     todaySalesTotal = CDec(cmd.ExecuteScalar())
                 End Using
@@ -134,7 +134,7 @@ Public Class HomePanelBuilder
                 ' matches the Today's Sales figure and never shows held/voided rows)
                 Using cmd As New MySqlCommand(
                     "SELECT sale_no, sale_datetime, total FROM sales " &
-                    "WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid " &
+                    "WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid " &
                     "ORDER BY sale_datetime DESC LIMIT 2", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
@@ -717,7 +717,7 @@ Public Class HomePanelBuilder
             Using conn2 = Db.GetConnection()
                 conn2.Open()
                 Using cmd As New MySqlCommand(
-            "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
+            "SELECT COUNT(*) FROM sales WHERE status='OnHold' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     heldCount = CInt(cmd.ExecuteScalar())
                 End Using
@@ -754,12 +754,12 @@ Public Class HomePanelBuilder
                         newLowStock = CInt(cmd.ExecuteScalar())
                     End Using
                     Using cmd As New MySqlCommand(
-                        "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn2)
+                        "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn2)
                         cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                         newSalesTotal = CDec(cmd.ExecuteScalar())
                     End Using
                     Using cmd As New MySqlCommand(
-                        "SELECT COUNT(*) FROM sales WHERE status='Held' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
+                        "SELECT COUNT(*) FROM sales WHERE status='OnHold' AND DATE(sale_datetime)=CURDATE() AND user_id=@uid", conn2)
                         cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                         newHeld = CInt(cmd.ExecuteScalar())
                     End Using
@@ -1182,7 +1182,7 @@ Public Class HomePanelBuilder
                 ' Sales today and transaction count
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) AS rev, COUNT(*) AS txns " &
-                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn)
+                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
@@ -1198,7 +1198,7 @@ Public Class HomePanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(si.qty),0) FROM sale_items si " &
                     "JOIN sales s ON si.sale_id=s.sale_id " &
-                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed' AND s.user_id=@uid", conn)
+                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status IN ('Completed','Partially Refunded') AND s.user_id=@uid", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     SafeSetText(_lblItemsValue, CInt(cmd.ExecuteScalar()).ToString())
                 End Using

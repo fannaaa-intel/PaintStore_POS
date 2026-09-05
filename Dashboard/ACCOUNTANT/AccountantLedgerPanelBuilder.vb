@@ -169,7 +169,7 @@ Public Class AccountantLedgerPanelBuilder
         Try
             Using cmd As New MySqlCommand(
                 "SELECT s.sale_id, s.sale_no, s.sale_datetime, s.total, s.vat_amount " &
-                "FROM sales s WHERE s.status = 'Completed' " &
+                "FROM sales s WHERE s.status IN ('Completed','Partially Refunded') " &
                 BuildDateWhereCol("s.sale_datetime").Replace("WHERE ", "AND "), conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
@@ -355,10 +355,14 @@ Public Class AccountantLedgerPanelBuilder
                 conn.Open()
 
                 ' ── SALES: Dr Cash / Cr Sales Revenue (net) / Cr Output VAT ──
+                ' 'Partially Refunded' counts as a sale: the original revenue
+                ' stands and the refund is posted separately under Sales Returns
+                ' below. Filtering to 'Completed' alone dropped the revenue while
+                ' still deducting the refund, so the books did not balance.
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) AS t, " &
                     "COALESCE(SUM(CASE WHEN vat_amount <= 0 THEN ROUND(total*12/112,2) ELSE vat_amount END),0) AS v " &
-                    "FROM sales WHERE status='Completed' AND sale_datetime BETWEEN @from AND @to", conn)
+                    "FROM sales WHERE status IN ('Completed','Partially Refunded') AND sale_datetime BETWEEN @from AND @to", conn)
                     cmd.Parameters.AddWithValue("@from", fromVal)
                     cmd.Parameters.AddWithValue("@to", toVal)
                     Using rdr = cmd.ExecuteReader()
@@ -380,7 +384,7 @@ Public Class AccountantLedgerPanelBuilder
                     "JOIN sales s ON s.sale_id = si.sale_id " &
                     "JOIN (SELECT product_id, SUM(unit_cost * qty) / NULLIF(SUM(qty),0) AS avg_cost " &
                     "      FROM po_items GROUP BY product_id) ac ON ac.product_id = si.product_id " &
-                    "WHERE si.product_id IS NOT NULL AND s.status='Completed' " &
+                    "WHERE si.product_id IS NOT NULL AND s.status IN ('Completed','Partially Refunded') " &
                     "AND s.sale_datetime BETWEEN @from AND @to", conn)
                     cmd.Parameters.AddWithValue("@from", fromVal)
                     cmd.Parameters.AddWithValue("@to", toVal)

@@ -71,9 +71,13 @@ Public Class AccountantReportsPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
 
+                ' Revenue must exclude sales that never took money: this query
+                ' had no status filter at all, so Voided sales and carts merely
+                ' parked OnHold were being reported as income.
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
-                    "WHERE sale_datetime BETWEEN @from AND @to", conn)
+                    "WHERE status IN ('Completed','Partially Refunded') " &
+                    "AND sale_datetime BETWEEN @from AND @to", conn)
                     cmd.Parameters.AddWithValue("@from", fromVal)
                     cmd.Parameters.AddWithValue("@to", toVal)
                     _revenue = Convert.ToDecimal(cmd.ExecuteScalar())

@@ -88,7 +88,7 @@ Public Class AccountantDashPanelBuilder
 
                 ' Revenue
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total),0) FROM sales s WHERE status='Completed'" &
+                    "SELECT COALESCE(SUM(total),0) FROM sales s WHERE status IN ('Completed','Partially Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _revenue = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
@@ -111,14 +111,14 @@ Public Class AccountantDashPanelBuilder
 
                 ' VAT Collected
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(vat_amount),0) FROM sales s WHERE status='Completed'" &
+                    "SELECT COALESCE(SUM(vat_amount),0) FROM sales s WHERE status IN ('Completed','Partially Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _vatCollected = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
                 ' Transaction count
                 Using cmd As New MySqlCommand(
-                    "SELECT COUNT(*) FROM sales s WHERE status='Completed'" &
+                    "SELECT COUNT(*) FROM sales s WHERE status IN ('Completed','Partially Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _txnCount = Convert.ToInt32(cmd.ExecuteScalar())
                 End Using
@@ -127,7 +127,7 @@ Public Class AccountantDashPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT pm.name FROM sales s " &
                     "JOIN payment_methods pm ON s.method_id = pm.method_id " &
-               "WHERE s.status='Completed'" &
+               "WHERE s.status IN ('Completed','Partially Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, "") &
                     " GROUP BY pm.name ORDER BY COUNT(*) DESC LIMIT 1", conn)
                     Dim res = cmd.ExecuteScalar()
@@ -140,7 +140,7 @@ Public Class AccountantDashPanelBuilder
                     "FROM sales s " &
                     "JOIN users u ON s.user_id = u.user_id " &
                     "LEFT JOIN payment_methods pm ON s.method_id = pm.method_id " &
-                    "WHERE s.status='Completed'" &
+                    "WHERE s.status IN ('Completed','Partially Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, "") &
                     " ORDER BY s.sale_datetime DESC LIMIT 6", conn)
                     Using rdr = cmd.ExecuteReader()

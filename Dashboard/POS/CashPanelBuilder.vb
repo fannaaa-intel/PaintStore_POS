@@ -156,11 +156,16 @@ Public Class CashPanelBuilder
                     If result IsNot Nothing Then cashMethodId = CInt(result)
                 End Using
 
-                ' Total cash sales for this shift
+                ' Total cash sales for this shift.
+                ' 'Partially Refunded' is included: that cash really did enter the
+                ' drawer, and the refund is subtracted separately below. Counting
+                ' only 'Completed' removed the takings but kept the refund, showing
+                ' the cashier a shortfall that was not real.
                 If cashMethodId > 0 Then
                     Using cmd As New MySqlCommand(
                         "SELECT COALESCE(SUM(total),0) FROM sales " &
-                        "WHERE shift_id=@sid AND method_id=@mid AND status='Completed'", conn)
+                        "WHERE shift_id=@sid AND method_id=@mid " &
+                        "AND status IN ('Completed','Partially Refunded')", conn)
                         cmd.Parameters.AddWithValue("@sid", _shiftId)
                         cmd.Parameters.AddWithValue("@mid", cashMethodId)
                         _cashSales = CDec(cmd.ExecuteScalar())

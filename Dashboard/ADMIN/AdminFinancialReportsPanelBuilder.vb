@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -128,7 +128,7 @@ Public Class AdminFinancialReportsPanelBuilder
                     "COALESCE(SUM(vat_amount),0) AS vat, " &
                     "COALESCE(SUM(discount_amount),0) AS disc " &
                     "FROM sales " &
-                    "WHERE status = 'Completed' " &
+                    "WHERE status IN ('Completed','Partially Refunded') " &
                     "AND sale_datetime >= @fromD AND sale_datetime < @toD", conn)
                     AddRangeParams(cmd)
                     Using rdr = cmd.ExecuteReader()
@@ -155,7 +155,7 @@ Public Class AdminFinancialReportsPanelBuilder
                     "COUNT(*) AS n, COALESCE(SUM(s.total),0) AS t " &
                     "FROM sales s " &
                     "LEFT JOIN payment_methods pm ON pm.method_id = s.method_id " &
-                    "WHERE s.status = 'Completed' " &
+                    "WHERE s.status IN ('Completed','Partially Refunded') " &
                     "AND s.sale_datetime >= @fromD AND s.sale_datetime < @toD " &
                     "GROUP BY COALESCE(pm.name,'Unspecified') " &
                     "ORDER BY t DESC", conn)
@@ -176,7 +176,7 @@ Public Class AdminFinancialReportsPanelBuilder
                     "SELECT DATE(sale_datetime) AS d, COUNT(*) AS n, " &
                     "COALESCE(SUM(total),0) AS t " &
                     "FROM sales " &
-                    "WHERE status = 'Completed' " &
+                    "WHERE status IN ('Completed','Partially Refunded') " &
                     "AND sale_datetime >= @fromD AND sale_datetime < @toD " &
                     "GROUP BY DATE(sale_datetime) ORDER BY d DESC", conn)
                     AddRangeParams(cmd)

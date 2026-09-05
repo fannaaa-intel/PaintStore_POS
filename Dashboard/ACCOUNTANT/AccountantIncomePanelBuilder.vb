@@ -121,7 +121,7 @@ Public Class AccountantIncomePanelBuilder
                     "FROM sales s " &
                     "JOIN users u ON s.user_id = u.user_id " &
                     "LEFT JOIN payment_methods pm ON s.method_id = pm.method_id " &
-                    "WHERE s.status = 'Completed'" & dateWhere &
+                    "WHERE s.status IN ('Completed','Partially Refunded')" & dateWhere &
                     " ORDER BY s.sale_datetime DESC", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
@@ -160,7 +160,7 @@ Public Class AccountantIncomePanelBuilder
                 ' ── Totals ──
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
-                    "WHERE status='Completed'" & dateWhere, conn)
+                    "WHERE status IN ('Completed','Partially Refunded')" & dateWhere, conn)
                     _totalIncome = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 

@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -144,7 +144,7 @@ Public Class AdminDashPanelBuilder
                     " COALESCE(SUM(CASE WHEN DATE(sale_datetime)=CURDATE() THEN 1 ELSE 0 END),0) AS d_tx, " &
                     " COUNT(DISTINCT CASE WHEN DATE(sale_datetime)=CURDATE() THEN user_id END) AS d_cashiers " &
                     "FROM sales " &
-                    "WHERE status='Completed' AND sale_datetime >= CURDATE() - INTERVAL @win DAY"
+                    "WHERE status IN ('Completed','Partially Refunded') AND sale_datetime >= CURDATE() - INTERVAL @win DAY"
 
                 Using cmd As New MySqlCommand(sql, conn)
                     cmd.Parameters.AddWithValue("@win", 70)
@@ -186,7 +186,7 @@ Public Class AdminDashPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT DATE(sale_datetime) AS d, COALESCE(SUM(total),0) AS t " &
                     "FROM sales " &
-                    "WHERE status='Completed' AND sale_datetime >= CURDATE() - INTERVAL @days DAY " &
+                    "WHERE status IN ('Completed','Partially Refunded') AND sale_datetime >= CURDATE() - INTERVAL @days DAY " &
                     "GROUP BY DATE(sale_datetime) ORDER BY d", conn)
                     cmd.Parameters.AddWithValue("@days", TREND_DAYS - 1)
                     Using rdr = cmd.ExecuteReader()

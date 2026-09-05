@@ -410,7 +410,7 @@ Public Class TransactionPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
-                    "WHERE shift_id=@sid AND status='Completed'", conn)
+                    "WHERE shift_id=@sid AND status IN ('Completed','Partially Refunded')", conn)
                     cmd.Parameters.AddWithValue("@sid", Session.ShiftId)
                     shiftTotal = CDec(cmd.ExecuteScalar())
                 End Using

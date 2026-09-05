@@ -107,7 +107,7 @@ Public Class SalesPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) AS rev, COUNT(*) AS txns " &
-                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status='Completed' AND user_id=@uid", conn)
+                    "FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
@@ -120,7 +120,7 @@ Public Class SalesPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(si.qty),0) FROM sale_items si " &
                     "JOIN sales s ON si.sale_id=s.sale_id " &
-                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed' AND s.user_id=@uid", conn)
+                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status IN ('Completed','Partially Refunded') AND s.user_id=@uid", conn)
                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                     dbItems = CInt(cmd.ExecuteScalar())
                 End Using
@@ -970,7 +970,7 @@ Public Class SalesPanelBuilder
                     "FROM sale_items si " &
                     "JOIN products p ON si.product_id=p.product_id " &
                     "JOIN sales s ON si.sale_id=s.sale_id " &
-                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed' " &
+                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status IN ('Completed','Partially Refunded') " &
                     "GROUP BY p.product_id ORDER BY rev DESC LIMIT 4", conn)
                     Using rdr = cmd.ExecuteReader()
                         Dim maxRev As Decimal = 1
@@ -1068,7 +1068,7 @@ Public Class SalesPanelBuilder
                     "JOIN products p ON si.product_id=p.product_id " &
                     "JOIN categories c ON p.category_id=c.category_id " &
                     "JOIN sales s ON si.sale_id=s.sale_id " &
-                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status='Completed' " &
+                    "WHERE DATE(s.sale_datetime)=CURDATE() AND s.status IN ('Completed','Partially Refunded') " &
                     "GROUP BY c.category_id ORDER BY cnt DESC LIMIT 4", conn)
                     Using rdr = cmd.ExecuteReader()
                         Dim total As Integer = 0
