@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -114,6 +114,18 @@ Public Class AdminCategoriesPanelBuilder
     End Function
 
     ' Case-insensitive duplicate check. excludeId lets a rename keep its own name.
+    ' True when the name is one the POS tab strip / SKU prefix logic recognises.
+    Private Shared Function IsPosMappedName(categoryName As String) As Boolean
+        Select Case If(categoryName, "").Trim().ToLowerInvariant()
+            Case "paint", "paints", "tools", "tool",
+                 "thinner", "thinners", "solvent", "solvents",
+                 "accessories", "accessory"
+                Return True
+            Case Else
+                Return False
+        End Select
+    End Function
+
     Private Shared Function NameTaken(name As String, Optional excludeId As Integer = 0) As Boolean
         Try
             Using conn = Db.GetConnection()
@@ -536,6 +548,24 @@ Public Class AdminCategoriesPanelBuilder
             AppModal.Show("A category named """ & name & """ already exists.",
                           "Duplicate Category", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
+        End If
+
+        ' The POS tab strip and the SKU prefix generator both match the category
+        ' NAME as a string ("paint", "tools", "thinner", "accessories"). Renaming
+        ' away from one of those does not lose any product, but they stop landing
+        ' under the fixed POS tab and new SKUs change prefix. Say so first.
+        If IsPosMappedName(r.Name) AndAlso Not IsPosMappedName(name) Then
+            If AppModal.Show(
+                "The POS product tabs and SKU prefixes are matched on the category name." &
+                Environment.NewLine & Environment.NewLine &
+                "Renaming """ & r.Name & """ to """ & name & """ means its products no longer " &
+                "appear under the " & r.Name & " tab in the POS, and new items in it get a " &
+                "different SKU prefix. Existing SKUs are unchanged." &
+                Environment.NewLine & Environment.NewLine & "Rename anyway?",
+                "Rename Category", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) <> DialogResult.Yes Then
+                Return
+            End If
         End If
 
         Try
