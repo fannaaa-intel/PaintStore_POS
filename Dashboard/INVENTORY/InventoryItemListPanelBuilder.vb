@@ -1447,29 +1447,71 @@ Public Class InventoryItemListPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                Dim sql As String
-                If productId > 0 Then
-                    sql = "UPDATE products SET category_id=@cat, sku=@sku, name=@name, paint_type=@ptype, " &
-                          "size_label=@size, color_hex=@hex, image_path=@img, unit_price=@price, " &
-                          "reorder_level=@re WHERE product_id=@id"
-                Else
-                    sql = "INSERT INTO products (category_id, sku, name, paint_type, size_label, color_hex, " &
-                          "image_path, unit_price, stock_qty, reorder_level, is_active) " &
-                          "VALUES (@cat, @sku, @name, @ptype, @size, @hex, @img, @price, @qty, @re, 1)"
-                End If
-                Using cmd As New MySqlCommand(sql, conn)
-                    cmd.Parameters.AddWithValue("@cat", catId)
-                    cmd.Parameters.AddWithValue("@sku", sku)
-                    cmd.Parameters.AddWithValue("@name", name)
-                    cmd.Parameters.AddWithValue("@ptype", NullIfEmpty(If(paintType, "").Trim()))
-                    cmd.Parameters.AddWithValue("@size", NullIfEmpty(txtSize.Text.Trim()))
-                    cmd.Parameters.AddWithValue("@hex", NullIfEmpty(hex))
-                    cmd.Parameters.AddWithValue("@img", NullIfEmpty(imagePath))
-                    cmd.Parameters.AddWithValue("@price", price)
-                    If productId <= 0 Then cmd.Parameters.AddWithValue("@qty", CInt(numStock.Value))
-                    cmd.Parameters.AddWithValue("@re", CInt(numReorder.Value))
-                    If productId > 0 Then cmd.Parameters.AddWithValue("@id", productId)
-                    cmd.ExecuteNonQuery()
+                ' A new product's opening stock has to be recorded as a movement
+                ' as well, or that inventory appears from nowhere and stock on
+                ' hand can never be reconciled against the movement history. The
+                ' schema already defines an 'Initial' movement type for this; it
+                ' was simply never written. Both statements go in one transaction
+                ' so the product and its opening balance are never half-saved.
+                Using txn As MySqlTransaction = conn.BeginTransaction()
+                    Try
+                        Dim sql As String
+                        If productId > 0 Then
+                            sql = "UPDATE products SET category_id=@cat, sku=@sku, name=@name, paint_type=@ptype, " &
+                                  "size_label=@size, color_hex=@hex, image_path=@img, unit_price=@price, " &
+                                  "reorder_level=@re WHERE product_id=@id"
+                        Else
+                            sql = "INSERT INTO products (category_id, sku, name, paint_type, size_label, color_hex, " &
+                                  "image_path, unit_price, stock_qty, reorder_level, is_active) " &
+                                  "VALUES (@cat, @sku, @name, @ptype, @size, @hex, @img, @price, @qty, @re, 1)"
+                        End If
+
+                        Dim newId As Integer = 0
+                        Dim openingQty As Integer = If(productId > 0, 0, CInt(numStock.Value))
+
+                        Using cmd As New MySqlCommand(sql, conn, txn)
+                            cmd.Parameters.AddWithValue("@cat", catId)
+                            cmd.Parameters.AddWithValue("@sku", sku)
+                            cmd.Parameters.AddWithValue("@name", name)
+                            cmd.Parameters.AddWithValue("@ptype", NullIfEmpty(If(paintType, "").Trim()))
+                            cmd.Parameters.AddWithValue("@size", NullIfEmpty(txtSize.Text.Trim()))
+                            cmd.Parameters.AddWithValue("@hex", NullIfEmpty(hex))
+                            cmd.Parameters.AddWithValue("@img", NullIfEmpty(imagePath))
+                            cmd.Parameters.AddWithValue("@price", price)
+                            If productId <= 0 Then cmd.Parameters.AddWithValue("@qty", openingQty)
+                            cmd.Parameters.AddWithValue("@re", CInt(numReorder.Value))
+                            If productId > 0 Then cmd.Parameters.AddWithValue("@id", productId)
+                            cmd.ExecuteNonQuery()
+                            If productId <= 0 Then newId = CInt(cmd.LastInsertedId)
+                        End Using
+
+                        If productId <= 0 AndAlso openingQty <> 0 Then
+                            Using cmd As New MySqlCommand(
+                                "INSERT INTO stock_movements " &
+                                "(product_id, user_id, movement_type, qty_change, reference_type, note, created_at) " &
+                                "VALUES (@pid, @uid, 'Initial', @qc, 'newitem', 'Opening stock on item creation', NOW())",
+                                conn, txn)
+                                cmd.Parameters.AddWithValue("@pid", newId)
+                                cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                                cmd.Parameters.AddWithValue("@qc", openingQty)
+                                cmd.ExecuteNonQuery()
+                            End Using
+                        End If
+
+                        txn.Commit()
+
+                        ' Product changes are exactly what an audit needs to see;
+                        ' this screen previously logged nothing but LOGOUT.
+                        If productId > 0 Then
+                            ActivityLog.Record("PRODUCT_EDIT", "product", productId, name)
+                        Else
+                            ActivityLog.Record("PRODUCT_ADD", "product", newId,
+                                               name & " (" & sku & "), opening stock " & openingQty)
+                        End If
+                    Catch
+                        txn.Rollback()
+                        Throw
+                    End Try
                 End Using
             End Using
             Return True
@@ -1509,6 +1551,7 @@ Public Class InventoryItemListPanelBuilder
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
+            ActivityLog.Record("PRODUCT_DELETE", "product", productId, productName)
             Return True
         Catch ex As Exception
             AppModal.Show("Could not delete the product:" & Environment.NewLine & ex.Message,

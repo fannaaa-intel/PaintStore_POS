@@ -423,6 +423,14 @@ Public Class InventoryStockAdjustmentPanelBuilder
                         End Using
 
                         txn.Commit()
+
+                        ' Manual stock changes are the highest-risk inventory
+                        ' action there is -- they move quantity with no sale or
+                        ' delivery behind them -- so they belong in the audit log.
+                        ActivityLog.Record("STOCK_ADJUST", "product", productId,
+                            movementType & " " & If(qtyChange > 0, "+", "") & qtyChange &
+                            If(String.IsNullOrEmpty(note), "", " — " & note))
+
                         Return True
                     Catch exInner As Exception
                         txn.Rollback()

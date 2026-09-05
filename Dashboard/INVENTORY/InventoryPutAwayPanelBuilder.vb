@@ -1024,6 +1024,12 @@ Public Class InventoryPutAwayPanelBuilder
                         Next
 
                         txn.Commit()
+
+                        ' Put-away is the point stock actually enters the shelves,
+                        ' so record who did it against which PO.
+                        ActivityLog.Record("STOCK_PUTAWAY", "purchase_order", currentPoId,
+                            toShelve.Count & If(toShelve.Count = 1, " line", " lines") &
+                            ", " & toShelve.Sum(Function(l) l.ShelveNow) & " unit(s) shelved")
                     Catch exInner As Exception
                         txn.Rollback()
                         AppModal.Show("Stock-in was not saved:" & Environment.NewLine & exInner.Message,
