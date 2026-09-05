@@ -1383,44 +1383,51 @@ Public Class TransactionPanelBuilder
                 ' Charge the VAT-adjusted total, not the net -- see ComputeTotalDue.
                 Dim grand As Decimal = StoreSettings.ComputeTotalDue(subtotal - disc)
 
-                ' Per-method capture: Cash needs amount tendered (-> change);
-                ' Card / E-Wallet need a reference number (no change given).
+                ' Per-method capture: cash needs the amount tendered (-> change);
+                ' everything else needs a reference number (no change given).
                 Dim tendered As Decimal = grand
                 Dim changeDue As Decimal = 0
                 Dim refNo As String = ""
 
-                Select Case dbName
-                    Case "Cash"
-                        Do
-                            Dim entry As String = PaymentPromptModal.Show("Cash", grand, PaymentPromptModal.FieldKind.AmountTendered, grand.ToString("0.00"))
-                            If entry Is Nothing Then Return   ' cashier cancelled
-                            Dim parsed As Decimal
-                            If Not Decimal.TryParse(entry.Trim(), parsed) Then
-                                AppModal.Show("Please enter a valid amount (numbers only).",
-                                    "Invalid Amount", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                            ElseIf parsed < grand Then
-                                AppModal.Show(String.Format("Amount tendered (P {0:N2}) is less than the total (P {1:N2}).",
-                                    parsed, grand), "Insufficient Amount", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                            Else
-                                tendered = parsed
-                                changeDue = parsed - grand
-                                Exit Do
-                            End If
-                        Loop
-
-                    Case "Card", "E-Wallet"
-                        Do
-                            Dim entry As String = PaymentPromptModal.Show(dbName, grand, PaymentPromptModal.FieldKind.ReferenceNumber, "")
-                            If entry Is Nothing Then Return   ' cashier cancelled
-                            If entry.Trim().Length = 0 Then
-                                AppModal.Show("A reference number is required for " & dbName & " payments.",
-                                    "Reference Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                            Else
-                                refNo = entry.Trim()
-                                Exit Do
-                            End If
-                        Loop
-                End Select
+                ' Matched on content rather than an exact name. Payment methods are
+                ' editable in Store Settings, and the cash drawer query and refund
+                ' path both use LIKE '%cash%' -- so "CASH" or "Cash on Hand" counts
+                ' as cash there and must count as cash here too.
+                '
+                ' The old Select Case matched "Cash" / "Card" / "E-Wallet" exactly,
+                ' so any renamed or newly added method fell through with no prompt
+                ' at all: the sale completed with tendered = total, no change worked
+                ' out and no reference captured.
+                If dbName.IndexOf("cash", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    Do
+                        Dim entry As String = PaymentPromptModal.Show("Cash", grand, PaymentPromptModal.FieldKind.AmountTendered, grand.ToString("0.00"))
+                        If entry Is Nothing Then Return   ' cashier cancelled
+                        Dim parsed As Decimal
+                        If Not Decimal.TryParse(entry.Trim(), parsed) Then
+                            AppModal.Show("Please enter a valid amount (numbers only).",
+                                "Invalid Amount", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        ElseIf parsed < grand Then
+                            AppModal.Show(String.Format("Amount tendered (P {0:N2}) is less than the total (P {1:N2}).",
+                                parsed, grand), "Insufficient Amount", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Else
+                            tendered = parsed
+                            changeDue = parsed - grand
+                            Exit Do
+                        End If
+                    Loop
+                Else
+                    Do
+                        Dim entry As String = PaymentPromptModal.Show(dbName, grand, PaymentPromptModal.FieldKind.ReferenceNumber, "")
+                        If entry Is Nothing Then Return   ' cashier cancelled
+                        If entry.Trim().Length = 0 Then
+                            AppModal.Show("A reference number is required for " & dbName & " payments.",
+                                "Reference Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Else
+                            refNo = entry.Trim()
+                            Exit Do
+                        End If
+                    Loop
+                End If
 
                 If ConfirmSaleModal.Show(dbName, grand, tendered, changeDue, refNo) Then
                     CompleteSale(grand, tendered, changeDue, refNo)
@@ -2174,7 +2181,10 @@ Public Class TransactionPanelBuilder
             If _lastSaleDiscount > 0 Then lines.Add(New ReceiptPrinter.RLine("Discount", "- P " & _lastSaleDiscount.ToString("N2")))
             lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, "P " & _lastSaleVat.ToString("N2")))
             lines.Add(New ReceiptPrinter.RLine("TOTAL", "P " & _lastSaleTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
-            If String.Equals(_lastSalePay, "Cash", StringComparison.OrdinalIgnoreCase) Then
+            ' Same content match the payment prompt uses, so a method named
+            ' "CASH" or "Cash on Hand" still prints Tendered and Change.
+            If _lastSalePay IsNot Nothing AndAlso
+               _lastSalePay.IndexOf("cash", StringComparison.OrdinalIgnoreCase) >= 0 Then
                 lines.Add(New ReceiptPrinter.RLine("Tendered", "P " & _lastSaleTendered.ToString("N2")))
                 lines.Add(New ReceiptPrinter.RLine("Change", "P " & _lastSaleChange.ToString("N2")))
             End If

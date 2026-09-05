@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -388,12 +388,20 @@ Public Class AdminStoreSettingsPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' store_settings is a single-row table (CHECK setting_id = 1) but
+                ' nothing creates that row, so on a fresh database a plain UPDATE
+                ' matched nothing and the save silently did nothing while still
+                ' reporting success. INSERT .. ON DUPLICATE KEY UPDATE creates the
+                ' row the first time and updates it every time after.
                 Using cmd As New MySqlCommand(
-                    "UPDATE store_settings SET " &
+                    "INSERT INTO store_settings " &
+                    "(setting_id, store_name, store_tagline, store_address, " &
+                    " store_contact, store_tin, vat_rate, vat_inclusive) " &
+                    "VALUES (@id, @name, @tag, @addr, @contact, @tin, @rate, @incl) " &
+                    "ON DUPLICATE KEY UPDATE " &
                     "store_name=@name, store_tagline=@tag, store_address=@addr, " &
                     "store_contact=@contact, store_tin=@tin, " &
-                    "vat_rate=@rate, vat_inclusive=@incl " &
-                    "WHERE setting_id=@id", conn)
+                    "vat_rate=@rate, vat_inclusive=@incl", conn)
                     cmd.Parameters.AddWithValue("@name", storeName)
                     cmd.Parameters.AddWithValue("@tag", tagline)
                     cmd.Parameters.AddWithValue("@addr", NullIfBlank(_txtAddress.Text.Trim()))
