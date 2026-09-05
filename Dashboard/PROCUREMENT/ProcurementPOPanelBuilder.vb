@@ -2409,7 +2409,42 @@ Public Class ProcurementPOPanelBuilder
                                           btnReceive.Left = header.Width - 24 - btnReceive.Width
                                       End Sub
             btnReceive.Top = 17 : btnReceive.Left = 700
+        End If
 
+        ' ── Cancel (Draft / Ordered only) ────────────────────────────────────────
+        ' 'Cancelled' was already in the schema, already a filter tab, and already
+        ' excluded from expense totals -- only the write path was missing, so a
+        ' mistaken order could never be closed off and sat in the active list for
+        ' good. Secondary styling in the file's own NegativeClr: this is a
+        ' destructive action that must not compete with the primary button.
+        If po.Status = "Draft" OrElse po.Status = "Ordered" Then
+            Dim btnCancel As New Button With {
+                .Text = "Cancel Order", .Size = New Size(140, 46),
+                .FlatStyle = FlatStyle.Flat, .BackColor = Color.White, .ForeColor = NegativeClr,
+                .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Anchor = AnchorStyles.Top Or AnchorStyles.Right, .Tag = ""
+            }
+            btnCancel.FlatAppearance.BorderSize = 0
+            RoundControl(btnCancel, 12)
+            AddHover(btnCancel, Color.White, Color.FromArgb(252, 236, 236))
+            Dim capCancelId As Integer = po.PoId
+            Dim capCancelNo As String = po.PoNo
+            AddHandler btnCancel.Click, Sub()
+                                            If CStr(If(btnCancel.Tag, "")) = "done" Then Return
+                                            CancelPo(capCancelId, capCancelNo, btnCancel)
+                                        End Sub
+            header.Controls.Add(btnCancel)
+
+            ' Sits to the LEFT of the primary action, which is 180 (Draft) or
+            ' 160 (Ordered) wide plus the 24px gutter and a 10px gap.
+            Dim primaryW As Integer = If(po.Status = "Draft", 180, 160)
+            AddHandler header.Resize, Sub()
+                                          btnCancel.Top = 17
+                                          btnCancel.Left = header.Width - 24 - primaryW - 10 - btnCancel.Width
+                                      End Sub
+            btnCancel.Top = 17
+            btnCancel.Left = 700 - 10 - btnCancel.Width
         End If
 
         ' ── SCROLLABLE BODY ──────────────────────────────────────────────────────
@@ -2944,6 +2979,93 @@ Public Class ProcurementPOPanelBuilder
             Return
         End Try
         LoadDetail(poId)
+    End Sub
+
+    ' Cancel a purchase order that has not been received against.
+    '
+    ' Requests that were converted into this PO have to be handed back, or the
+    ' need they represent is lost: the request stays 'Converted' pointing at a
+    ' dead order and can never be re-quoted or re-ordered.
+    '
+    ' Anything already received is refused outright -- stock has physically moved
+    ' and stock_movements rows exist, so the order is part of the audit trail.
+    Private Shared Sub CancelPo(poId As Integer, poNo As String, btn As Button)
+        If AppModal.Show(
+            "Cancel purchase order " & poNo & "?" & Environment.NewLine & Environment.NewLine &
+            "It stops counting towards expenses and payables, and any purchase " &
+            "requests it was raised from are reopened so they can be ordered again." &
+            Environment.NewLine & Environment.NewLine & "This cannot be undone.",
+            "Cancel Purchase Order", MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning) <> DialogResult.Yes Then
+            Return
+        End If
+
+        btn.Tag = "done"
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using txn As MySqlTransaction = conn.BeginTransaction()
+                    Try
+                        ' Refuse if anything was received against it. Checked inside
+                        ' the transaction: the PO may have been received between the
+                        ' screen loading and this click.
+                        Dim received As Integer = 0
+                        Using cmd As New MySqlCommand(
+                            "SELECT COUNT(*) FROM stock_movements " &
+                            "WHERE reference_type IN ('receive','putaway') AND reference_id = @id",
+                            conn, txn)
+                            cmd.Parameters.AddWithValue("@id", poId)
+                            received = Convert.ToInt32(cmd.ExecuteScalar())
+                        End Using
+                        If received > 0 Then
+                            Throw New Exception(
+                                "Goods have already been received against this order, so it " &
+                                "cannot be cancelled." & Environment.NewLine &
+                                "Use a stock adjustment if the delivery was wrong.")
+                        End If
+
+                        Dim affected As Integer
+                        Using cmd As New MySqlCommand(
+                            "UPDATE purchase_orders SET status = 'Cancelled' " &
+                            "WHERE po_id = @id AND status IN ('Draft','Ordered')", conn, txn)
+                            cmd.Parameters.AddWithValue("@id", poId)
+                            affected = cmd.ExecuteNonQuery()
+                        End Using
+                        If affected = 0 Then
+                            Throw New Exception(
+                                "This order is no longer a draft or an open order, so it was " &
+                                "not cancelled.")
+                        End If
+
+                        ' Hand the sourced requests back to the queue.
+                        Using cmd As New MySqlCommand(
+                            "UPDATE purchase_requests pr " &
+                            "JOIN po_items pi ON pi.request_id = pr.request_id " &
+                            "SET pr.status = 'Approved', pr.reviewed_by = NULL, pr.reviewed_at = NULL " &
+                            "WHERE pi.po_id = @id AND pr.status = 'Converted'", conn, txn)
+                            cmd.Parameters.AddWithValue("@id", poId)
+                            cmd.ExecuteNonQuery()
+                        End Using
+
+                        txn.Commit()
+                        ActivityLog.Record("PO_CANCELLED", "purchase_order", poId, poNo)
+                    Catch
+                        txn.Rollback()
+                        Throw
+                    End Try
+                End Using
+            End Using
+
+            AppModal.Show("Purchase order " & poNo & " was cancelled.", "Cancelled",
+                          MessageBoxButtons.OK, MessageBoxIcon.Information)
+            LoadDetail(poId)
+
+        Catch ex As Exception
+            btn.Tag = ""
+            AppModal.Show("Could not cancel the purchase order:" & Environment.NewLine &
+                          Environment.NewLine & ex.Message,
+                          "Cancel Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        End Try
     End Sub
 
     Private Shared Sub GoToReceive(poId As Integer)
