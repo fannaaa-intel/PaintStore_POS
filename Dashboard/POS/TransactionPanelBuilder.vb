@@ -109,6 +109,7 @@ Public Class TransactionPanelBuilder
     ' Cart-dependent actions, disabled while the cart is empty.
     Private Shared _btnDiscount As Button
     Private Shared _btnHold As Button
+    Private Shared ReadOnly _payButtons As New List(Of Button)
     Private Shared _lblDiscount As Label
     Private Shared _lblVat As Label
     Private Shared _lblGrandTotal As Label
@@ -168,6 +169,7 @@ Public Class TransactionPanelBuilder
         _activePayNormalClr = Color.Transparent
         _lblItems = Nothing : _lblSubtotal = Nothing
         _btnDiscount = Nothing : _btnHold = Nothing
+        _payButtons.Clear()
         _lblDiscount = Nothing : _lblVat = Nothing : _lblGrandTotal = Nothing
         _catalogHost = Nothing : _cartHost = Nothing : _lblCatalogCount = Nothing
 
@@ -1102,6 +1104,9 @@ Public Class TransactionPanelBuilder
         Dim hasCart As Boolean = (items > 0)
         If _btnDiscount IsNot Nothing Then _btnDiscount.Enabled = hasCart
         If _btnHold IsNot Nothing Then _btnHold.Enabled = hasCart
+        For Each pb In _payButtons
+            pb.Enabled = hasCart
+        Next
     End Sub
 
     Private Shared Function CreateCartRow(line As CartLine) As Panel
@@ -1343,16 +1348,26 @@ Public Class TransactionPanelBuilder
             Sub(s, e)
                 Dim b = CType(s, Button) : Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(b.BackColor) : g.FillRoundedRectangle(br, rect, 10) : End Using
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, Color.White,
+                ' Same Muted treatment the action bar uses, so an empty cart reads
+                ' the same way across the whole till.
+                Dim fill As Color = If(b.Enabled, b.BackColor, MutedBg)
+                Using br As New SolidBrush(fill) : g.FillRoundedRectangle(br, rect, 10) : End Using
+                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle,
+                    If(b.Enabled, Color.White, MutedFore),
                     TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
         AddHandler btn.MouseEnter,
             Sub()
-                If btn IsNot _activePayBtn Then
+                If btn.Enabled AndAlso btn IsNot _activePayBtn Then
                     btn.BackColor = hoverClr
                     btn.Invalidate()
                 End If
+            End Sub
+        AddHandler btn.EnabledChanged,
+            Sub()
+                btn.Cursor = If(btn.Enabled, Cursors.Hand, Cursors.Default)
+                If btn IsNot _activePayBtn Then btn.BackColor = normalClr
+                btn.Invalidate()
             End Sub
         AddHandler btn.MouseLeave,
             Sub()
@@ -1361,6 +1376,7 @@ Public Class TransactionPanelBuilder
                     btn.Invalidate()
                 End If
             End Sub
+        _payButtons.Add(btn)
         AddHandler btn.Click,
             Sub()
                 If _cart.Count = 0 Then
