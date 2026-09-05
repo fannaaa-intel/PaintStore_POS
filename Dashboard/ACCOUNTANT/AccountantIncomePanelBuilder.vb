@@ -66,6 +66,9 @@ Public Class AccountantIncomePanelBuilder
     Private Shared _expenseRows As New List(Of ExpenseRow)
     Private Shared _totalIncome As Decimal
     Private Shared _totalExpenses As Decimal
+    ' Money handed back to customers in the period. Sales are recorded gross, so
+    ' without this Net Profit ignored refunds entirely.
+    Private Shared _totalRefunds As Decimal
 
     Private Shared _rowsHost As Panel
 
@@ -105,6 +108,7 @@ Public Class AccountantIncomePanelBuilder
         _expenseRows.Clear()
         _totalIncome = 0
         _totalExpenses = 0
+        _totalRefunds = 0
         _loadError = ""   ' FIX 2: reset each load
 
         Dim dateWhere As String = BuildDateWhere()
@@ -171,6 +175,15 @@ Public Class AccountantIncomePanelBuilder
                     _totalExpenses = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
+                ' Refunds for the same period. Sales are stored gross, so money
+                ' handed back has to come off the top or Net Profit reports a
+                ' store that refunded heavily as having earned just as much.
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(total_refund),0) FROM returns " &
+                    "WHERE 1=1" & BuildRefundDateWhere(), conn)
+                    _totalRefunds = Convert.ToDecimal(cmd.ExecuteScalar())
+                End Using
+
             End Using
         Catch ex As Exception
             ' FIX 2: store error for visible display
@@ -184,6 +197,16 @@ Public Class AccountantIncomePanelBuilder
             Case "today" : Return " AND DATE(sale_datetime) = CURDATE()"
             Case "week" : Return " AND sale_datetime >= CURDATE() - INTERVAL 7 DAY"
             Case "month" : Return " AND sale_datetime >= CURDATE() - INTERVAL 30 DAY"
+            Case Else : Return ""
+        End Select
+    End Function
+
+    ' Same windows as BuildDateWhere, against the returns table's own date.
+    Private Shared Function BuildRefundDateWhere() As String
+        Select Case _filter
+            Case "today" : Return " AND DATE(return_datetime) = CURDATE()"
+            Case "week" : Return " AND return_datetime >= CURDATE() - INTERVAL 7 DAY"
+            Case "month" : Return " AND return_datetime >= CURDATE() - INTERVAL 30 DAY"
             Case Else : Return ""
         End Select
     End Function
@@ -586,7 +609,7 @@ Public Class AccountantIncomePanelBuilder
     Private Shared Function BuildKpiBar() As Panel
         Const SIDE_PAD As Integer = 24
 
-        Dim net As Decimal = _totalIncome - _totalExpenses
+        Dim net As Decimal = _totalIncome - _totalRefunds - _totalExpenses
         Dim netColor As Color
         Dim netSign As String
         Dim netSub As String
@@ -623,7 +646,12 @@ Public Class AccountantIncomePanelBuilder
         Next
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        Dim c1 = MakeKpiCard("Total Income", Peso & _totalIncome.ToString("N2"), MintPrimary, "From completed sales")
+        ' Refunds are shown on the income card rather than as a fourth tile, so
+        ' the deduction behind Net Profit is visible without changing the layout.
+        Dim incomeSub As String = If(_totalRefunds > 0,
+            "Gross sales, less " & Peso & _totalRefunds.ToString("N2") & " refunded",
+            "From completed sales")
+        Dim c1 = MakeKpiCard("Total Income", Peso & (_totalIncome - _totalRefunds).ToString("N2"), MintPrimary, incomeSub)
         Dim c2 = MakeKpiCard("Total Expenses", Peso & _totalExpenses.ToString("N2"), AccentOrange, "From purchase orders (excl. cancelled)")
         Dim c3 = MakeKpiCard("Net Profit", netSign & Peso & Math.Abs(net).ToString("N2"), netColor, netSub)
 
