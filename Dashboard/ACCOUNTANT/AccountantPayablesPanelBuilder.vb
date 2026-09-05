@@ -873,7 +873,16 @@ Public Class AccountantPayablesPanelBuilder
                 lblSupplier.Left = CInt(w * 0.18) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 lblOrderDate.Left = CInt(w * 0.38) : lblOrderDate.Top = (height - lblOrderDate.Height) \ 2
                 lblExpected.Left = CInt(w * 0.52) : lblExpected.Top = (height - lblExpected.Height) \ 2
-                badge.Left = CInt(w * 0.66) : badge.Top = (height \ 2) - badge.Height - 2
+                ' The badge is raised only to leave room for the OVERDUE tag
+                ' beneath it. With no tag -- which is every Received row, since
+                ' delivered orders are never overdue -- that offset left the
+                ' badge floating above centre over an empty gap.
+                badge.Left = CInt(w * 0.66)
+                If overdueTag Is Nothing Then
+                    badge.Top = (height - badge.Height) \ 2
+                Else
+                    badge.Top = (height \ 2) - badge.Height - 2
+                End If
 
                 lblAmount.Left = w - lblAmount.Width - 24 : lblAmount.Top = (height - lblAmount.Height) \ 2
 
@@ -936,6 +945,10 @@ Public Class AccountantPayablesPanelBuilder
             Case "Draft" : Return (Color.FromArgb(120, 120, 120), Color.FromArgb(238, 238, 238))
             Case "Ordered" : Return (AccentOrange, Color.FromArgb(255, 240, 220))
             Case "Partially Received" : Return (AccentBlue, Color.FromArgb(220, 235, 255))
+            ' Goods are in; only payment is outstanding. Mint is this file's
+            ' positive/settled tone, so it reads as "delivered" rather than
+            ' falling through to the generic grey used for unknown statuses.
+            Case "Received" : Return (MintDeep, Color.FromArgb(214, 242, 234))
             Case Else : Return (SubText, Color.FromArgb(238, 238, 238))
         End Select
     End Function
@@ -970,18 +983,53 @@ Public Class AccountantPayablesPanelBuilder
         Return path
     End Function
 
+    ' Rounded pill for a status badge.
+    '
+    ' Clipping with a Region alone gives hard, aliased corners -- a Region is a
+    ' 1-bit mask, so the curve comes out visibly stepped. The pill is painted
+    ' here instead, antialiased, with the label drawn transparently over it, and
+    ' the Region kept only so the row colour shows outside the curve.
     Private Shared Sub RoundLabel(lbl As Label, radius As Integer)
-        AddHandler lbl.Resize,
-            Sub()
-                Dim path As New GraphicsPath()
-                Dim r As Integer = radius
-                path.AddArc(0, 0, r, r, 180, 90)
-                path.AddArc(lbl.Width - r, 0, r, r, 270, 90)
-                path.AddArc(lbl.Width - r, lbl.Height - r, r, r, 0, 90)
-                path.AddArc(0, lbl.Height - r, r, r, 90, 90)
-                path.CloseFigure()
-                lbl.Region = New Region(path)
+        Dim fill As Color = lbl.BackColor
+        lbl.BackColor = Color.Transparent
+
+        Dim buildPath =
+            Function(w As Integer, h As Integer) As GraphicsPath
+                Dim r As Integer = Math.Min(radius, Math.Min(w, h) \ 2)
+                Dim gp As New GraphicsPath()
+                If r <= 0 Then
+                    gp.AddRectangle(New Rectangle(0, 0, w, h))
+                Else
+                    gp.AddArc(0, 0, r * 2, r * 2, 180, 90)
+                    gp.AddArc(w - r * 2 - 1, 0, r * 2, r * 2, 270, 90)
+                    gp.AddArc(w - r * 2 - 1, h - r * 2 - 1, r * 2, r * 2, 0, 90)
+                    gp.AddArc(0, h - r * 2 - 1, r * 2, r * 2, 90, 90)
+                End If
+                gp.CloseFigure()
+                Return gp
+            End Function
+
+        AddHandler lbl.Paint,
+            Sub(sender As Object, e As PaintEventArgs)
+                Dim l = CType(sender, Label)
+                If l.Width <= 0 OrElse l.Height <= 0 Then Return
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using gp As GraphicsPath = buildPath(l.Width, l.Height)
+                    Using br As New SolidBrush(fill)
+                        e.Graphics.FillPath(br, gp)
+                    End Using
+                End Using
+                ' Centre within the whole pill: AutoSize already sized the label
+                ' to text + padding, so the padded rectangle is symmetric and
+                ' ClientRectangle is the correct box to centre in.
+                TextRenderer.DrawText(e.Graphics, l.Text, l.Font, l.ClientRectangle,
+                                      l.ForeColor,
+                                      TextFormatFlags.HorizontalCenter Or
+                                      TextFormatFlags.VerticalCenter Or
+                                      TextFormatFlags.NoPadding)
             End Sub
+
+        AddHandler lbl.Resize, Sub() lbl.Invalidate()
     End Sub
 
     Private Shared Sub PropagateHover(row As Panel)
