@@ -14,8 +14,19 @@ echo " PaintStore POS - pre-flight checks"
 echo "=============================================="
 
 echo ""; echo "[1] Build"
-"$MSBUILD" PaintStore_POS.vbproj -nologo -v:q -t:Rebuild >/tmp/psb.log 2>&1
-chk $? "compiles with 0 errors"
+if tasklist 2>/dev/null | grep -qi "PaintStore_POS.exe"; then
+    echo "  NOTE  app is running - it locks the .exe, so only compiling"
+    "$MSBUILD" PaintStore_POS.vbproj -nologo -v:q -t:Build -p:OutDir=obj\checkbuild\ >/tmp/psb.log 2>&1
+else
+    "$MSBUILD" PaintStore_POS.vbproj -nologo -v:q -t:Rebuild >/tmp/psb.log 2>&1
+fi
+# MSB3021/MSB3027 are "cannot overwrite the locked .exe", not compile errors.
+if grep -qE "error BC[0-9]+" /tmp/psb.log; then
+    chk 1 "compiles with 0 errors"
+    grep -E "error BC[0-9]+" /tmp/psb.log | head -5 | sed 's/^/        /'
+else
+    chk 0 "compiles with 0 errors"
+fi
 
 echo ""; echo "[2] Database"
 "$MYSQL" -u root -D $DB -e "SELECT 1;" >/dev/null 2>&1
