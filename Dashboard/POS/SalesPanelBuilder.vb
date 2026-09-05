@@ -407,7 +407,10 @@ Public Class SalesPanelBuilder
         }
         AddHandler card.Resize, Sub() toolRow.Width = card.Width
 
-        Dim filters() As String = {"All", "Completed", "On Hold", "Refunded", "Voided"}
+        ' "Partial" matches DbStatusToDisplay below. Without it, partially
+        ' refunded sales showed in All (labelled Partial) but could not be
+        ' filtered for, and were invisible under both Completed and Refunded.
+        Dim filters() As String = {"All", "Completed", "Partial", "On Hold", "Refunded", "Voided"}
         Dim activeFilterIdx As Integer = 0
         Dim tabBtns(filters.Length - 1) As Button
 
@@ -750,6 +753,7 @@ Public Class SalesPanelBuilder
     Private Shared Function FilterToDbStatus(label As String) As String
         Select Case label
             Case "On Hold" : Return "OnHold"
+            Case "Partial" : Return "Partially Refunded"
             Case Else : Return label
         End Select
     End Function
