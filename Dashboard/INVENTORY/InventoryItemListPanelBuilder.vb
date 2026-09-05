@@ -1647,18 +1647,48 @@ Public Class InventoryItemListPanelBuilder
         End Select
     End Function
 
+    ' Next free SKU for a category, e.g. "PNT-0007".
+    '
+    ' This must look at EVERY product row, not the in-memory `items` list: that
+    ' list is loaded WHERE is_active = 1, but deleting a product only sets
+    ' is_active = 0 and its SKU keeps occupying the unique index. Scanning the
+    ' list therefore handed back a SKU that was already taken, and the insert
+    ' failed on the unique constraint with no way for the user to correct it --
+    ' the SKU box is read-only.
     Private Shared Function NextSku(categoryName As String) As String
         Dim prefix As String = SkuPrefixFor(categoryName)
         Dim maxNum As Integer = 0
-        For Each it In items
-            Dim s = If(it.Sku, "").Trim().ToUpperInvariant()
-            Dim head = prefix.ToUpperInvariant() & "-"
-            If s.StartsWith(head) Then
-                Dim tail = s.Substring(head.Length)
-                Dim n As Integer
-                If Integer.TryParse(tail, n) AndAlso n > maxNum Then maxNum = n
-            End If
-        Next
+
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                ' Compare against the numeric tail of every SKU sharing this
+                ' prefix, active or not.
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(MAX(CAST(SUBSTRING(sku, @len) AS UNSIGNED)), 0) " &
+                    "FROM products WHERE sku LIKE @pat", conn)
+                    cmd.Parameters.AddWithValue("@len", prefix.Length + 2)  ' 1-based, past the '-'
+                    cmd.Parameters.AddWithValue("@pat", prefix & "-%")
+                    Dim o = cmd.ExecuteScalar()
+                    If o IsNot Nothing AndAlso Not IsDBNull(o) Then
+                        maxNum = Convert.ToInt32(o)
+                    End If
+                End Using
+            End Using
+        Catch
+            ' Unreachable database: fall back to the loaded list. Worst case the
+            ' insert reports a duplicate SKU, which is already handled.
+            For Each it In items
+                Dim s = If(it.Sku, "").Trim().ToUpperInvariant()
+                Dim head = prefix.ToUpperInvariant() & "-"
+                If s.StartsWith(head) Then
+                    Dim tail = s.Substring(head.Length)
+                    Dim n As Integer
+                    If Integer.TryParse(tail, n) AndAlso n > maxNum Then maxNum = n
+                End If
+            Next
+        End Try
+
         Return prefix & "-" & (maxNum + 1).ToString("0000")
     End Function
 
