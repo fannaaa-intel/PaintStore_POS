@@ -273,6 +273,7 @@
     <Compile Include="Modules\Db.vb" />
     <Compile Include="Modules\DocNumber.vb" />
     <Compile Include="Modules\ImageCache.vb" />
+    <Compile Include="Modules\SupplierLogo.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />
     <Compile Include="Modules\POS\ReceiptPrinter.vb" />
     <Compile Include="Modules\PasswordHelper.vb" />

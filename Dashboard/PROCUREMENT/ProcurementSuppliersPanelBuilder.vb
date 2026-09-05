@@ -1,5 +1,7 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
+Imports System.Drawing.Imaging
+Imports System.IO
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
 
@@ -10,11 +12,18 @@ Imports MySql.Data.MySqlClient
 '  INLINE VIEWS (swapped in the same container):
 '    1. List    — every supplier with contact details + active-PO count.
 '                 "Add Supplier" opens the form.
-'    2. Form    — add OR edit a supplier (name / contact / phone / email /
-'                 address). Save inserts or updates the suppliers table.
-'    3. Detail  — one supplier: contact card, product chips
+'    2. Form    — add OR edit a supplier (logo / name / contact / phone /
+'                 email / address). Save inserts or updates the suppliers table.
+'    3. Detail  — one supplier: identity card, product chips
 '                 (products WHERE supplier_id = this), last-10 PO history,
 '                 and an Edit button.
+'
+'  SUPPLIER LOGO
+'    suppliers.image_path is optional (see migrations.sql). The file itself is
+'    copied into SupplierImages\ and the row stores the path relative to the app
+'    folder, the same convention products.image_path uses. Where the column does
+'    not exist the screen falls back to the gradient-initial avatar and hides
+'    the upload tile, so an un-migrated database still works.
 ' =============================================================================
 Public Class ProcurementSuppliersPanelBuilder
 
@@ -42,6 +51,10 @@ Public Class ProcurementSuppliersPanelBuilder
         Public Phone As String
         Public Email As String
         Public Address As String
+        Public ImagePath As String
+        Public Tin As String
+        Public PaymentTerms As String
+        Public Notes As String
         Public IsActive As Boolean
         Public ActivePoCount As Integer
     End Class
@@ -63,13 +76,23 @@ Public Class ProcurementSuppliersPanelBuilder
     Private Shared txtPhone As TextBox
     Private Shared txtEmail As TextBox
     Private Shared txtAddress As TextBox
+    Private Shared txtTin As TextBox
+    Private Shared txtNotes As TextBox
+    Private Shared cboTerms As ComboBox
+    Private Shared cboStatus As ComboBox
     Private Shared btnSaveRef As Button
+
+    ' Logo chosen on the form, as a path relative to the app folder. Empty means
+    ' "no photo" — which is also how an existing photo is cleared.
+    Private Shared pickedImagePath As String = ""
+
 
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadSuppliers(container As Panel)
         containerRef = container
+        SupplierLogo.Probe()
         RenderList()
     End Sub
 
@@ -79,6 +102,11 @@ Public Class ProcurementSuppliersPanelBuilder
     Private Shared Sub RenderList()
         Dim container As Panel = containerRef
         If container Is Nothing Then Return
+
+        ' Drop the scaled avatars: a logo replaced since the last render would
+        ' otherwise keep painting from the stale bitmap, and each bitmap holds
+        ' a GDI+ handle until it is disposed.
+        SupplierLogo.ClearCache(container)
 
         Dim rows As List(Of SupplierRow) = LoadSupplierList()
 
@@ -258,30 +286,18 @@ Public Class ProcurementSuppliersPanelBuilder
             End Sub
 
         ' ── Avatar bubble ────────────────────────────────────────────────────────
-        Dim initial As String = If(String.IsNullOrWhiteSpace(sup.Name), "?",
-                                   sup.Name.Trim().Substring(0, 1).ToUpperInvariant())
+        Dim initial As String = SupplierLogo.InitialOf(sup.Name)
         Dim avSize As Integer = 52
         Dim avatar As New BufferedPanel With {
             .Size = New Size(avSize, avSize),
             .Location = New Point(22, (cardH - avSize) \ 2),
             .BackColor = Color.Transparent
         }
+        Dim capImage As String = sup.ImagePath
         AddHandler avatar.Paint,
             Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim av As New Rectangle(0, 0, avSize - 1, avSize - 1)
-                Using path As GraphicsPath = RoundRect(av, 14)
-                    Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 135.0F)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                Using f As New Font("Segoe UI", 20, FontStyle.Bold),
-                      br As New SolidBrush(Color.White)
-                    Dim sz As SizeF = e.Graphics.MeasureString(initial, f)
-                    e.Graphics.DrawString(initial, f, br,
-                        (avSize - sz.Width) / 2.0F - 0.5F,
-                        (avSize - sz.Height) / 2.0F)
-                End Using
+                SupplierLogo.Paint(e.Graphics, New Rectangle(0, 0, avSize - 1, avSize - 1),
+                            14, capImage, initial, 20.0F)
             End Sub
         card.Controls.Add(avatar)
 
@@ -478,65 +494,137 @@ Public Class ProcurementSuppliersPanelBuilder
         container.BackColor = MintBg
 
         ' ── Header ────────────────────────────────────────────────────────────
+        ' Taller than the list header: this one carries a subtitle under the
+        ' title, and the two are stacked by measurement rather than by a guessed
+        ' offset, which is what let them overlap.
         Dim header As New Panel With {
-            .Height = 80, .BackColor = MintBg,
+            .Height = 96, .BackColor = MintBg,
             .Padding = New Padding(0, 0, 24, 0), .Dock = DockStyle.Top
         }
-        Dim iconPathF As String = IO.Path.Combine(Application.StartupPath, "previous.png")
-        Dim picBackF As New PictureBox With {
-            .Size = New Size(22, 22), .Location = New Point(24, 36),
-            .BackColor = Color.Transparent, .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
-        }
-        If IO.File.Exists(iconPathF) Then
-            Try
-                Dim raw As Image = Image.FromFile(iconPathF)
-                Dim bmp As New Bitmap(raw.Width, raw.Height)
-                Using g As Graphics = Graphics.FromImage(bmp)
-                    Dim cm As New Imaging.ColorMatrix(New Single()() {
-                        New Single() {0, 0, 0, 0, 0},
-                        New Single() {0, 0, 0, 0, 0},
-                        New Single() {0, 0, 0, 0, 0},
-                        New Single() {0, 0, 0, 1, 0},
-                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
-                    })
-                    Dim ia As New Imaging.ImageAttributes()
-                    ia.SetColorMatrix(cm)
-                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height), 0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
-                End Using
-                picBackF.Image = bmp
-                raw.Dispose()
-            Catch
-            End Try
-        End If
+        Dim picBackF As PictureBox = BuildBackArrow()
         AddHandler picBackF.Click, Sub() If editingId > 0 Then LoadDetail(editingId) Else RenderList()
-        AddHandler picBackF.MouseEnter, Sub() picBackF.BackColor = Color.FromArgb(30, 0, 130, 109)
-        AddHandler picBackF.MouseLeave, Sub() picBackF.BackColor = Color.Transparent
         Dim lblTitle As New Label With {
             .Text = If(supplierId > 0, "Edit Supplier", "Add Supplier"),
             .Font = New Font("Segoe UI", 22, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(picBackF.Right + 10, 24), .BackColor = Color.Transparent
+            .Location = New Point(picBackF.Right + 10, 20), .BackColor = Color.Transparent
         }
-        header.Controls.AddRange({picBackF, lblTitle})
+        Dim lblTitleSub As New Label With {
+            .Text = If(supplierId > 0,
+                       "Update this supplier's details.",
+                       "Register a new supplier. Fields marked * are required."),
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+            .AutoSize = True, .BackColor = Color.Transparent,
+            .Location = New Point(picBackF.Right + 12, 58)
+        }
+        header.Controls.AddRange({picBackF, lblTitle, lblTitleSub})
 
-        ' ── Body fills remaining space ─────────────────────────────────────────
+        ' PreferredHeight is only meaningful once the label has a parent and a
+        ' font applied, so the subtitle is placed from the title's real height
+        ' here rather than from a hard-coded y.
+        lblTitleSub.Top = lblTitle.Top + lblTitle.PreferredHeight + 2
+        picBackF.Top = lblTitle.Top + (lblTitle.PreferredHeight - picBackF.Height) \ 2
+
+        ' ── Body ──────────────────────────────────────────────────────────────
+        ' Scrollable: the grouped form is taller than a short window, and a form
+        ' whose Save button is off-screen cannot be used.
         Dim body As New Panel With {
-            .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = False
+            .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = True
         }
 
-        Dim cardWidth As Integer = 560
+        ' Wider than the old single column, so two fields fit side by side.
+        Dim cardWidth As Integer = 760
         Dim card As New BufferedPanel With {.Width = cardWidth, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
-        Dim yy As Integer = 28
-        txtName = AddFormField(card, "Supplier Name *", yy, If(existing IsNot Nothing, existing.Name, ""), False, "e.g. ABC Paint Supplies") : yy += 80
-        txtContact = AddFormField(card, "Contact Person", yy, If(existing IsNot Nothing, existing.Contact, ""), False, "e.g. Juan dela Cruz") : yy += 80
-        txtPhone = AddFormField(card, "Phone", yy, If(existing IsNot Nothing, existing.Phone, ""), False, "e.g. 09171234567") : yy += 80
-        txtEmail = AddFormField(card, "Email", yy, If(existing IsNot Nothing, existing.Email, ""), False, "e.g. supplier@gmail.com") : yy += 80
-        txtAddress = AddFormField(card, "Address", yy, If(existing IsNot Nothing, existing.Address, ""), True, "e.g. 123 Rizal St., Aparri, Cagayan") : yy += 80
+        ' Seeded from the row being edited, so opening Edit and saving without
+        ' touching the photo keeps it rather than clearing it.
+        pickedImagePath = If(existing IsNot Nothing, If(existing.ImagePath, ""), "")
 
-        Dim btnBarH As Integer = 64
-        Dim btnBarY As Integer = yy + 8
+        ' Column geometry: two equal fields with a gutter between them.
+        Dim padX As Integer = 32
+        Dim gutter As Integer = 24
+        Dim colW As Integer = (cardWidth - padX * 2 - gutter) \ 2
+        Dim colRX As Integer = padX + colW + gutter
+
+        Dim yy As Integer = 30
+
+        ' ── Section: Identity ─────────────────────────────────────────────────
+        ' The logo sits beside the name rather than above the whole form: the
+        ' two together are what identifies the supplier, so they read as one
+        ' block instead of the photo looking like a separate step.
+        yy = AddSectionHeader(card, "Identity", "Who the supplier is.", yy, padX)
+
+        Dim logoSize As Integer = 104
+        AddLogoPicker(card, If(existing IsNot Nothing, existing.Name, ""), padX, yy, logoSize)
+
+        Dim idX As Integer = padX + logoSize + 26
+        Dim idW As Integer = cardWidth - idX - padX
+        txtName = AddFormField(card, "Supplier Name *", idX, yy, idW,
+                               If(existing IsNot Nothing, existing.Name, ""),
+                               False, "e.g. ABC Paint Supplies")
+
+        If SupplierLogo.HasCommercial Then
+            txtTin = AddFormField(card, "TIN", idX, yy + 78, idW,
+                                  If(existing IsNot Nothing, existing.Tin, ""),
+                                  False, "e.g. 123-456-789-000")
+        Else
+            txtTin = Nothing
+        End If
+
+        ' The logo tile is the tallest thing in this section.
+        yy += Math.Max(logoSize, If(SupplierLogo.HasCommercial, 156, 78)) + 26
+        yy = AddSectionDivider(card, yy, padX)
+
+        ' ── Section: Contact ──────────────────────────────────────────────────
+        yy = AddSectionHeader(card, "Contact", "How to reach them.", yy, padX)
+
+        ' Phone and email are short, so they pair on one row.
+        txtContact = AddFormField(card, "Contact Person *", padX, yy, colW,
+                                  If(existing IsNot Nothing, existing.Contact, ""),
+                                  False, "e.g. Juan dela Cruz")
+        txtPhone = AddFormField(card, "Phone *", colRX, yy, colW,
+                                If(existing IsNot Nothing, existing.Phone, ""),
+                                False, "e.g. 09171234567")
+        yy += 78
+
+        txtEmail = AddFormField(card, "Email *", padX, yy, colW,
+                                If(existing IsNot Nothing, existing.Email, ""),
+                                False, "e.g. supplier@gmail.com")
+        txtAddress = AddFormField(card, "Address *", colRX, yy, colW,
+                                  If(existing IsNot Nothing, existing.Address, ""),
+                                  False, "e.g. 123 Rizal St., Aparri, Cagayan")
+        yy += 78
+
+        ' ── Section: Commercial ───────────────────────────────────────────────
+        If SupplierLogo.HasCommercial Then
+            yy = AddSectionDivider(card, yy, padX)
+            yy = AddSectionHeader(card, "Commercial",
+                                  "Terms this supplier is dealt with on.", yy, padX)
+
+            cboTerms = AddFormCombo(card, "Payment Terms", padX, yy, colW,
+                                    SupplierLogo.PaymentTermOptions,
+                                    If(existing IsNot Nothing, existing.PaymentTerms, ""),
+                                    "Not specified")
+            cboStatus = AddFormCombo(card, "Status", colRX, yy, colW,
+                                     New String() {"Active", "Inactive"},
+                                     If(existing Is Nothing OrElse existing.IsActive, "Active", "Inactive"),
+                                     "")
+            yy += 78
+
+            txtNotes = AddFormField(card, "Notes", padX, yy, cardWidth - padX * 2,
+                                    If(existing IsNot Nothing, existing.Notes, ""),
+                                    True, "Delivery quirks, minimum order, best time to call…")
+            yy += 96
+        Else
+            cboTerms = Nothing
+            cboStatus = Nothing
+            txtNotes = Nothing
+        End If
+
+        ' ── Button bar ────────────────────────────────────────────────────────
+        Dim btnBarH As Integer = 72
+        Dim btnBarY As Integer = yy + 4
 
         Dim btnBar As New Panel With {
             .BackColor = Color.Transparent, .Location = New Point(0, btnBarY),
@@ -545,40 +633,26 @@ Public Class ProcurementSuppliersPanelBuilder
         AddHandler btnBar.Paint,
             Sub(s, e)
                 Using pen As New Pen(CardBorder, 1)
-                    e.Graphics.DrawLine(pen, 20, 0, CType(s, Panel).Width - 20, 0)
+                    e.Graphics.DrawLine(pen, padX, 0, CType(s, Panel).Width - padX, 0)
                 End Using
             End Sub
 
+        Dim lblRequired As New Label With {
+            .Text = "* Required", .Font = New Font("Segoe UI", 9),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
+            .Location = New Point(padX, (btnBarH - 18) \ 2)
+        }
+
         Dim btnCancel As New Button With {
-            .Text = "Cancel", .Size = New Size(110, 38),
+            .Text = "Cancel", .Size = New Size(112, 40),
             .FlatStyle = FlatStyle.Flat, .BackColor = Color.White,
             .ForeColor = SubText, .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand
         }
-        btnCancel.FlatAppearance.BorderSize = 1
-        btnCancel.FlatAppearance.BorderColor = CardBorder
-        AddHandler btnCancel.Paint,
-            Sub(s, e)
-                Dim b = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As GraphicsPath = RoundRect(New Rectangle(1, 1, b.Width - 2, b.Height - 2), 8)
-                    Using fill As New SolidBrush(b.BackColor)
-                        e.Graphics.FillPath(fill, path)
-                    End Using
-                    Using pen As New Pen(CardBorder, 1.2F)
-                        e.Graphics.DrawPath(pen, path)
-                    End Using
-                End Using
-                Dim sf As New StringFormat With {
-                    .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
-                }
-                Using brush As New SolidBrush(b.ForeColor)
-                    e.Graphics.DrawString(b.Text, b.Font, brush,
-                        New RectangleF(0, 0, b.Width, b.Height), sf)
-                End Using
-            End Sub
+        btnCancel.FlatAppearance.BorderSize = 0
+        AddHandler btnCancel.Paint, Sub(s, e) PaintOutlineButton(CType(s, Button), e, CardBorder)
         AddHandler btnCancel.MouseEnter,
             Sub()
-                btnCancel.BackColor = Color.FromArgb(244, 248, 246)
+                btnCancel.BackColor = MintBg
                 btnCancel.Invalidate()
             End Sub
         AddHandler btnCancel.MouseLeave,
@@ -590,31 +664,15 @@ Public Class ProcurementSuppliersPanelBuilder
 
         btnSaveRef = New Button With {
             .Text = If(supplierId > 0, "Save Changes", "Add Supplier"),
-            .Size = New Size(148, 38), .FlatStyle = FlatStyle.Flat,
+            .Size = New Size(152, 40), .FlatStyle = FlatStyle.Flat,
             .BackColor = MintPrimary, .ForeColor = Color.White,
             .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand, .Tag = ""
         }
         btnSaveRef.FlatAppearance.BorderSize = 0
-        AddHandler btnSaveRef.Paint,
-            Sub(s, e)
-                Dim b = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width, b.Height), 8)
-                    Using fill As New SolidBrush(b.BackColor)
-                        e.Graphics.FillPath(fill, path)
-                    End Using
-                End Using
-                Dim sf As New StringFormat With {
-                    .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
-                }
-                Using brush As New SolidBrush(b.ForeColor)
-                    e.Graphics.DrawString(b.Text, b.Font, brush,
-                        New RectangleF(0, 0, b.Width, b.Height), sf)
-                End Using
-            End Sub
+        AddHandler btnSaveRef.Paint, Sub(s, e) PaintFilledButton(CType(s, Button), e)
         AddHandler btnSaveRef.MouseEnter,
             Sub()
-                btnSaveRef.BackColor = Color.FromArgb(0, 150, 127)
+                btnSaveRef.BackColor = MintDeep
                 btnSaveRef.Invalidate()
             End Sub
         AddHandler btnSaveRef.MouseLeave,
@@ -624,27 +682,26 @@ Public Class ProcurementSuppliersPanelBuilder
             End Sub
         AddHandler btnSaveRef.Click, Sub() CommitSupplier()
 
-        btnBar.Controls.AddRange({btnCancel, btnSaveRef})
+        btnBar.Controls.AddRange({lblRequired, btnCancel, btnSaveRef})
 
-        Dim tInit As Integer = (btnBarH - btnSaveRef.Height) \ 2
-        btnSaveRef.Top = tInit
-        btnSaveRef.Left = btnBar.Width - 20 - btnSaveRef.Width
-        btnCancel.Top = tInit
-        btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 10
-
-        AddHandler btnBar.Resize,
+        Dim PositionButtons As Action =
             Sub()
                 Dim t As Integer = (btnBar.Height - btnSaveRef.Height) \ 2
                 btnSaveRef.Top = t
-                btnSaveRef.Left = btnBar.Width - 20 - btnSaveRef.Width
+                btnSaveRef.Left = btnBar.Width - padX - btnSaveRef.Width
                 btnCancel.Top = t
-                btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 10
+                btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 12
             End Sub
+        AddHandler btnBar.Resize, Sub() PositionButtons()
+        PositionButtons()
 
-        card.Height = btnBarY + btnBarH + 20
+        card.Height = btnBarY + btnBarH + 12
         card.Controls.Add(btnBar)
 
-        Dim verticalOffset As Integer = -100
+        ' Nudged above centre so the card reads as sitting under the title
+        ' rather than floating. A card taller than the viewport pins to the top
+        ' instead, and the body scrolls.
+        Dim verticalOffset As Integer = -20
 
         Dim PositionCard As Action =
             Sub()
@@ -664,51 +721,237 @@ Public Class ProcurementSuppliersPanelBuilder
         body.BeginInvoke(New Action(Sub() PositionCard()))
     End Sub
 
-    Private Shared Function AddFormField(parent As Panel, label As String, y As Integer,
+    ' ── SECTION HEADER ───────────────────────────────────────────────────────
+    ' A titled band that groups the fields under it. Returns the y the first
+    ' field of the section starts at.
+    Private Shared Function AddSectionHeader(parent As Panel, title As String,
+                                             caption As String, y As Integer,
+                                             padX As Integer) As Integer
+        Dim lblTitle As New Label With {
+            .Text = title.ToUpperInvariant(),
+            .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
+            .ForeColor = MintDeep, .AutoSize = True,
+            .Location = New Point(padX, y), .BackColor = Color.Transparent
+        }
+        Dim lblCaption As New Label With {
+            .Text = caption, .Font = New Font("Segoe UI", 9),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
+            .Location = New Point(padX, y + 17)
+        }
+        parent.Controls.AddRange({lblTitle, lblCaption})
+        Return y + 44
+    End Function
+
+    ' A hairline between two sections.
+    Private Shared Function AddSectionDivider(parent As Panel, y As Integer,
+                                              padX As Integer) As Integer
+        Dim line As New Panel With {
+            .Height = 1, .BackColor = Color.FromArgb(238, 243, 241),
+            .Location = New Point(padX, y),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        parent.Controls.Add(line)
+        AddHandler parent.Resize, Sub() line.Width = parent.Width - padX * 2
+        line.Width = Math.Max(200, parent.Width - padX * 2)
+        Return y + 24
+    End Function
+
+    ' ── LOGO PICKER ──────────────────────────────────────────────────────────
+    ' A single click-target: the tile IS the button. An "Upload Photo" button
+    ' beside it said the same thing twice, so the tile carries the whole
+    ' interaction — click to choose, hover to see it offer, and once a photo is
+    ' set a small × in the corner clears it.
+    Private Shared Sub AddLogoPicker(parent As Panel, supplierName As String,
+                                     x As Integer, y As Integer, tileSize As Integer)
+        Dim initial As String = SupplierLogo.InitialOf(supplierName)
+
+        Dim lbl As New Label With {
+            .Text = "Logo", .Font = New Font("Segoe UI Semibold", 9.5F),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(x, y), .BackColor = Color.Transparent
+        }
+        parent.Controls.Add(lbl)
+
+        Dim tileY As Integer = y + 22
+        Dim tile As New BufferedPanel With {
+            .Size = New Size(tileSize, tileSize),
+            .Location = New Point(x, tileY),
+            .BackColor = CardBg, .Cursor = Cursors.Hand
+        }
+
+        Dim hot As Boolean = False
+        Dim clearRect As New Rectangle(tileSize - 26, 4, 22, 22)
+
+        AddHandler tile.Paint,
+            Sub(s2, e2)
+                Dim g As Graphics = e2.Graphics
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim box As New Rectangle(0, 0, tileSize - 1, tileSize - 1)
+                Dim hasPhoto As Boolean = (pickedImagePath <> "") AndAlso
+                                          SupplierLogo.GetThumb(pickedImagePath, box.Width) IsNot Nothing
+
+                If hasPhoto Then
+                    SupplierLogo.Paint(g, box, 16, pickedImagePath, initial, 34.0F)
+                    ' Hovering dims the photo and says what a click does.
+                    If hot Then
+                        Using path As GraphicsPath = RoundRect(box, 16)
+                            Using br As New SolidBrush(Color.FromArgb(140, 10, 79, 66))
+                                g.FillPath(br, path)
+                            End Using
+                        End Using
+                        Using f As New Font("Segoe UI Semibold", 9.0F),
+                              br As New SolidBrush(Color.White)
+                            Dim t As String = "Change"
+                            Dim sz As SizeF = g.MeasureString(t, f)
+                            g.DrawString(t, f, br, (tileSize - sz.Width) / 2.0F,
+                                         (tileSize - sz.Height) / 2.0F)
+                        End Using
+                    End If
+                    ' Clear badge, top-right.
+                    Using br As New SolidBrush(Color.FromArgb(215, 255, 255, 255))
+                        g.FillEllipse(br, clearRect)
+                    End Using
+                    Using pen As New Pen(Color.FromArgb(60, 0, 0, 0), 1.0F)
+                        g.DrawEllipse(pen, clearRect)
+                    End Using
+                    Using pen As New Pen(NegativeClr, 1.8F)
+                        pen.StartCap = LineCap.Round
+                        pen.EndCap = LineCap.Round
+                        Dim cx As Single = clearRect.X + clearRect.Width / 2.0F
+                        Dim cy As Single = clearRect.Y + clearRect.Height / 2.0F
+                        g.DrawLine(pen, cx - 4, cy - 4, cx + 4, cy + 4)
+                        g.DrawLine(pen, cx + 4, cy - 4, cx - 4, cy + 4)
+                    End Using
+                Else
+                    ' Empty state: a dashed drop-tile, so it reads as
+                    ' "something goes here" rather than as a photo already set.
+                    Using path As GraphicsPath = RoundRect(box, 16)
+                        Using br As New SolidBrush(If(hot, Color.FromArgb(224, 244, 238), TileBg))
+                            g.FillPath(br, path)
+                        End Using
+                        Using pen As New Pen(If(hot, MintPrimary, Color.FromArgb(190, 210, 204)), 1.4F)
+                            pen.DashStyle = DashStyle.Dash
+                            g.DrawPath(pen, path)
+                        End Using
+                    End Using
+                    Using pen As New Pen(MintDeep, 2.0F)
+                        pen.StartCap = LineCap.Round
+                        pen.EndCap = LineCap.Round
+                        Dim cx As Single = tileSize / 2.0F
+                        Dim cy As Single = tileSize / 2.0F - 11
+                        g.DrawLine(pen, cx - 9, cy, cx + 9, cy)
+                        g.DrawLine(pen, cx, cy - 9, cx, cy + 9)
+                    End Using
+                    Using f As New Font("Segoe UI Semibold", 8.5F),
+                          br As New SolidBrush(MintDeep)
+                        Dim t As String = "Add photo"
+                        Dim sz As SizeF = g.MeasureString(t, f)
+                        g.DrawString(t, f, br, (tileSize - sz.Width) / 2.0F, tileSize / 2.0F + 10)
+                    End Using
+                End If
+            End Sub
+
+        Dim browse As Action =
+            Sub()
+                Using ofd As New OpenFileDialog With {
+                    .Title = "Choose supplier logo",
+                    .Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files|*.*"
+                }
+                    If ofd.ShowDialog() = DialogResult.OK Then
+                        Dim stored As String = SupplierLogo.Store(ofd.FileName)
+                        If stored <> "" Then
+                            pickedImagePath = stored
+                            tile.Invalidate()
+                        End If
+                    End If
+                End Using
+            End Sub
+
+        AddHandler tile.MouseClick,
+            Sub(s2, e2)
+                Dim me_ As MouseEventArgs = CType(e2, MouseEventArgs)
+                ' The clear badge only exists while a photo is set.
+                If pickedImagePath <> "" AndAlso clearRect.Contains(me_.Location) Then
+                    ' Clears the row's photo on save. The imported file is left
+                    ' in SupplierImages rather than deleted, because another row
+                    ' saved earlier may still point at it.
+                    pickedImagePath = ""
+                    tile.Invalidate()
+                Else
+                    browse()
+                End If
+            End Sub
+        AddHandler tile.MouseEnter,
+            Sub()
+                hot = True
+                tile.Invalidate()
+            End Sub
+        AddHandler tile.MouseLeave,
+            Sub()
+                hot = False
+                tile.Invalidate()
+            End Sub
+
+        parent.Controls.Add(tile)
+
+        Dim lblHint As New Label With {
+            .Text = "PNG or JPG", .Font = New Font("Segoe UI", 8),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
+            .Location = New Point(x, tileY + tileSize + 6)
+        }
+        parent.Controls.Add(lblHint)
+    End Sub
+
+    ' ── TEXT FIELD ───────────────────────────────────────────────────────────
+    ' Absolutely positioned so two can share a row. Width is fixed by the
+    ' caller rather than anchored to the card, which is what lets the form be
+    ' two columns.
+    Private Shared Function AddFormField(parent As Panel, label As String,
+                                         x As Integer, y As Integer, width As Integer,
                                          value As String,
                                          Optional multiline As Boolean = False,
                                          Optional placeholder As String = "") As TextBox
         Dim lbl As New Label With {
-            .Text = label, .Font = New Font("Segoe UI Semibold", 10),
+            .Text = label, .Font = New Font("Segoe UI Semibold", 9.5F),
             .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(24, y), .BackColor = Color.Transparent
+            .Location = New Point(x, y), .BackColor = Color.Transparent
         }
 
-        Dim tileH As Integer = If(multiline, 52, 46)
+        Dim tileH As Integer = If(multiline, 68, 44)
         Dim tile As New Panel With {
-            .Location = New Point(24, y + 24), .Height = tileH,
-            .BackColor = CardBg,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            .Location = New Point(x, y + 22), .Size = New Size(width, tileH),
+            .BackColor = CardBg
         }
 
         Dim txt As New TextBox With {
             .BorderStyle = BorderStyle.None, .BackColor = CardBg,
-            .ForeColor = MintDark, .Font = New Font("Segoe UI", 11),
-            .Text = If(value, ""), .Location = New Point(12, (tileH - 22) \ 2),
-            .Multiline = multiline,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            .ForeColor = MintDark, .Font = New Font("Segoe UI", 10.5F),
+            .Text = If(value, ""),
+            .Location = New Point(12, If(multiline, 10, (tileH - 20) \ 2)),
+            .Width = width - 24,
+            .Multiline = multiline
         }
+        If multiline Then txt.Height = tileH - 20
         tile.Controls.Add(txt)
 
         If placeholder <> "" Then
             Dim phLabel As New Label With {
                 .Text = placeholder, .Font = New Font("Segoe UI", 10, FontStyle.Italic),
-                .ForeColor = Color.FromArgb(180, 180, 180), .BackColor = Color.Transparent,
-                .AutoSize = False, .Height = tileH, .Location = New Point(13, 0),
-                .Cursor = Cursors.IBeam, .TextAlign = ContentAlignment.MiddleLeft
+                .ForeColor = Color.FromArgb(180, 190, 187), .BackColor = Color.Transparent,
+                .AutoSize = False, .Size = New Size(width - 26, If(multiline, 22, tileH)),
+                .Location = New Point(13, If(multiline, 9, 0)),
+                .Cursor = Cursors.IBeam,
+                .TextAlign = If(multiline, ContentAlignment.TopLeft, ContentAlignment.MiddleLeft)
             }
             tile.Controls.Add(phLabel)
             phLabel.BringToFront()
 
             Dim UpdatePh As Action = Sub() phLabel.Visible = (txt.Text = "" AndAlso Not txt.Focused)
-
             AddHandler txt.TextChanged, Sub() UpdatePh()
             AddHandler txt.Enter, Sub() UpdatePh()
             AddHandler txt.Leave, Sub() UpdatePh()
             AddHandler phLabel.Click, Sub() txt.Focus()
             UpdatePh()
-
-            AddHandler tile.Resize, Sub() phLabel.Width = tile.Width - 24
         End If
 
         AddHandler tile.Paint,
@@ -720,9 +963,7 @@ Public Class ProcurementSuppliersPanelBuilder
                     Using fill As New SolidBrush(CardBg)
                         e.Graphics.FillPath(fill, path)
                     End Using
-                    Using pen As New Pen(If(txt.Focused,
-                                            Color.FromArgb(0, 168, 142),
-                                            Color.FromArgb(214, 224, 220)),
+                    Using pen As New Pen(If(txt.Focused, MintPrimary, Color.FromArgb(214, 224, 220)),
                                          If(txt.Focused, 1.8F, 1.2F))
                         e.Graphics.DrawPath(pen, path)
                     End Using
@@ -731,20 +972,104 @@ Public Class ProcurementSuppliersPanelBuilder
 
         AddHandler txt.Enter, Sub() tile.Invalidate()
         AddHandler txt.Leave, Sub() tile.Invalidate()
-        AddHandler txt.TextChanged, Sub() tile.Invalidate()
-
-        AddHandler tile.Resize,
-            Sub()
-                txt.Width = tile.Width - 24
-                If multiline Then txt.Height = tile.Height - 16
-            End Sub
-        AddHandler parent.Resize, Sub() tile.Width = parent.Width - 48
-
-        tile.Width = Math.Max(200, parent.Width - 48)
-        txt.Width = tile.Width - 24
 
         parent.Controls.AddRange({lbl, tile})
         Return txt
+    End Function
+
+    ' ── DROPDOWN FIELD ───────────────────────────────────────────────────────
+    ' Same tile as AddFormField so the two line up on a shared row. The combo is
+    ' owner-drawn flat, because a stock ComboBox paints a raised 3D border that
+    ' would not match anything else on this form.
+    Private Shared Function AddFormCombo(parent As Panel, label As String,
+                                         x As Integer, y As Integer, width As Integer,
+                                         items As String(), value As String,
+                                         emptyText As String) As ComboBox
+        Dim lbl As New Label With {
+            .Text = label, .Font = New Font("Segoe UI Semibold", 9.5F),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(x, y), .BackColor = Color.Transparent
+        }
+
+        Dim tileH As Integer = 44
+        Dim tile As New Panel With {
+            .Location = New Point(x, y + 22), .Size = New Size(width, tileH),
+            .BackColor = CardBg
+        }
+
+        Dim cbo As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList,
+            .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 10.5F),
+            .BackColor = CardBg, .ForeColor = MintDark,
+            .Location = New Point(10, (tileH - 24) \ 2),
+            .Width = width - 20,
+            .DrawMode = DrawMode.OwnerDrawFixed, .ItemHeight = 22
+        }
+
+        ' A blank first entry is how "not specified" is chosen; without it a
+        ' dropdown-list combo cannot be returned to empty.
+        If emptyText <> "" Then cbo.Items.Add(emptyText)
+        cbo.Items.AddRange(items)
+
+        ' An older row may hold a value this list does not offer; keep it rather
+        ' than silently rewriting the supplier's terms on the next save.
+        If value <> "" AndAlso Not cbo.Items.Contains(value) Then cbo.Items.Add(value)
+        If value <> "" Then
+            cbo.SelectedItem = value
+        ElseIf cbo.Items.Count > 0 Then
+            cbo.SelectedIndex = 0
+        End If
+
+        AddHandler cbo.DrawItem,
+            Sub(s, e)
+                If e.Index < 0 Then Return
+                e.DrawBackground()
+                Dim text As String = cbo.Items(e.Index).ToString()
+                Dim isEmptyRow As Boolean = (emptyText <> "" AndAlso e.Index = 0)
+                Using br As New SolidBrush(If(isEmptyRow, FaintText, MintDark))
+                    Dim sf As New StringFormat With {.LineAlignment = StringAlignment.Center}
+                    e.Graphics.DrawString(text, cbo.Font, br,
+                        New RectangleF(e.Bounds.X + 2, e.Bounds.Y, e.Bounds.Width, e.Bounds.Height), sf)
+                End Using
+            End Sub
+
+        tile.Controls.Add(cbo)
+
+        AddHandler tile.Paint,
+            Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rect = tile.ClientRectangle
+                rect.Inflate(-1, -1)
+                Using path As GraphicsPath = RoundRect(rect, 10)
+                    Using fill As New SolidBrush(CardBg)
+                        e.Graphics.FillPath(fill, path)
+                    End Using
+                    Using pen As New Pen(If(cbo.Focused, MintPrimary, Color.FromArgb(214, 224, 220)),
+                                         If(cbo.Focused, 1.8F, 1.2F))
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+                ' Chevron, drawn over the combo's own flat button area.
+                Using pen As New Pen(SubText, 1.6F)
+                    pen.StartCap = LineCap.Round
+                    pen.EndCap = LineCap.Round
+                    pen.LineJoin = LineJoin.Round
+                    Dim cx As Single = tile.Width - 20
+                    Dim cy As Single = tile.Height / 2.0F - 1
+                    e.Graphics.DrawLines(pen, New PointF() {
+                        New PointF(cx - 5, cy - 2),
+                        New PointF(cx, cy + 3),
+                        New PointF(cx + 5, cy - 2)
+                    })
+                End Using
+            End Sub
+
+        AddHandler cbo.Enter, Sub() tile.Invalidate()
+        AddHandler cbo.Leave, Sub() tile.Invalidate()
+
+        parent.Controls.AddRange({lbl, tile})
+        Return cbo
     End Function
 
     Private Shared Sub CommitSupplier()
@@ -755,6 +1080,20 @@ Public Class ProcurementSuppliersPanelBuilder
         Dim phone As String = txtPhone.Text.Trim()
         Dim email As String = txtEmail.Text.Trim()
         Dim address As String = txtAddress.Text.Trim()
+
+        ' The commercial controls only exist once their columns do.
+        Dim tin As String = If(txtTin IsNot Nothing, txtTin.Text.Trim(), "")
+        Dim notes As String = If(txtNotes IsNot Nothing, txtNotes.Text.Trim(), "")
+        Dim terms As String = ""
+        If cboTerms IsNot Nothing AndAlso cboTerms.SelectedIndex > 0 Then
+            terms = CStr(cboTerms.SelectedItem)
+        End If
+        ' Status defaults to active for a brand-new supplier, which is what the
+        ' INSERT did before the field was offered at all.
+        Dim isActive As Boolean = True
+        If cboStatus IsNot Nothing Then
+            isActive = (CStr(If(cboStatus.SelectedItem, "Active")) = "Active")
+        End If
 
         If name = "" Then
             AppModal.Show("Supplier Name is required.", "Missing Field",
@@ -791,32 +1130,72 @@ Public Class ProcurementSuppliersPanelBuilder
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtAddress.Focus() : Return
         End If
+        ' TIN is optional, but a typed one has to look like a TIN — a wrong
+        ' number on an invoice is worse than none at all.
+        If tin <> "" AndAlso Not System.Text.RegularExpressions.Regex.IsMatch(tin, "^[0-9\-\s]+$") Then
+            AppModal.Show("TIN must contain digits only (e.g. 123-456-789-000).", "Invalid TIN",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            txtTin.Focus() : Return
+        End If
 
         btnSaveRef.Tag = "done"
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' The logo column is optional; write it only where it exists,
+                ' so an un-migrated database saves everything else as before.
                 If editingId > 0 Then
                     Using cmd As New MySqlCommand(
                         "UPDATE suppliers SET name = @n, contact_person = @c, phone = @p, " &
-                        "email = @e, address = @a WHERE supplier_id = @id", conn)
+                        "email = @e, address = @a, is_active = @act" &
+                        If(SupplierLogo.HasColumn, ", image_path = @img", "") &
+                        If(SupplierLogo.HasCommercial,
+                           ", tin = @tin, payment_terms = @terms, notes = @notes", "") &
+                        " WHERE supplier_id = @id", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
                         cmd.Parameters.AddWithValue("@p", phone)
                         cmd.Parameters.AddWithValue("@e", email)
                         cmd.Parameters.AddWithValue("@a", address)
+                        cmd.Parameters.AddWithValue("@act", If(isActive, 1, 0))
+                        ' Empty means the user removed the photo — store NULL,
+                        ' not "", so the column reads the same as never-set.
+                        If SupplierLogo.HasColumn Then
+                            cmd.Parameters.AddWithValue("@img",
+                                If(pickedImagePath = "", CObj(DBNull.Value), CObj(pickedImagePath)))
+                        End If
+                        If SupplierLogo.HasCommercial Then
+                            cmd.Parameters.AddWithValue("@tin", NullIfBlank(tin))
+                            cmd.Parameters.AddWithValue("@terms", NullIfBlank(terms))
+                            cmd.Parameters.AddWithValue("@notes", NullIfBlank(notes))
+                        End If
                         cmd.Parameters.AddWithValue("@id", editingId)
                         cmd.ExecuteNonQuery()
                     End Using
                 Else
                     Using cmd As New MySqlCommand(
-                        "INSERT INTO suppliers (name, contact_person, phone, email, address, is_active) " &
-                        "VALUES (@n, @c, @p, @e, @a, 1)", conn)
+                        "INSERT INTO suppliers (name, contact_person, phone, email, address" &
+                        If(SupplierLogo.HasColumn, ", image_path", "") &
+                        If(SupplierLogo.HasCommercial, ", tin, payment_terms, notes", "") &
+                        ", is_active) VALUES (@n, @c, @p, @e, @a" &
+                        If(SupplierLogo.HasColumn, ", @img", "") &
+                        If(SupplierLogo.HasCommercial, ", @tin, @terms, @notes", "") &
+                        ", @act)", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
                         cmd.Parameters.AddWithValue("@p", phone)
                         cmd.Parameters.AddWithValue("@e", email)
                         cmd.Parameters.AddWithValue("@a", address)
+                        cmd.Parameters.AddWithValue("@act", If(isActive, 1, 0))
+                        If SupplierLogo.HasColumn Then
+                            cmd.Parameters.AddWithValue("@img",
+                                If(pickedImagePath = "", CObj(DBNull.Value), CObj(pickedImagePath)))
+                        End If
+                        If SupplierLogo.HasCommercial Then
+                            cmd.Parameters.AddWithValue("@tin", NullIfBlank(tin))
+                            cmd.Parameters.AddWithValue("@terms", NullIfBlank(terms))
+                            cmd.Parameters.AddWithValue("@notes", NullIfBlank(notes))
+                        End If
                         cmd.ExecuteNonQuery()
                     End Using
                 End If
@@ -840,6 +1219,11 @@ Public Class ProcurementSuppliersPanelBuilder
     Private Shared Sub LoadDetail(supplierId As Integer)
         Dim container As Panel = containerRef
         If container Is Nothing Then Return
+
+        ' Same reason as RenderList: this is where an edit lands after saving,
+        ' so the logo on screen has to be re-read rather than served from the
+        ' bitmaps the previous view scaled.
+        SupplierLogo.ClearCache(container)
 
         Dim sup As SupplierRow = LoadOneSupplier(supplierId)
         If sup Is Nothing Then
@@ -1004,29 +1388,19 @@ Public Class ProcurementSuppliersPanelBuilder
         Dim infoCard As New BufferedPanel With {.Height = 260, .BackColor = CardBg, .Dock = DockStyle.Top}
         AddHandler infoCard.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
-        Dim initial As String = If(String.IsNullOrWhiteSpace(sup.Name), "?",
-                                   sup.Name.Trim().Substring(0, 1).ToUpperInvariant())
-        Dim avatarSize As Integer = 56
+        Dim initial As String = SupplierLogo.InitialOf(sup.Name)
+        ' The logo is the identity of the card, so it is given real size here
+        ' rather than the list's small tile.
+        Dim avatarSize As Integer = 84
         Dim avatar As New BufferedPanel With {
             .Size = New Size(avatarSize, avatarSize),
             .Location = New Point(22, 20), .BackColor = Color.Transparent
         }
+        Dim detailImage As String = sup.ImagePath
         AddHandler avatar.Paint,
             Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim av As New Rectangle(0, 0, avatarSize - 1, avatarSize - 1)
-                Using path As GraphicsPath = RoundRect(av, 16)
-                    Using br As New LinearGradientBrush(av, MintPrimary, MintDeep, 90.0F)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                Using f As New Font("Segoe UI", 22, FontStyle.Bold),
-                      br As New SolidBrush(Color.White)
-                    Dim sz = e.Graphics.MeasureString(initial, f)
-                    e.Graphics.DrawString(initial, f, br,
-                        (avatarSize - sz.Width) / 2.0F,
-                        (avatarSize - sz.Height) / 2.0F)
-                End Using
+                SupplierLogo.Paint(e.Graphics, New Rectangle(0, 0, avatarSize - 1, avatarSize - 1),
+                            20, detailImage, initial, 34.0F)
             End Sub
         infoCard.Controls.Add(avatar)
 
@@ -1034,9 +1408,31 @@ Public Class ProcurementSuppliersPanelBuilder
             .Text = sup.Name,
             .Font = New Font("Segoe UI", 18, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(avatarSize + 34, 22), .BackColor = Color.Transparent
+            .Location = New Point(avatarSize + 40, 34), .BackColor = Color.Transparent
         }
         infoCard.Controls.Add(lblSupName)
+
+        ' Second line: where they are. The full address is repeated in the field
+        ' list below, but a supplier is recognised by name + place, so the
+        ' header states both without making the reader look further down.
+        Dim lblSupWhere As New Label With {
+            .Text = If(String.IsNullOrWhiteSpace(sup.Address), "No address on file", sup.Address),
+            .Font = New Font("Segoe UI", 10.5F),
+            .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(avatarSize + 42, 66), .BackColor = Color.Transparent
+        }
+        infoCard.Controls.Add(lblSupWhere)
+
+        ' Centre the name block against the avatar once the labels have
+        ' measured themselves, so a long name does not sit off-axis.
+        Dim CentreNameBlock As Action =
+            Sub()
+                Dim blockH As Integer = lblSupName.PreferredHeight + 4 + lblSupWhere.PreferredHeight
+                Dim top As Integer = 20 + (avatarSize - blockH) \ 2
+                lblSupName.Top = top
+                lblSupWhere.Top = top + lblSupName.PreferredHeight + 4
+            End Sub
+        CentreNameBlock()
 
         Dim pill As New Label With {
             .Text = sup.ActivePoCount & If(sup.ActivePoCount = 1, " active PO", " active POs"),
@@ -1050,11 +1446,27 @@ Public Class ProcurementSuppliersPanelBuilder
         ' Empty state renders as a plain label — no fill, no pill region.
         If sup.ActivePoCount > 0 Then PillLabel(pill)
         infoCard.Controls.Add(pill)
-        AddHandler infoCard.Resize,
+
+        ' Inactive is the exception, so only that state is badged; active is the
+        ' norm and a badge on every profile would just be noise.
+        Dim inactiveBadge As Label = Nothing
+        If Not sup.IsActive Then
+            inactiveBadge = OutlineBadge("Inactive", SubText)
+            infoCard.Controls.Add(inactiveBadge)
+        End If
+        Dim PositionPills As Action =
             Sub()
                 pill.Left = infoCard.Width - pill.Width - 22
-                pill.Top = 26
+                pill.Top = 20 + (avatarSize - pill.Height) \ 2
+                If inactiveBadge IsNot Nothing Then
+                    ' Stacked under the PO pill, right edges aligned.
+                    pill.Top = 20 + (avatarSize - pill.Height) \ 2 - 16
+                    inactiveBadge.Left = infoCard.Width - inactiveBadge.Width - 22
+                    inactiveBadge.Top = pill.Top + pill.Height + 8
+                End If
             End Sub
+        AddHandler infoCard.Resize, Sub() PositionPills()
+        PositionPills()
 
         Dim nameDivider As New Panel With {
             .Height = 1, .BackColor = RowDivider,
@@ -1094,17 +1506,37 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Try
             End Function
 
+        Dim Dash As String = ChrW(8212)
         Dim fieldDefs As New List(Of (img As Image, lbl As String, val As String)) From {
-            (TintIcon("user.png"), "Contact Person", If(String.IsNullOrWhiteSpace(sup.Contact), ChrW(8212), sup.Contact)),
-            (TintIcon("phone.png"), "Phone", If(String.IsNullOrWhiteSpace(sup.Phone), ChrW(8212), sup.Phone)),
-            (TintIcon("mail.png"), "Email", If(String.IsNullOrWhiteSpace(sup.Email), ChrW(8212), sup.Email)),
-            (TintIcon("location.png"), "Address", If(String.IsNullOrWhiteSpace(sup.Address), ChrW(8212), sup.Address))
+            (TintIcon("user.png"), "Contact Person", If(String.IsNullOrWhiteSpace(sup.Contact), Dash, sup.Contact)),
+            (TintIcon("phone.png"), "Phone", If(String.IsNullOrWhiteSpace(sup.Phone), Dash, sup.Phone)),
+            (TintIcon("mail.png"), "Email", If(String.IsNullOrWhiteSpace(sup.Email), Dash, sup.Email)),
+            (TintIcon("location.png"), "Address", If(String.IsNullOrWhiteSpace(sup.Address), Dash, sup.Address))
         }
+        ' Only offered once the columns exist, so an un-migrated database shows
+        ' the same four fields it always did.
+        If SupplierLogo.HasCommercial Then
+            fieldDefs.Add((TintIcon("clipboard.png"), "TIN",
+                           If(String.IsNullOrWhiteSpace(sup.Tin), Dash, sup.Tin)))
+            fieldDefs.Add((TintIcon("wallet-income.png"), "Payment Terms",
+                           If(String.IsNullOrWhiteSpace(sup.PaymentTerms), Dash, sup.PaymentTerms)))
+        End If
+
+        ' Two columns: the list is six fields once TIN and terms are in, and a
+        ' single column of six pushes the buttons well below the fold.
+        Dim colGap As Integer = 24
+        Dim fieldCols As Integer = 2
 
         Dim yf As Integer = fieldStartY
+        Dim idx As Integer = -1
         For Each fd In fieldDefs
+            idx += 1
+            Dim col As Integer = idx Mod fieldCols
+            Dim rowY As Integer = fieldStartY + (idx \ fieldCols) * fieldGap
+            Dim colX As Integer = 22
+
             Dim iconTile As New BufferedPanel With {
-                .Size = New Size(34, 34), .Location = New Point(22, yf), .BackColor = TileBg
+                .Size = New Size(34, 34), .Location = New Point(colX, rowY), .BackColor = TileBg
             }
             AddHandler iconTile.Paint,
                 Sub(s, e)
@@ -1132,16 +1564,57 @@ Public Class ProcurementSuppliersPanelBuilder
             Dim lblFieldCap As New Label With {
                 .Text = fd.lbl, .Font = New Font("Segoe UI", 8.5F),
                 .ForeColor = FaintText, .AutoSize = True,
-                .Location = New Point(66, yf + 2), .BackColor = Color.Transparent
+                .Location = New Point(colX + 44, rowY + 2), .BackColor = Color.Transparent
             }
             Dim lblFieldVal As New Label With {
                 .Text = fd.val, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-                .ForeColor = MintDark, .AutoSize = True,
-                .Location = New Point(66, yf + 18), .BackColor = Color.Transparent
+                .ForeColor = MintDark, .AutoSize = True, .AutoEllipsis = True,
+                .Location = New Point(colX + 44, rowY + 18), .BackColor = Color.Transparent
             }
             infoCard.Controls.AddRange({iconTile, lblFieldCap, lblFieldVal})
-            yf += fieldGap
+
+            ' Column x depends on the card's width, which is not known until it
+            ' is laid out, so the trio is placed again on every resize.
+            Dim capCol As Integer = col
+            Dim RePlace As Action =
+                Sub()
+                    Dim usable As Integer = infoCard.Width - 44
+                    Dim cw As Integer = (usable - colGap) \ fieldCols
+                    Dim x As Integer = 22 + capCol * (cw + colGap)
+                    iconTile.Left = x
+                    lblFieldCap.Left = x + 44
+                    lblFieldVal.Left = x + 44
+                    lblFieldVal.MaximumSize = New Size(Math.Max(60, cw - 48), 0)
+                End Sub
+            AddHandler infoCard.Resize, Sub() RePlace()
+            RePlace()
         Next
+        ' Where the field grid ends, whatever the row count.
+        yf = fieldStartY + CInt(Math.Ceiling(fieldDefs.Count / CDbl(fieldCols))) * fieldGap
+
+        ' Notes span the full width — free text does not belong in a column.
+        If SupplierLogo.HasCommercial AndAlso Not String.IsNullOrWhiteSpace(sup.Notes) Then
+            Dim lblNotesCap As New Label With {
+                .Text = "Notes", .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = FaintText, .AutoSize = True,
+                .Location = New Point(22, yf), .BackColor = Color.Transparent
+            }
+            Dim lblNotesVal As New Label With {
+                .Text = sup.Notes, .Font = New Font("Segoe UI", 10.5F),
+                .ForeColor = Color.FromArgb(52, 68, 64), .AutoSize = True,
+                .Location = New Point(22, yf + 18), .BackColor = Color.Transparent
+            }
+            infoCard.Controls.AddRange({lblNotesCap, lblNotesVal})
+
+            Dim SizeNotes As Action =
+                Sub() lblNotesVal.MaximumSize = New Size(Math.Max(120, infoCard.Width - 44), 0)
+            AddHandler infoCard.Resize, Sub() SizeNotes()
+            SizeNotes()
+
+            ' AutoSize labels only report a real height once measured, so the
+            ' card is grown by what the text actually needs.
+            yf += 22 + Math.Max(20, lblNotesVal.PreferredHeight) + 14
+        End If
 
         Dim actionBarY As Integer = yf + 12
         Dim actionBar As New Panel With {
@@ -1444,6 +1917,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT s.supplier_id, s.name, s.contact_person, s.phone, s.email, s.address, s.is_active, " &
+                    SupplierLogo.SelectFragment() &
                     "(SELECT COUNT(*) FROM purchase_orders po " &
                     " WHERE po.supplier_id = s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos " &
                     "FROM suppliers s ORDER BY s.name ASC", conn)
@@ -1468,6 +1942,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT s.supplier_id, s.name, s.contact_person, s.phone, s.email, s.address, s.is_active, " &
+                    SupplierLogo.SelectFragment() &
                     "(SELECT COUNT(*) FROM purchase_orders po " &
                     " WHERE po.supplier_id = s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos " &
                     "FROM suppliers s WHERE s.supplier_id = @id LIMIT 1", conn)
@@ -1492,6 +1967,10 @@ Public Class ProcurementSuppliersPanelBuilder
             .Phone = If(IsDBNull(rdr("phone")), "", rdr("phone").ToString()),
             .Email = If(IsDBNull(rdr("email")), "", rdr("email").ToString()),
             .Address = If(IsDBNull(rdr("address")), "", rdr("address").ToString()),
+            .ImagePath = SupplierLogo.ReadPath(rdr),
+            .Tin = SupplierLogo.ReadColumn(rdr, "tin"),
+            .PaymentTerms = SupplierLogo.ReadColumn(rdr, "payment_terms"),
+            .Notes = SupplierLogo.ReadColumn(rdr, "notes"),
             .IsActive = (Not IsDBNull(rdr("is_active"))) AndAlso Convert.ToBoolean(rdr("is_active")),
             .ActivePoCount = If(withCount, SafeInt(rdr("active_pos")), 0)
         }
@@ -1586,6 +2065,81 @@ Public Class ProcurementSuppliersPanelBuilder
         PanelRenderer.Draw(panel, e, True)
     End Sub
 
+    ' Outlined rounded button, centred label. Same reasoning as
+    ' PaintFilledButton, with a hairline border instead of a solid fill.
+    Private Shared Sub PaintOutlineButton(b As Button, e As PaintEventArgs, border As Color)
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+        Using path As GraphicsPath = RoundRect(New Rectangle(1, 1, b.Width - 2, b.Height - 2), 8)
+            Using fill As New SolidBrush(b.BackColor)
+                e.Graphics.FillPath(fill, path)
+            End Using
+            Using pen As New Pen(border, 1.2F)
+                e.Graphics.DrawPath(pen, path)
+            End Using
+        End Using
+        Dim sf As New StringFormat With {
+            .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
+        }
+        Using brush As New SolidBrush(b.ForeColor)
+            e.Graphics.DrawString(b.Text, b.Font, brush, New RectangleF(0, 0, b.Width, b.Height), sf)
+        End Using
+    End Sub
+
+    ' The tinted back chevron both the form and detail headers use. Built once
+    ' here rather than copied into each, which is how it drifted before.
+    Private Shared Function BuildBackArrow() As PictureBox
+        Dim pic As New PictureBox With {
+            .Size = New Size(22, 22), .Location = New Point(24, 36),
+            .BackColor = Color.Transparent,
+            .SizeMode = PictureBoxSizeMode.Zoom, .Cursor = Cursors.Hand
+        }
+        Dim iconPath As String = IO.Path.Combine(Application.StartupPath, "previous.png")
+        If IO.File.Exists(iconPath) Then
+            Try
+                Dim raw As Image = Image.FromFile(iconPath)
+                Dim bmp As New Bitmap(raw.Width, raw.Height)
+                Using g As Graphics = Graphics.FromImage(bmp)
+                    Dim cm As New Imaging.ColorMatrix(New Single()() {
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 0, 0},
+                        New Single() {0, 0, 0, 1, 0},
+                        New Single() {CSng(0 / 255.0F), CSng(130 / 255.0F), CSng(109 / 255.0F), 0, 1}
+                    })
+                    Dim ia As New Imaging.ImageAttributes()
+                    ia.SetColorMatrix(cm)
+                    g.DrawImage(raw, New Rectangle(0, 0, bmp.Width, bmp.Height),
+                                0, 0, raw.Width, raw.Height, GraphicsUnit.Pixel, ia)
+                End Using
+                pic.Image = bmp
+                raw.Dispose()
+            Catch
+                ' No icon is better than a crash on a missing or locked file.
+            End Try
+        End If
+        AddHandler pic.MouseEnter, Sub() pic.BackColor = Color.FromArgb(30, 0, 130, 109)
+        AddHandler pic.MouseLeave, Sub() pic.BackColor = Color.Transparent
+        Return pic
+    End Function
+
+    ' Solid rounded button, centred label. FlatStyle alone cannot round a
+    ' WinForms button without a Region, and a Region clips to hard pixels, so
+    ' the fill is drawn instead and the corners stay smooth.
+    Private Shared Sub PaintFilledButton(b As Button, e As PaintEventArgs)
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+        Using path As GraphicsPath = RoundRect(New Rectangle(0, 0, b.Width, b.Height), 8)
+            Using fill As New SolidBrush(b.BackColor)
+                e.Graphics.FillPath(fill, path)
+            End Using
+        End Using
+        Dim sf As New StringFormat With {
+            .Alignment = StringAlignment.Center, .LineAlignment = StringAlignment.Center
+        }
+        Using brush As New SolidBrush(b.ForeColor)
+            e.Graphics.DrawString(b.Text, b.Font, brush, New RectangleF(0, 0, b.Width, b.Height), sf)
+        End Using
+    End Sub
+
     Private Shared Function MakeLink(text As String, clr As Color) As Label
         Dim lbl As New Label With {
             .Text = text, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
@@ -1594,6 +2148,14 @@ Public Class ProcurementSuppliersPanelBuilder
         AddHandler lbl.MouseEnter, Sub() lbl.Font = New Font("Segoe UI", 11, FontStyle.Bold Or FontStyle.Underline)
         AddHandler lbl.MouseLeave, Sub() lbl.Font = New Font("Segoe UI", 11, FontStyle.Bold)
         Return lbl
+    End Function
+
+    ' An untyped optional field is stored NULL rather than "", so the column
+    ' reads the same as never-set and "no terms agreed" cannot be confused with
+    ' "terms agreed, recorded as empty".
+    Private Shared Function NullIfBlank(value As String) As Object
+        If String.IsNullOrWhiteSpace(value) Then Return DBNull.Value
+        Return value
     End Function
 
     Private Shared Function SafeInt(o As Object) As Integer

@@ -103,6 +103,84 @@ PaintStore_POS
  the file name up inside this installation's ProductImages folder.
  </summary>
 </member>
+<member name="F:PaintStore_POS.SupplierLogo.OptionalColumns">
+ <summary>Every optional supplier column, in the order a SELECT lists them.</summary>
+</member>
+<member name="P:PaintStore_POS.SupplierLogo.HasColumn">
+ <summary>True when suppliers.image_path exists.</summary>
+</member>
+<member name="P:PaintStore_POS.SupplierLogo.HasCommercial">
+ <summary>True when the commercial fields (tin / terms / notes) exist.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.Has(System.String)">
+ <summary>True when a specific optional column is present.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.Probe">
+ <summary>
+ Detect the optional columns. Called once when a supplier screen loads
+ rather than per query, so information_schema is not hit per row. One
+ round-trip covers every column via IN (...).
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.SelectFragment">
+ <summary>
+ The optional columns that exist, as "s.col, s.col, " ready to splice
+ into a SELECT list. Empty when none do, so one query string stays valid
+ on a migrated and an un-migrated database alike.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.GroupByFragment">
+ <summary>
+ The same columns as a GROUP BY tail (", s.col, s.col"), for the grouped
+ query the Admin grid runs. Empty when none exist.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.ReadColumn(MySql.Data.MySqlClient.MySqlDataReader,System.String)">
+ <summary>Read an optional column, or "" when it was not selected.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.ReadPath(MySql.Data.MySqlClient.MySqlDataReader)">
+ <summary>Read image_path from a reader, or "" when it was not selected.</summary>
+</member>
+<member name="P:PaintStore_POS.SupplierLogo.PaymentTermOptions">
+ <summary>
+ The payment terms a supplier can be given. Free-typed values from an
+ older row still display; this is what the dropdown offers.
+ </summary>
+</member>
+<member name="P:PaintStore_POS.SupplierLogo.ImageRoot">
+ <summary>Folder supplier logos are copied into.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.Store(System.String)">
+ <summary>
+ Copy a chosen file into the app's own folder and return the path to
+ store. Empty string when the import failed, which callers treat as
+ "no photo picked".
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.GetThumb(System.String,System.Int32)">
+ <summary>
+ A square thumbnail, centre-cropped so a wide logo is not squashed into
+ the avatar tile. Nothing when the path is empty or the file cannot be
+ read — every caller treats that as "draw the initial instead".
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.ClearCache(System.Windows.Forms.Control)">
+ <summary>
+ Drop the scaled avatars and dispose them once the UI thread has finished
+ the rebuild that replaced them. Call when a supplier screen re-renders,
+ so a logo replaced since the last render is re-read rather than served
+ from a stale bitmap.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.Paint(System.Drawing.Graphics,System.Drawing.Rectangle,System.Int32,System.String,System.String,System.Single)">
+ <summary>
+ One avatar tile: the logo when there is one, the gradient initial when
+ there is not.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierLogo.InitialOf(System.String)">
+ <summary>First letter of a supplier name, or "?" when it is blank.</summary>
+</member>
 <member name="M:PaintStore_POS.ReceiptPrinter.DrawBarcode(System.Drawing.Graphics,System.String,System.Int32,System.Int32,System.Int32)">
  <summary>
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.

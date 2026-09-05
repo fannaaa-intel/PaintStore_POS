@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -26,6 +26,11 @@ Imports MySql.Data.MySqlClient
 '  Counts come from one grouped query, not a per-row lookup:
 '    COUNT(DISTINCT p.product_id) / COUNT(DISTINCT po.po_id) over two LEFT
 '    JOINs. DISTINCT is required — joining both tables at once multiplies rows.
+'
+'  The supplier logo is drawn by the shared SupplierLogo module, the same one
+'  Procurement uploads through, so both screens show one photo from one cache.
+'  suppliers.image_path is optional (see migrations.sql); without it the tile
+'  falls back to the supplier's initial.
 ' =============================================================================
 Public Class AdminSuppliersPanelBuilder
 
@@ -53,6 +58,7 @@ Public Class AdminSuppliersPanelBuilder
         Public ContactPerson As String
         Public Phone As String
         Public Email As String
+        Public ImagePath As String
         Public IsActive As Boolean
         Public ProductCount As Integer
         Public PoCount As Integer
@@ -80,6 +86,10 @@ Public Class AdminSuppliersPanelBuilder
     Public Shared Sub LoadSuppliers(container As Panel)
         _container = container
         _searchQuery = ""
+        SupplierLogo.Probe()
+        ' A logo replaced in Procurement since this screen last rendered must be
+        ' re-read rather than served from the bitmap cached at that size.
+        SupplierLogo.ClearCache(container)
         LoadData()
         Render()
     End Sub
@@ -93,15 +103,19 @@ Public Class AdminSuppliersPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' The optional columns join both the projection and the
+                ' GROUP BY, and only the ones that actually exist.
                 Dim sql As String =
                     "SELECT s.supplier_id, s.name, s.contact_person, s.phone, s.email, s.is_active, " &
+                    SupplierLogo.SelectFragment() &
                     "COUNT(DISTINCT p.product_id) AS product_count, " &
                     "COUNT(DISTINCT po.po_id) AS po_count " &
                     "FROM suppliers s " &
                     "LEFT JOIN products p ON p.supplier_id = s.supplier_id " &
                     "LEFT JOIN purchase_orders po ON po.supplier_id = s.supplier_id " &
-                    "GROUP BY s.supplier_id, s.name, s.contact_person, s.phone, s.email, s.is_active " &
-                    "ORDER BY s.name ASC"
+                    "GROUP BY s.supplier_id, s.name, s.contact_person, s.phone, s.email, s.is_active" &
+                    SupplierLogo.GroupByFragment() &
+                    " ORDER BY s.name ASC"
 
                 Using cmd As New MySqlCommand(sql, conn)
                     Using rdr = cmd.ExecuteReader()
@@ -112,6 +126,7 @@ Public Class AdminSuppliersPanelBuilder
                                 .ContactPerson = SafeStr(rdr("contact_person")),
                                 .Phone = SafeStr(rdr("phone")),
                                 .Email = SafeStr(rdr("email")),
+                                .ImagePath = SupplierLogo.ReadPath(rdr),
                                 .IsActive = (Not IsDBNull(rdr("is_active"))) AndAlso
                                             Convert.ToBoolean(rdr("is_active")),
                                 .ProductCount = SafeInt(rdr("product_count")),
@@ -387,7 +402,7 @@ Public Class AdminSuppliersPanelBuilder
         Dim hdr As New Panel With {.Height = HDR_H, .BackColor = Color.Transparent}
 
         Dim labels As Label() = {
-            MakeColLabel("SUPPLIER", New Point(24, 13)),
+            MakeColLabel("SUPPLIER", New Point(24 + 38 + 14, 13)),
             MakeColLabel("CONTACT", New Point(0, 13)),
             MakeColLabel("PRODUCTS", New Point(0, 13)),
             MakeColLabel("PURCHASE ORDERS", New Point(0, 13))
@@ -397,7 +412,8 @@ Public Class AdminSuppliersPanelBuilder
         AddHandler hdr.Resize,
             Sub()
                 Dim w = hdr.Width
-                labels(0).Left = 24
+                ' Aligned with the name text, which now starts past the logo.
+                labels(0).Left = 24 + 38 + 14
                 labels(1).Left = CInt(w * 0.3)
                 labels(2).Left = CInt(w * 0.64)
                 labels(3).Left = CInt(w * 0.79)
@@ -501,6 +517,30 @@ Public Class AdminSuppliersPanelBuilder
                 End Using
             End Sub
 
+        ' Logo tile — the same avatar Procurement uploads, so a supplier is
+        ' recognisable here at a glance rather than by name alone.
+        Dim avSize As Integer = 38
+        Dim initial As String = SupplierLogo.InitialOf(r.Name)
+        Dim capImage As String = r.ImagePath
+        Dim isActive As Boolean = r.IsActive
+        Dim avatar As New BufferedPanel With {
+            .Size = New Size(avSize, avSize),
+            .BackColor = Color.Transparent
+        }
+        AddHandler avatar.Paint,
+            Sub(s2, e2)
+                Dim box As New Rectangle(0, 0, avSize - 1, avSize - 1)
+                SupplierLogo.Paint(e2.Graphics, box, 11, capImage, initial, 15.0F)
+                ' Inactive suppliers read as muted everywhere else on the row;
+                ' the logo is greyed to match rather than staying full colour.
+                If Not isActive Then
+                    e2.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                    Using br As New SolidBrush(Color.FromArgb(150, 244, 248, 246))
+                        e2.Graphics.FillRoundedRectangle(br, box, 11)
+                    End Using
+                End If
+            End Sub
+
         Dim lblName As New Label With {
             .Text = If(r.Name = "", "—", r.Name),
             .Font = New Font("Segoe UI", 11, FontStyle.Bold),
@@ -566,6 +606,7 @@ Public Class AdminSuppliersPanelBuilder
         }
         RoundLabel(poPill, 10)
 
+        p.Controls.Add(avatar)
         p.Controls.Add(lblName)
         If badge IsNot Nothing Then p.Controls.Add(badge)
         p.Controls.AddRange({lblContact, lblDetail, prodPill, poPill})
@@ -577,10 +618,14 @@ Public Class AdminSuppliersPanelBuilder
                 Dim prodX As Integer = CInt(w * 0.64)
                 Dim poX As Integer = CInt(w * 0.79)
 
-                lblName.Left = 24
+                avatar.Left = 24
+                avatar.Top = (height - avSize) \ 2
+
+                Dim nameX As Integer = 24 + avSize + 14
+                lblName.Left = nameX
                 lblName.Top = (height - lblName.Height) \ 2
                 If badge IsNot Nothing Then
-                    badge.Left = 24 + lblName.PreferredWidth + 8
+                    badge.Left = nameX + lblName.PreferredWidth + 8
                     badge.Top = (height - badge.Height) \ 2
                 End If
 
