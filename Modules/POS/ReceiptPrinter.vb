@@ -519,23 +519,27 @@ Public Module ReceiptPrinter
         AddHandler btnPrint.Click,
             Sub()
                 Dim ni As Integer = 0
-                Dim doc As New PrintDocument()
-                doc.DocumentName = documentName
-                doc.DefaultPageSettings.PaperSize = New PaperSize("Receipt", RECEIPT_W, 1100)
-                doc.DefaultPageSettings.Margins = New Margins(12, 12, 12, 12)
-                doc.OriginAtMargins = True
-                AddHandler doc.PrintPage,
-                    Sub(ps, pe)
-                        PrintPage(pe, lines, ni, storeName, storeTagline, receiptNo)
-                    End Sub
-                Try
-                    Using pd As New PrintDialog With {.Document = doc}
-                        If pd.ShowDialog() = DialogResult.OK Then doc.Print()
-                    End Using
-                Catch ex As Exception
-                    AppModal.Show("Print failed:" & Environment.NewLine & ex.Message,
-                        "Print Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                End Try
+                ' A fresh PrintDocument per click, so it must be disposed per
+                ' click too -- it owns unmanaged printer/spooler resources and
+                ' reprinting repeatedly leaked one every time.
+                Using doc As New PrintDocument()
+                    doc.DocumentName = documentName
+                    doc.DefaultPageSettings.PaperSize = New PaperSize("Receipt", RECEIPT_W, 1100)
+                    doc.DefaultPageSettings.Margins = New Margins(12, 12, 12, 12)
+                    doc.OriginAtMargins = True
+                    AddHandler doc.PrintPage,
+                        Sub(ps, pe)
+                            PrintPage(pe, lines, ni, storeName, storeTagline, receiptNo)
+                        End Sub
+                    Try
+                        Using pd As New PrintDialog With {.Document = doc}
+                            If pd.ShowDialog() = DialogResult.OK Then doc.Print()
+                        End Using
+                    Catch ex As Exception
+                        AppModal.Show("Print failed:" & Environment.NewLine & ex.Message,
+                            "Print Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    End Try
+                End Using
             End Sub
 
         f.Controls.AddRange({topBar, bottomBar, scroll})

@@ -122,6 +122,29 @@ Public Module PaymentPromptModal
             End Sub
         fieldBox.Controls.Add(txt)
 
+        ' Amount is money: refuse anything that is not a digit or a single
+        ' decimal separator at the keystroke. The caller still validates on OK --
+        ' this just stops a cashier typing letters into a currency field and only
+        ' finding out after they press Enter.
+        If kind = FieldKind.AmountTendered Then
+            Dim decSep As String =
+                Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator
+            AddHandler txt.KeyPress,
+                Sub(sk As Object, ke As KeyPressEventArgs)
+                    If Char.IsControl(ke.KeyChar) Then Return          ' backspace etc.
+                    If Char.IsDigit(ke.KeyChar) Then Return
+                    If decSep.Length = 1 AndAlso ke.KeyChar = decSep(0) Then
+                        ' Only one separator, and not while it would be selected away.
+                        If txt.Text.IndexOf(decSep) >= 0 AndAlso
+                           Not txt.SelectedText.Contains(decSep) Then
+                            ke.Handled = True
+                        End If
+                        Return
+                    End If
+                    ke.Handled = True
+                End Sub
+        End If
+
         ' Live change preview — Cash only. Purely visual; the actual
         ' insufficient-amount check still happens in TransactionPanelBuilder.
         Dim lblChange As Label = Nothing
