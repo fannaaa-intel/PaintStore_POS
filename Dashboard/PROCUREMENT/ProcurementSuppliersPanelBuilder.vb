@@ -1239,6 +1239,38 @@ Public Class ProcurementSuppliersPanelBuilder
             End Sub
         AddHandler btnDelete.Click,
             Sub()
+                ' Purchase orders and quotations both reference suppliers with a
+                ' foreign key, so deleting one that is in use fails at the
+                ' database and surfaced a raw constraint error. Check first and
+                ' explain it, the way the Categories screen does.
+                Dim inUse As Integer = 0
+                Try
+                    Using conn = Db.GetConnection()
+                        conn.Open()
+                        Using cmd As New MySqlCommand(
+                            "SELECT (SELECT COUNT(*) FROM purchase_orders WHERE supplier_id=@id) + " &
+                            "       (SELECT COUNT(*) FROM quotations WHERE supplier_id=@id)", conn)
+                            cmd.Parameters.AddWithValue("@id", supplierId)
+                            inUse = Convert.ToInt32(cmd.ExecuteScalar())
+                        End Using
+                    End Using
+                Catch ex As Exception
+                    AppModal.Show("Could not check whether the supplier is in use:" &
+                                  Environment.NewLine & ex.Message,
+                                  "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End Try
+
+                If inUse > 0 Then
+                    AppModal.Show(sup.Name & " is referenced by " & inUse.ToString("N0") &
+                                  If(inUse = 1, " purchase order or quotation",
+                                                " purchase orders / quotations") &
+                                  " and cannot be deleted." & Environment.NewLine & Environment.NewLine &
+                                  "Its history has to stay for those records to make sense.",
+                                  "Supplier In Use", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+
                 Dim confirm = AppModal.Show(
                     "Are you sure you want to delete """ & sup.Name & """?" &
                     Environment.NewLine & "This cannot be undone.",
