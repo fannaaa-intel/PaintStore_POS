@@ -340,7 +340,11 @@ Public Class AdminColorFormulasPanelBuilder
         Dim topRegion As Panel = BuildListTop()
         topRegion.Dock = DockStyle.Top
 
+        Dim tileStrip As Panel = BuildTileStrip()
+        tileStrip.Dock = DockStyle.Top
+
         _container.Controls.Add(tableWrapper)
+        _container.Controls.Add(tileStrip)
         _container.Controls.Add(topRegion)
         _container.ResumeLayout()
 
@@ -350,9 +354,69 @@ Public Class AdminColorFormulasPanelBuilder
     Private Shared Function CardHeightFor(rowCount As Integer) As Integer
         Dim contentH As Integer = If(rowCount = 0, 90, rowCount * ROW_H)
         Dim cardH As Integer = HDR_H + PAD_TOP + contentH + PAD_BOTTOM + 2
-        Dim maxH As Integer = _container.ClientSize.Height - 72 - 32
+        Dim maxH As Integer = _container.ClientSize.Height - 72 - (SUMMARY_H + 12) - 32
         If maxH > 160 AndAlso cardH > maxH Then cardH = maxH
         Return cardH
+    End Function
+
+    ' =========================================================================
+    '  SUMMARY TILES
+    ' =========================================================================
+    Private Const SUMMARY_H As Integer = 140
+
+    Private Shared Function BuildTileStrip() As Panel
+        Dim bar As New Panel With {
+            .Height = SUMMARY_H + 12, .BackColor = MintBg,
+            .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
+        }
+        Dim grid As New TableLayoutPanel With {
+            .Dock = DockStyle.Fill, .ColumnCount = 3, .RowCount = 1,
+            .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        }
+        For i As Integer = 0 To 2
+            grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 33.33F))
+        Next
+        grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
+
+        Dim total As Integer = _allRows.Count
+        Dim colorants As Integer = 0
+        Dim types As New List(Of String)
+        For Each r In _allRows
+            colorants += r.ComponentCount
+            Dim t As String = If(r.PaintType, "").Trim()
+            If t <> "" AndAlso Not types.Contains(t, StringComparer.OrdinalIgnoreCase) Then types.Add(t)
+        Next
+
+        Dim defs = {
+            ("Formulas", total.ToString("N0"), "on file", MintPrimary),
+            ("Paint Types", types.Count.ToString("N0"), "distinct types", MintDark),
+            ("Colorants", colorants.ToString("N0"), "across all recipes", Color.FromArgb(45, 80, 150))
+        }
+        For i As Integer = 0 To 2
+            Dim d = defs(i)
+            Dim card = MakeSummaryCard(d.Item1, d.Item4, d.Item2, d.Item3)
+            card.Margin = New Padding(0, 0, If(i < 2, 12, 0), 0)
+            grid.Controls.Add(card, i, 0)
+        Next
+        bar.Controls.Add(grid)
+        Return bar
+    End Function
+
+    Private Shared Function MakeSummaryCard(caption As String, valueClr As Color,
+                                            value As String, subLabel As String) As Panel
+        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
+        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+        card.Controls.Add(New Label With {
+            .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent})
+        Return card
     End Function
 
     Private Shared Function BuildListTop() As Panel
@@ -756,6 +820,9 @@ Public Class AdminColorFormulasPanelBuilder
             _cboPaintType.Items.Add(t)
         Next
         _cboPaintType.Text = d.PaintType
+        ' An editable combo cannot be OwnerDrawn on its edit box, but its
+        ' dropdown list can - drop-down items get the mint highlight.
+        StyleComboList(_cboPaintType)
 
         _cboBaseProduct = New ComboBox With {
             .Font = New Font("Segoe UI", 11.0F),
@@ -764,6 +831,7 @@ Public Class AdminColorFormulasPanelBuilder
             .BackColor = FieldBg,
             .ForeColor = Color.FromArgb(35, 50, 46)
         }
+        StyleComboList(_cboBaseProduct)
         For Each po In products
             _cboBaseProduct.Items.Add(po)
         Next
@@ -794,7 +862,7 @@ Public Class AdminColorFormulasPanelBuilder
         Dim fNotes = AddField(card, "Notes", _txtNotes)
 
         ' Live swatch beside the hex field.
-        _swatch = New Panel With {.Size = New Size(FIELD_H, FIELD_H), .BackColor = Color.Transparent}
+        _swatch = New Panel With {.Size = New Size(FIELD_H, FIELD_H), .BackColor = Color.Transparent, .Cursor = Cursors.Hand}
         AddHandler _swatch.Paint,
             Sub(s, e)
                 Dim g = e.Graphics
@@ -811,6 +879,20 @@ Public Class AdminColorFormulasPanelBuilder
             End Sub
         card.Controls.Add(_swatch)
         AddHandler _txtHex.TextChanged, Sub() _swatch.Invalidate()
+        ' Clicking the swatch opens the system colour picker and writes the
+        ' chosen colour back as #RRGGBB - the same behaviour the Inventory Item
+        ' List uses. Before this the swatch looked clickable but did nothing.
+        Dim openColorPicker As Action =
+            Sub()
+                Using cd As New ColorDialog With {.FullOpen = True,
+                    .Color = HexToColor(_txtHex.Text.Trim(), MintPrimary)}
+                    If cd.ShowDialog() = DialogResult.OK Then
+                        _txtHex.Text = "#" & cd.Color.R.ToString("X2") &
+                            cd.Color.G.ToString("X2") & cd.Color.B.ToString("X2")
+                    End If
+                End Using
+            End Sub
+        AddHandler _swatch.Click, Sub() openColorPicker()
 
         AddHandler card.Resize,
             Sub()
@@ -927,8 +1009,8 @@ Public Class AdminColorFormulasPanelBuilder
 
         Dim nameBox As TextBox = MakeTextBox(colorant)
         Dim amtBox As TextBox = MakeTextBox(amount)
-        Dim nameWrap As Panel = MakeFieldBox(nameBox)
-        Dim amtWrap As Panel = MakeFieldBox(amtBox)
+        Dim nameWrap As Panel = MakeFieldBox(nameBox, "Colorant name (e.g. Raw Umber)")
+        Dim amtWrap As Panel = MakeFieldBox(amtBox, "0")
 
         Dim lblMl As New Label With {
             .Text = "ml",
@@ -1062,6 +1144,19 @@ Public Class AdminColorFormulasPanelBuilder
             Return
         End If
 
+        ' Length guards matching the column widths, so an over-long value gives
+        ' a clear message here instead of a raw MySQL truncation error on save.
+        Dim lenErr As String = FirstLengthError({
+            ("Name", name, 100),
+            ("Paint type", _cboPaintType.Text.Trim(), 30),
+            ("Size label", _txtSize.Text.Trim(), 20),
+            ("Notes", _txtNotes.Text.Trim(), 255)
+        })
+        If lenErr <> "" Then
+            AppModal.Show(lenErr, "Too Long", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
         Dim hex As String = _txtHex.Text.Trim()
         If hex <> "" AndAlso Not HexPattern.IsMatch(hex) Then
             AppModal.Show("Color hex must look like #RRGGBB (for example #1A2B3C), or be left empty.",
@@ -1192,6 +1287,17 @@ Public Class AdminColorFormulasPanelBuilder
         cmd.Parameters.AddWithValue("@notes", NullIfBlank(notes))
     End Sub
 
+    ' Returns the first field that exceeds its column width, or "" if all fit.
+    Private Shared Function FirstLengthError(fields As (label As String, value As String, max As Integer)()) As String
+        For Each f In fields
+            If f.value IsNot Nothing AndAlso f.value.Length > f.max Then
+                Return f.label & " must be " & f.max.ToString() & " characters or fewer " &
+                       "(it is " & f.value.Length.ToString() & ")."
+            End If
+        Next
+        Return ""
+    End Function
+
     Private Shared Function NullIfBlank(s As String) As Object
         If String.IsNullOrEmpty(s) Then Return DBNull.Value
         Return s
@@ -1281,6 +1387,28 @@ Public Class AdminColorFormulasPanelBuilder
         Public Input As Control
     End Class
 
+    ' Owner-draws a combo's dropdown list so the selected row uses the app's
+    ' mint highlight instead of the harsh Windows-blue bar. Works for both the
+    ' editable and the list-only combos on this screen.
+    Private Shared Sub StyleComboList(cbo As ComboBox)
+        cbo.DrawMode = DrawMode.OwnerDrawFixed
+        cbo.ItemHeight = 26
+        AddHandler cbo.DrawItem,
+            Sub(s As Object, e As DrawItemEventArgs)
+                e.DrawBackground()
+                If e.Index < 0 Then Return
+                Dim selected As Boolean =
+                    (e.State And DrawItemState.Selected) = DrawItemState.Selected
+                Using bg As New SolidBrush(If(selected, Color.FromArgb(224, 242, 235), CardBg))
+                    e.Graphics.FillRectangle(bg, e.Bounds)
+                End Using
+                Dim txt As String = cbo.GetItemText(cbo.Items(e.Index))
+                TextRenderer.DrawText(e.Graphics, txt, cbo.Font,
+                    New Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height),
+                    Color.FromArgb(35, 50, 46), TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+            End Sub
+    End Sub
+
     Private Shared Function MakeTextBox(value As String) As TextBox
         Return New TextBox With {
             .Font = New Font("Segoe UI", 11.0F),
@@ -1292,9 +1420,10 @@ Public Class AdminColorFormulasPanelBuilder
     End Function
 
     ' A rounded field box wrapping an arbitrary input control.
-    Private Shared Function MakeFieldBox(input As Control) As Panel
+    Private Shared Function MakeFieldBox(input As Control, Optional placeholder As String = "") As Panel
         Dim box As New Panel With {.Size = New Size(100, FIELD_H), .BackColor = Color.Transparent}
         Dim focusedFlag As Boolean = False
+        Dim tb As TextBox = TryCast(input, TextBox)
         AddHandler box.Paint,
             Sub(s, e)
                 Dim g = e.Graphics
@@ -1306,6 +1435,13 @@ Public Class AdminColorFormulasPanelBuilder
                 Using p As New Pen(If(focusedFlag, MintPrimary, FieldBorder), If(focusedFlag, 1.8F, 1.0F))
                     g.DrawRoundedRectangle(p, rect, 9)
                 End Using
+                ' Placeholder painted behind an empty box, so the input's .Text
+                ' stays truly empty (callers read .Text as the real value).
+                If placeholder <> "" AndAlso tb IsNot Nothing AndAlso tb.Text = "" AndAlso Not tb.Focused Then
+                    TextRenderer.DrawText(g, placeholder, tb.Font,
+                        New Rectangle(tb.Left, tb.Top - 1, box.Width - tb.Left - 6, tb.Height + 2),
+                        FaintText, TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+                End If
             End Sub
         AddHandler input.Enter, Sub()
                                     focusedFlag = True
@@ -1315,6 +1451,7 @@ Public Class AdminColorFormulasPanelBuilder
                                     focusedFlag = False
                                     box.Invalidate()
                                 End Sub
+        If tb IsNot Nothing Then AddHandler tb.TextChanged, Sub() box.Invalidate()
         box.Controls.Add(input)
         Return box
     End Function

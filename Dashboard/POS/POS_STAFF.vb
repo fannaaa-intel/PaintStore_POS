@@ -192,6 +192,33 @@ Public Class POS_STAFF
             topPos += 58
         Next
 
+
+        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
+        ' Self-service password change, so a member of staff does not have to ask
+        ' an admin for a reset just to choose a new password. Built in code rather
+        ' than the designer because every dashboard needs the same one, and it
+        ' sits just above Logout where account-level actions belong.
+        Dim btnAccount As New Button With {
+            .Name = "account",
+            .Text = "My Account"
+        }
+        Nav.Controls.Add(btnAccount)
+        StyleButton(btnAccount)
+        btnAccount.Left = 14
+        btnAccount.Width = Nav.Width - 28
+        btnAccount.Height = 48
+        btnAccount.Top = Nav.Height - 168
+        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(btnAccount, 12)
+        AddHandler btnAccount.Click,
+            Sub()
+                ' Deliberately does NOT change the active nav highlight: this
+                ' opens a dialog, it does not navigate away from the panel the
+                ' user is looking at.
+                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
+                                                    Session.CurrentFullName)
+            End Sub
+
         StyleButton(logout)
         logout.Left = 14
         logout.Width = Nav.Width - 28
@@ -289,38 +316,6 @@ Public Class POS_STAFF
         ' DockStyle.Fill + Resize handlers, so they reflow automatically.
         MainContainer.PerformLayout()
         MainContainer.Invalidate(True)
-    End Sub
-
-    ' ===========================================================================
-    ' PLACEHOLDER
-    ' ===========================================================================
-    Private Sub LoadPlaceholder(title As String)
-        MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
-
-
-        Dim panel As New Panel With {
-            .Dock = DockStyle.Fill,
-            .BackColor = Color.FromArgb(220, 240, 235)
-        }
-        Dim lblTitle As New Label With {
-            .Text = title,
-            .Font = New Font("Segoe UI", 18, FontStyle.Bold),
-            .ForeColor = MintDarkTop,
-            .AutoSize = True,
-            .Location = New Point(30, 30)
-        }
-        Dim lblInfo As New Label With {
-            .Text = "Ready for integration...",
-            .Font = New Font("Segoe UI", 10),
-            .ForeColor = Color.Gray,
-            .AutoSize = True,
-            .Location = New Point(32, 70)
-        }
-        panel.Controls.Add(lblTitle)
-        panel.Controls.Add(lblInfo)
-        MainContainer.Controls.Add(panel)
-        MainContainer.ResumeLayout()
     End Sub
 
     ' ===========================================================================
@@ -524,6 +519,7 @@ Public Class POS_STAFF
             Case "reports" : iconPath = "coins.png"
             Case "settings" : iconPath = "settings.png"
             Case "logout" : iconPath = "logout.png"
+            Case "account" : iconPath = "user.png"
         End Select
 
         ' Remember the caption before anything can clear it, so the collapsed rail

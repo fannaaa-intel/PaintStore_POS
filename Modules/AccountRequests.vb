@@ -289,4 +289,96 @@ Public Module AccountRequests
         Return sb.ToString()
     End Function
 
+    ' -------------------------------------------------------------------------
+    '  FORCED PASSWORD CHANGE
+    '
+    '  Set by IssueResetPassword when an admin hands over a temporary password
+    '  in person. Cleared by ChangePasswordModal once the user picks their own.
+    ' -------------------------------------------------------------------------
+
+    ' True when this account is still on an admin-issued temporary password.
+    ' False on an un-migrated database, so the login flow is unchanged there.
+    Public Function MustChangePassword(userId As Integer) As Boolean
+        If Not HasApprovalColumns() Then Return False
+
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT must_change_password FROM users WHERE user_id = @id", cn)
+                    cmd.Parameters.AddWithValue("@id", userId)
+                    Dim res = cmd.ExecuteScalar()
+                    If res Is Nothing OrElse IsDBNull(res) Then Return False
+                    Return Convert.ToInt32(res) = 1
+                End Using
+            End Using
+        Catch
+            ' Fail open on a read error: a database hiccup must not lock a user
+            ' out of an account whose password is perfectly valid. The flag is
+            ' still set, so the prompt returns on the next sign-in.
+            Return False
+        End Try
+    End Function
+
+    ' Stores a new password and clears the forced-change flag in one statement,
+    ' so the two can never disagree: a password that saved but left the flag set
+    ' would prompt forever, and clearing the flag alone would leave the shared
+    ' password live.
+    '
+    ' Returns "" on success, otherwise the message to show in the dialog.
+    Public Function SetPassword(userId As Integer, newPassword As String) As String
+        Dim err As String = ValidatePassword(newPassword)
+        If err <> "" Then Return err
+
+        Try
+            Dim hash As String = PasswordHelper.HashPassword(newPassword)
+
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Dim sql As String =
+                    "UPDATE users SET password_hash = @h" &
+                    If(HasApprovalColumns(), ", must_change_password = 0", "") &
+                    " WHERE user_id = @id"
+                Using cmd As New MySqlCommand(sql, cn)
+                    cmd.Parameters.AddWithValue("@h", hash)
+                    cmd.Parameters.AddWithValue("@id", userId)
+                    If cmd.ExecuteNonQuery() = 0 Then
+                        Return "That account could not be found."
+                    End If
+                End Using
+            End Using
+
+            Return ""
+
+        Catch ex As Exception
+            Return "Could not save the new password: " & ex.Message
+        End Try
+    End Function
+
+    ' Checks a password against the stored hash for one account.
+    '
+    ' The voluntary change-password screen asks for the current password before
+    ' accepting a new one. Without that check, anyone who walked up to a till
+    ' left signed in could lock the real user out of their own account.
+    Public Function VerifyCurrentPassword(userId As Integer, password As String) As Boolean
+        If String.IsNullOrEmpty(password) Then Return False
+
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT password_hash FROM users WHERE user_id = @id", cn)
+                    cmd.Parameters.AddWithValue("@id", userId)
+                    Dim res = cmd.ExecuteScalar()
+                    If res Is Nothing OrElse IsDBNull(res) Then Return False
+                    Return PasswordHelper.VerifyPassword(password, res.ToString())
+                End Using
+            End Using
+        Catch
+            ' Fail CLOSED, unlike MustChangePassword: a read error here must not
+            ' be a way past the current-password check.
+            Return False
+        End Try
+    End Function
+
 End Module

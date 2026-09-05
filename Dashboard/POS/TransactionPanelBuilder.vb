@@ -91,6 +91,9 @@ Public Class TransactionPanelBuilder
 
     ' Payment
     Private Shared _payMethods As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+    ' Active methods in method_id order, carrying their type/note so the till
+    ' reads behaviour from the record instead of guessing from the name.
+    Private Shared _payMethodList As New List(Of PaymentMethods.Method)
     Private Shared _payMethodId As Integer = 0
     Private Shared _payMethodName As String = ""
     Private Shared _activePayBtn As Button = Nothing
@@ -199,20 +202,14 @@ Public Class TransactionPanelBuilder
     End Sub
 
     Private Shared Sub LoadPaymentMethods()
+        ' Only active methods reach the till. Behaviour (cash vs reference) and
+        ' the note come from the record via PaymentMethods, which falls back to
+        ' name-guessing on an un-migrated database.
+        _payMethodList = PaymentMethods.LoadAll(activeOnly:=True)
         _payMethods.Clear()
-        Try
-            Using conn As MySqlConnection = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand("SELECT method_id, name FROM payment_methods", conn)
-                    Using rdr = cmd.ExecuteReader()
-                        While rdr.Read()
-                            _payMethods(rdr.GetString("name")) = rdr.GetInt32("method_id")
-                        End While
-                    End Using
-                End Using
-            End Using
-        Catch
-        End Try
+        For Each m In _payMethodList
+            _payMethods(m.Name) = m.MethodId
+        Next
     End Sub
 
     Private Shared Sub LoadProducts()
@@ -1329,15 +1326,62 @@ Public Class TransactionPanelBuilder
     ' =========================================================================
     Private Shared Function BuildPaymentBar() As Control
         Dim host As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0)}
-        Dim layout As New TableLayoutPanel With {.Dock = DockStyle.Fill, .ColumnCount = 3, .RowCount = 1,
-        .BackColor = Color.Transparent, .Margin = New Padding(0), .Padding = New Padding(0)}
-        For i = 0 To 2 : layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 33.33F)) : Next
+
+        ' One button per payment method, built from the payment_methods table
+        ' (in method_id order) rather than a fixed three. A method the admin adds
+        ' in Store Settings therefore shows up here for the cashier, and a removed
+        ' one disappears - the row is no longer hardcoded to Cash / Card / E-Wallet.
+        Dim names As New List(Of String)
+        For Each m In _payMethodList
+            names.Add(m.Name)
+        Next
+        If names.Count = 0 Then
+            ' No active methods configured: keep the till usable with a single
+            ' Cash button, matching the old default, rather than an empty bar.
+            names = New List(Of String) From {"Cash"}
+        End If
+
+        Dim count As Integer = names.Count
+        Dim layout As New TableLayoutPanel With {.Dock = DockStyle.Fill, .RowCount = 1,
+        .ColumnCount = count, .BackColor = Color.Transparent, .Margin = New Padding(0), .Padding = New Padding(0)}
+        For i = 0 To count - 1
+            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100.0F / count))
+        Next
         layout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
-        layout.Controls.Add(MakePayBtn("CASH", "Cash", Color.FromArgb(0, 148, 74), Color.FromArgb(0, 100, 55), 0), 0, 0)
-        layout.Controls.Add(MakePayBtn("CARD", "Card", Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140), 4), 1, 0)
-        layout.Controls.Add(MakePayBtn("E-WALLET", "E-Wallet", Color.FromArgb(100, 50, 180), Color.FromArgb(70, 30, 140), 4), 2, 0)
+
+        For i = 0 To count - 1
+            Dim nm As String = names(i)
+            Dim clr = PayColorFor(nm, i)
+            Dim leftMargin As Integer = If(i = 0, 0, 4)
+            layout.Controls.Add(MakePayBtn(nm.ToUpper(), nm, clr.normal, clr.hover, leftMargin), i, 0)
+        Next
+
         host.Controls.Add(layout)
         Return host
+    End Function
+
+    ' Colour for a payment button. Cash / Card / E-Wallet keep the exact greens,
+    ' blues and purples the till has always used, matched on content so a rename
+    ' like "Cash on Hand" still reads as cash. Anything else cycles a small
+    ' neutral-but-distinct palette by position, so newly added methods look
+    ' deliberate rather than all identical.
+    Private Shared Function PayColorFor(name As String, index As Integer) As (normal As Color, hover As Color)
+        Dim n As String = If(name, "").ToLower()
+        If n.IndexOf("cash") >= 0 Then Return (Color.FromArgb(0, 148, 74), Color.FromArgb(0, 100, 55))
+        If n.IndexOf("card") >= 0 Then Return (Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140))
+        If n.IndexOf("wallet") >= 0 OrElse n.IndexOf("gcash") >= 0 OrElse n.IndexOf("maya") >= 0 Then
+            Return (Color.FromArgb(100, 50, 180), Color.FromArgb(70, 30, 140))
+        End If
+        ' Fallback palette for any other method, indexed so two new methods do
+        ' not collide on the same colour.
+        Dim palette = {
+            (Color.FromArgb(196, 120, 20), Color.FromArgb(150, 90, 12)),
+            (Color.FromArgb(30, 140, 150), Color.FromArgb(20, 100, 110)),
+            (Color.FromArgb(150, 60, 90), Color.FromArgb(110, 40, 66)),
+            (Color.FromArgb(90, 110, 40), Color.FromArgb(64, 80, 26))
+        }
+        Dim p = palette(index Mod palette.Length)
+        Return (p.Item1, p.Item2)
     End Function
 
     Private Shared Function MakePayBtn(text As String, dbName As String, normalClr As Color, hoverClr As Color, leftMargin As Integer) As Button
@@ -1408,16 +1452,20 @@ Public Class TransactionPanelBuilder
                 Dim changeDue As Decimal = 0
                 Dim refNo As String = ""
 
-                ' Matched on content rather than an exact name. Payment methods are
-                ' editable in Store Settings, and the cash drawer query and refund
-                ' path both use LIKE '%cash%' -- so "CASH" or "Cash on Hand" counts
-                ' as cash there and must count as cash here too.
-                '
-                ' The old Select Case matched "Cash" / "Card" / "E-Wallet" exactly,
-                ' so any renamed or newly added method fell through with no prompt
-                ' at all: the sale completed with tendered = total, no change worked
-                ' out and no reference captured.
-                If dbName.IndexOf("cash", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                ' Cash vs reference now comes from the method's TYPE, not its
+                ' name: a method typed 'Cash' asks for the amount tendered and
+                ' gives change, everything else asks for a reference number. This
+                ' fixes 'GCash' - whose name contains 'cash' - being wrongly
+                ' treated as physical cash. On an un-migrated database the type
+                ' falls back to the (gcash-aware) name guess inside PaymentMethods.
+                Dim payIsCash As Boolean = False
+                For Each pm In _payMethodList
+                    If String.Equals(pm.Name, dbName, StringComparison.OrdinalIgnoreCase) Then
+                        payIsCash = pm.IsCash
+                        Exit For
+                    End If
+                Next
+                If payIsCash Then
                     Do
                         Dim entry As String = PaymentPromptModal.Show("Cash", grand, PaymentPromptModal.FieldKind.AmountTendered, grand.ToString("0.00"))
                         If entry Is Nothing Then Return   ' cashier cancelled

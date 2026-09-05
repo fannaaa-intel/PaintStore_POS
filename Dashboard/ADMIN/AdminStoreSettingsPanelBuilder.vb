@@ -42,6 +42,9 @@ Public Class AdminStoreSettingsPanelBuilder
     Private Class PayMethod
         Public MethodId As Integer
         Public Name As String
+        Public Type As String = "Reference"
+        Public IsActive As Boolean = True
+        Public Note As String = ""
     End Class
 
     ' ── STATE ─────────────────────────────────────────────────────────────────
@@ -117,26 +120,16 @@ Public Class AdminStoreSettingsPanelBuilder
     End Sub
 
     Private Shared Sub LoadMethods()
+        ' Delegates to the shared PaymentMethods module (all methods, including
+        ' inactive ones, since this screen manages them). Type/active/note come
+        ' from the record, or a safe fallback on an un-migrated database.
         _methods.Clear()
-        Try
-            Using conn = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand(
-                    "SELECT method_id, name FROM payment_methods ORDER BY method_id", conn)
-                    Using rdr = cmd.ExecuteReader()
-                        While rdr.Read()
-                            _methods.Add(New PayMethod With {
-                                .MethodId = SafeInt(rdr("method_id")),
-                                .Name = SafeStr(rdr("name"))
-                            })
-                        End While
-                    End Using
-                End Using
-            End Using
-        Catch ex As Exception
-            AppModal.Show("Could not load payment methods: " & ex.Message, "Database Error",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
+        For Each m In PaymentMethods.LoadAll(activeOnly:=False)
+            _methods.Add(New PayMethod With {
+                .MethodId = m.MethodId, .Name = m.Name,
+                .Type = m.Type, .IsActive = m.IsActive, .Note = m.Note
+            })
+        Next
     End Sub
 
     Private Shared Function SafeInt(o As Object) As Integer
@@ -553,14 +546,22 @@ Public Class AdminStoreSettingsPanelBuilder
             .ForeColor = MintDark,
             .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' A sub-line under the name showing what the method IS: its type, and
+        ' whether it is hidden from the till. Turns the row from a bare name
+        ' into something an admin can read at a glance.
+        Dim typeLabel As String = If(String.Equals(m.Type, "Cash", StringComparison.OrdinalIgnoreCase),
+                                     "Cash - gives change", "Reference - needs a ref. no.")
+        Dim subLine As String = typeLabel
+        If Not m.IsActive Then subLine &= "   -   HIDDEN"
+        If Not String.IsNullOrWhiteSpace(m.Note) Then subLine &= "   -   " & m.Note.Trim()
         Dim lblId As New Label With {
-            .Text = "#" & m.MethodId.ToString(),
+            .Text = subLine,
             .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = FaintText,
+            .ForeColor = If(m.IsActive, FaintText, AccentRed),
             .AutoSize = True, .BackColor = Color.Transparent
         }
 
-        Dim btnRename As Button = MakeActionButton("Rename", Color.FromArgb(220, 235, 232), MintDark)
+        Dim btnRename As Button = MakeActionButton("Edit", Color.FromArgb(220, 235, 232), MintDark)
         Dim btnRemove As Button = MakeActionButton("Remove", Color.FromArgb(255, 232, 232), AccentRed)
         AddHandler btnRename.Click, Sub() RenameMethod(m)
         AddHandler btnRemove.Click, Sub() RemoveMethod(m)
@@ -569,9 +570,12 @@ Public Class AdminStoreSettingsPanelBuilder
 
         AddHandler p.Resize,
             Sub()
-                lblName.Left = 22 : lblName.Top = (height - lblName.Height) \ 2
-                lblId.Left = 22 + Math.Max(160, lblName.PreferredWidth + 20)
-                lblId.Top = (height - lblId.Height) \ 2
+                ' Name on top, the type/status sub-line beneath it - two stacked
+                ' lines, vertically centred as a pair.
+                Dim blockH As Integer = lblName.Height + 2 + lblId.Height
+                Dim top0 As Integer = (height - blockH) \ 2
+                lblName.Left = 22 : lblName.Top = top0
+                lblId.Left = 22 : lblId.Top = lblName.Bottom + 2
                 btnRemove.Left = p.Width - btnRemove.Width - 16
                 btnRemove.Top = (height - btnRemove.Height) \ 2
                 btnRename.Left = btnRemove.Left - btnRename.Width - 6
@@ -584,13 +588,18 @@ Public Class AdminStoreSettingsPanelBuilder
 
     ' ── CRUD ─────────────────────────────────────────────────────────────────
     Private Shared Sub AddMethod()
-        Dim name As String = AppModal.Prompt("Name of the new payment method:", "Add Payment Method")
-        If name Is Nothing Then Return
-        name = name.Trim()
+        ' Full form: name, type, active, note. On an un-migrated database only
+        ' the name is asked (showTypeActive:=False) and the extra columns are
+        ' not written, so the old behaviour is preserved.
+        Dim hasCols As Boolean = PaymentMethods.HasBehaviourColumns()
+        Dim r As PaymentMethodModal.Result =
+            PaymentMethodModal.Prompt(isEdit:=False, showTypeActive:=hasCols, seed:=Nothing)
+        If r Is Nothing Then Return
+
+        Dim name As String = r.Name.Trim()
         Dim nameErr As String = ValidateMethodName(name)
         If nameErr <> "" Then
-            AppModal.Show(nameErr, "Add Payment Method",
-                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            AppModal.Show(nameErr, "Add Payment Method", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
 
@@ -607,9 +616,18 @@ Public Class AdminStoreSettingsPanelBuilder
                         Return
                     End If
                 End Using
-                Using cmd As New MySqlCommand(
-                    "INSERT INTO payment_methods (name) VALUES (@n)", conn)
+
+                Dim sql As String = If(hasCols,
+                    "INSERT INTO payment_methods (name, type, is_active, note) VALUES (@n, @t, @a, @note)",
+                    "INSERT INTO payment_methods (name) VALUES (@n)")
+                Using cmd As New MySqlCommand(sql, conn)
                     cmd.Parameters.AddWithValue("@n", name)
+                    If hasCols Then
+                        cmd.Parameters.AddWithValue("@t", r.Type)
+                        cmd.Parameters.AddWithValue("@a", If(r.IsActive, 1, 0))
+                        cmd.Parameters.AddWithValue("@note",
+                            If(String.IsNullOrWhiteSpace(r.Note), CObj(DBNull.Value), CObj(r.Note.Trim())))
+                    End If
                     cmd.ExecuteNonQuery()
                 End Using
                 Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
@@ -622,22 +640,28 @@ Public Class AdminStoreSettingsPanelBuilder
             Return
         End Try
 
+        PaymentMethods.ResetSchemaCache()
         ActivityLog.Record("PAYMETHOD_ADD", "payment_method", newId, name)
         LoadStoreSettings(_container)
     End Sub
 
+    ' Kept the name RenameMethod so the row wiring is unchanged, but it now opens
+    ' the full editor rather than a name-only prompt.
     Private Shared Sub RenameMethod(m As PayMethod)
-        Dim name As String = AppModal.Prompt("New name for """ & m.Name & """:",
-                                             "Rename Payment Method", m.Name)
-        If name Is Nothing Then Return
-        name = name.Trim()
+        Dim hasCols As Boolean = PaymentMethods.HasBehaviourColumns()
+        Dim seed As New PaymentMethodModal.Result With {
+            .Name = m.Name, .Type = m.Type, .IsActive = m.IsActive, .Note = m.Note
+        }
+        Dim r As PaymentMethodModal.Result =
+            PaymentMethodModal.Prompt(isEdit:=True, showTypeActive:=hasCols, seed:=seed)
+        If r Is Nothing Then Return
+
+        Dim name As String = r.Name.Trim()
         Dim nameErr As String = ValidateMethodName(name)
         If nameErr <> "" Then
-            AppModal.Show(nameErr, "Rename Payment Method",
-                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            AppModal.Show(nameErr, "Edit Payment Method", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
-        If name = m.Name Then Return
 
         Try
             Using conn = Db.GetConnection()
@@ -653,19 +677,29 @@ Public Class AdminStoreSettingsPanelBuilder
                         Return
                     End If
                 End Using
-                Using cmd As New MySqlCommand(
-                    "UPDATE payment_methods SET name=@n WHERE method_id=@id", conn)
+
+                Dim sql As String = If(hasCols,
+                    "UPDATE payment_methods SET name=@n, type=@t, is_active=@a, note=@note WHERE method_id=@id",
+                    "UPDATE payment_methods SET name=@n WHERE method_id=@id")
+                Using cmd As New MySqlCommand(sql, conn)
                     cmd.Parameters.AddWithValue("@n", name)
+                    If hasCols Then
+                        cmd.Parameters.AddWithValue("@t", r.Type)
+                        cmd.Parameters.AddWithValue("@a", If(r.IsActive, 1, 0))
+                        cmd.Parameters.AddWithValue("@note",
+                            If(String.IsNullOrWhiteSpace(r.Note), CObj(DBNull.Value), CObj(r.Note.Trim())))
+                    End If
                     cmd.Parameters.AddWithValue("@id", m.MethodId)
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not rename the payment method: " & ex.Message, "Database Error",
+            AppModal.Show("Could not save the payment method: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
 
+        PaymentMethods.ResetSchemaCache()
         ActivityLog.Record("PAYMETHOD_EDIT", "payment_method", m.MethodId, name)
         LoadStoreSettings(_container)
     End Sub

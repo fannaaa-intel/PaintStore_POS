@@ -126,6 +126,18 @@ Public Class AdminCategoriesPanelBuilder
         End Select
     End Function
 
+    ' categories.name is VARCHAR(50) UNIQUE. Checking the length here turns a
+    ' raw MySQL truncation error - surfaced as an unactionable 'Database Error'
+    ' - into something the admin can act on, matching how payment methods and
+    ' other master data validate their names.
+    Private Shared Function ValidateCategoryName(name As String) As String
+        If String.IsNullOrWhiteSpace(name) Then Return "The category name cannot be empty."
+        If name.Length > 50 Then
+            Return "Use 50 characters or fewer (that name is " & name.Length.ToString() & ")."
+        End If
+        Return ""
+    End Function
+
     Private Shared Function NameTaken(name As String, Optional excludeId As Integer = 0) As Boolean
         Try
             Using conn = Db.GetConnection()
@@ -164,7 +176,7 @@ Public Class AdminCategoriesPanelBuilder
         ' Height follows the row count, capped at the viewport.
         Dim contentH As Integer = If(_rows.Count = 0, 90, _rows.Count * ROW_H)
         Dim cardH As Integer = HDR_H + PAD_TOP + contentH + PAD_BOTTOM + 2
-        Dim maxH As Integer = _container.ClientSize.Height - 72 - 32
+        Dim maxH As Integer = _container.ClientSize.Height - 72 - (SUMMARY_H + 12) - 32
         If maxH > 160 AndAlso cardH > maxH Then cardH = maxH
 
         Dim listArea As New BufferedPanel With {
@@ -212,13 +224,94 @@ Public Class AdminCategoriesPanelBuilder
         Dim topRegion As Panel = BuildTopRegion()
         topRegion.Dock = DockStyle.Top
 
+        Dim tileStrip As Panel = BuildTileStrip()
+        tileStrip.Dock = DockStyle.Top
+
+        ' Docked-Top children stack in reverse add order, so the last added
+        ' sits nearest the top: table, then tiles, then the title bar.
         _container.Controls.Add(tableWrapper)
+        _container.Controls.Add(tileStrip)
         _container.Controls.Add(topRegion)
 
         _container.ResumeLayout()
 
         PopulateRows()
     End Sub
+
+    ' =========================================================================
+    '  SUMMARY TILES  —  the shape of the catalogue at a glance
+    ' =========================================================================
+    Private Const SUMMARY_H As Integer = 140
+
+    Private Shared Function BuildTileStrip() As Panel
+        Dim bar As New Panel With {
+            .Height = SUMMARY_H + 12,
+            .BackColor = MintBg,
+            .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
+        }
+        Dim grid As New TableLayoutPanel With {
+            .Dock = DockStyle.Fill, .ColumnCount = 3, .RowCount = 1,
+            .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        }
+        For i As Integer = 0 To 2
+            grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 33.33F))
+        Next
+        grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
+
+        Dim total As Integer = _rows.Count
+        Dim withProducts As Integer = 0
+        Dim totalProducts As Integer = 0
+        For Each r In _rows
+            If r.ProductCount > 0 Then withProducts += 1
+            totalProducts += r.ProductCount
+        Next
+        Dim empties As Integer = total - withProducts
+
+        Dim defs = {
+            ("Categories", total.ToString("N0"), "in the catalogue", MintPrimary, ""),
+            ("Products Filed", totalProducts.ToString("N0"), "across all categories", MintDark, ""),
+            ("Empty", empties.ToString("N0"), "with no products yet", SubText,
+             If(empties > 0, "Review", ""))
+        }
+        For i As Integer = 0 To 2
+            Dim d = defs(i)
+            Dim card = MakeSummaryCard(d.Item1, d.Item4, d.Item2, d.Item3, d.Item5)
+            card.Margin = New Padding(0, 0, If(i < 2, 12, 0), 0)
+            grid.Controls.Add(card, i, 0)
+        Next
+        bar.Controls.Add(grid)
+        Return bar
+    End Function
+
+    Private Shared Function MakeSummaryCard(caption As String, valueClr As Color,
+                                            value As String, subLabel As String,
+                                            badgeText As String) As Panel
+        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
+        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+        card.Controls.Add(New Label With {
+            .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent})
+        If badgeText <> "" Then
+            Dim badge As New Label With {
+                .Text = badgeText, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+                .ForeColor = MintPrimary, .BackColor = Color.FromArgb(236, 248, 244),
+                .AutoSize = True, .Padding = New Padding(6, 3, 6, 3),
+                .Anchor = AnchorStyles.Right Or AnchorStyles.Top}
+            card.Controls.Add(badge)
+            AddHandler card.Resize, Sub()
+                                        badge.Left = card.Width - badge.Width - 14
+                                        badge.Top = 14
+                                    End Sub
+        End If
+        Return card
+    End Function
 
     ' =========================================================================
     '  TOP REGION  —  72px title bar
@@ -440,6 +533,17 @@ Public Class AdminCategoriesPanelBuilder
         }
         RoundLabel(countPill, 10)
 
+        ' Merge folds this category's products into another, then deletes it -
+        ' the way to clear an in-use category that Remove refuses to touch.
+        Dim canMerge As Boolean = (_rows.Count > 1)
+        Dim btnMerge As Button
+        If canMerge Then
+            btnMerge = MakeActionButton("Merge", Color.FromArgb(232, 238, 250), Color.FromArgb(45, 80, 150))
+        Else
+            btnMerge = MakeActionButton("Merge", Color.FromArgb(240, 242, 241), FaintText)
+        End If
+        AddHandler btnMerge.Click, Sub() If canMerge Then MergeCategory(r)
+
         Dim btnRename As Button = MakeActionButton("Rename", Color.FromArgb(220, 235, 232), MintDark)
         AddHandler btnRename.Click, Sub() RenameCategory(r)
 
@@ -453,7 +557,7 @@ Public Class AdminCategoriesPanelBuilder
         End If
         AddHandler btnRemove.Click, Sub() RemoveCategory(r)
 
-        p.Controls.AddRange({lblName, countPill, btnRename, btnRemove})
+        p.Controls.AddRange({lblName, countPill, btnMerge, btnRename, btnRemove})
 
         AddHandler p.Resize,
             Sub()
@@ -464,7 +568,8 @@ Public Class AdminCategoriesPanelBuilder
 
                 Dim ax As Integer = CInt(w * 0.7)
                 Dim ay As Integer = (height - btnRename.Height) \ 2
-                btnRename.Left = ax : btnRename.Top = ay
+                btnMerge.Left = ax : btnMerge.Top = ay
+                btnRename.Left = btnMerge.Right + 6 : btnRename.Top = ay
                 btnRemove.Left = btnRename.Right + 6 : btnRemove.Top = ay
             End Sub
 
@@ -495,8 +600,9 @@ Public Class AdminCategoriesPanelBuilder
         If name Is Nothing Then Return
         name = name.Trim()
 
-        If name = "" Then
-            AppModal.Show("The category name cannot be empty.", "New Category",
+        Dim vErr As String = ValidateCategoryName(name)
+        If vErr <> "" Then
+            AppModal.Show(vErr, "New Category",
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
@@ -519,6 +625,12 @@ Public Class AdminCategoriesPanelBuilder
                     newId = Convert.ToInt32(cmd.ExecuteScalar())
                 End Using
             End Using
+        Catch ex As MySqlException When ex.Number = 1062
+            ' Unique index on name - someone added it between the NameTaken
+            ' check and this insert.
+            AppModal.Show("A category named """ & name & """ was just added. Please refresh.",
+                          "Duplicate Category", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
         Catch ex As Exception
             AppModal.Show("Could not add the category: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -535,8 +647,9 @@ Public Class AdminCategoriesPanelBuilder
         If name Is Nothing Then Return
         name = name.Trim()
 
-        If name = "" Then
-            AppModal.Show("The category name cannot be empty.", "Rename Category",
+        Dim vErr As String = ValidateCategoryName(name)
+        If vErr <> "" Then
+            AppModal.Show(vErr, "Rename Category",
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
@@ -575,6 +688,10 @@ Public Class AdminCategoriesPanelBuilder
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
+        Catch ex As MySqlException When ex.Number = 1062
+            AppModal.Show("A category named """ & name & """ was just added. Please refresh.",
+                          "Duplicate Category", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
         Catch ex As Exception
             AppModal.Show("Could not rename the category: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -584,6 +701,197 @@ Public Class AdminCategoriesPanelBuilder
         ActivityLog.Record("CATEGORY_EDIT", "category", r.CategoryId, name)
         LoadCategories(_container)
     End Sub
+
+    ' =========================================================================
+    '  MERGE  -  fold a category products into another, then delete it.
+    '
+    '  The way out of the dead-end where an in-use category cannot be removed:
+    '  instead of the admin hand-reassigning every product in Inventory first,
+    '  this moves them all in one step and removes the now-empty source. Both
+    '  writes run in a transaction so a failure leaves nothing half-done.
+    ' =========================================================================
+    Private Shared Sub MergeCategory(source As CategoryRecord)
+        Dim targets As New List(Of CategoryRecord)
+        For Each r In _rows
+            If r.CategoryId <> source.CategoryId Then targets.Add(r)
+        Next
+        If targets.Count = 0 Then Return
+
+        Dim targetId As Integer = PickTarget(source, targets)
+        If targetId <= 0 Then Return
+
+        Dim targetName As String = ""
+        For Each r In targets
+            If r.CategoryId = targetId Then targetName = r.Name
+        Next
+
+        Dim moved As Integer = source.ProductCount
+        If AppModal.Show(
+            "Move " & moved.ToString("N0") & If(moved = 1, " product", " products") &
+            " from """ & source.Name & """ into """ & targetName & """, then delete """ &
+            source.Name & """?" & vbCrLf & vbCrLf & "This cannot be undone.",
+            "Confirm Merge", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
+            Return
+        End If
+
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using tx = conn.BeginTransaction()
+                    Using cmd As New MySqlCommand(
+                        "UPDATE products SET category_id=@to WHERE category_id=@from", conn, tx)
+                        cmd.Parameters.AddWithValue("@to", targetId)
+                        cmd.Parameters.AddWithValue("@from", source.CategoryId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    Using cmd As New MySqlCommand(
+                        "DELETE FROM categories WHERE category_id=@id", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", source.CategoryId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    tx.Commit()
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not merge the category: " & ex.Message, "Database Error",
+                          MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return
+        End Try
+
+        ActivityLog.Record("CATEGORY_MERGE", "category", source.CategoryId,
+                           source.Name & " merged into " & targetName &
+                           " (" & moved.ToString() & " products)")
+        LoadCategories(_container)
+    End Sub
+
+    ' Small themed picker: a titled card with a drop-down of the target
+    ' categories. Returns the chosen category_id, or 0 if cancelled.
+    Private Shared Function PickTarget(source As CategoryRecord,
+                                       targets As List(Of CategoryRecord)) As Integer
+        Const CARD_W As Integer = 420
+        Const PAD As Integer = 24
+        Dim chosen As Integer = 0
+
+        Dim f As New Form With {
+            .FormBorderStyle = FormBorderStyle.None,
+            .StartPosition = FormStartPosition.CenterParent,
+            .BackColor = CardBg, .ShowInTaskbar = False, .Width = CARD_W, .KeyPreview = True
+        }
+
+        Dim lblTitle As New Label With {
+            .Text = "Merge " & source.Name,
+            .Font = New Font("Segoe UI Semibold", 12.0F), .ForeColor = MintDark,
+            .AutoSize = False, .Location = New Point(PAD, PAD),
+            .Size = New Size(CARD_W - PAD * 2, 22), .BackColor = Color.Transparent
+        }
+        Dim lblBody As New Label With {
+            .Text = "Its products will move into the category you pick, and """ &
+                    source.Name & """ will be deleted.",
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = False, .Location = New Point(PAD, lblTitle.Bottom + 8),
+            .Size = New Size(CARD_W - PAD * 2, 40), .BackColor = Color.Transparent
+        }
+        Dim lblPick As New Label With {
+            .Text = "Merge into", .Font = New Font("Segoe UI Semibold", 9.0F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(PAD, lblBody.Bottom + 10), .BackColor = Color.Transparent
+        }
+        ' Owner-drawn so the dropdown list uses the app's mint highlight instead
+        ' of the harsh Windows-blue selection bar, and each row gets comfortable
+        ' padding. The 34px item height matches the field's own height.
+        Dim cbo As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList,
+            .Font = New Font("Segoe UI", 10.5F),
+            .Location = New Point(PAD, lblPick.Bottom + 4),
+            .Width = CARD_W - PAD * 2,
+            .FlatStyle = FlatStyle.Flat,
+            .BackColor = CardBg,
+            .ForeColor = MintDark,
+            .DrawMode = DrawMode.OwnerDrawFixed,
+            .ItemHeight = 30
+        }
+        For Each r In targets
+            cbo.Items.Add(r.Name)
+        Next
+        cbo.SelectedIndex = 0
+        AddHandler cbo.DrawItem,
+            Sub(s As Object, e As DrawItemEventArgs)
+                e.DrawBackground()
+                If e.Index < 0 Then Return
+                Dim selected As Boolean =
+                    (e.State And DrawItemState.Selected) = DrawItemState.Selected
+                Using bg As New SolidBrush(If(selected, RowHover, CardBg))
+                    e.Graphics.FillRectangle(bg, e.Bounds)
+                End Using
+                Dim txt As String = cbo.Items(e.Index).ToString()
+                TextRenderer.DrawText(e.Graphics, txt, cbo.Font,
+                    New Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height),
+                    MintDark, TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+            End Sub
+
+        Dim btnY As Integer = cbo.Bottom + 22
+        Dim btnOk As New Button With {
+            .Text = "Merge", .Size = New Size(110, 36),
+            .Location = New Point(CARD_W - PAD - 110, btnY),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 9.5F), .Cursor = Cursors.Hand
+        }
+        btnOk.FlatAppearance.BorderSize = 0
+        Dim btnCancel As New Button With {
+            .Text = "Cancel", .Size = New Size(96, 36),
+            .Location = New Point(CARD_W - PAD - 110 - 8 - 96, btnY),
+            .FlatStyle = FlatStyle.Flat, .BackColor = Color.FromArgb(243, 246, 244),
+            .ForeColor = Color.FromArgb(70, 86, 80), .Font = New Font("Segoe UI Semibold", 9.5F),
+            .Cursor = Cursors.Hand
+        }
+        btnCancel.FlatAppearance.BorderSize = 0
+
+        AddHandler btnCancel.Click, Sub() f.Close()
+        AddHandler btnOk.Click,
+            Sub()
+                Dim idx As Integer = cbo.SelectedIndex
+                If idx >= 0 AndAlso idx < targets.Count Then chosen = targets(idx).CategoryId
+                f.Close()
+            End Sub
+
+        Dim cardH As Integer = btnY + 36 + PAD
+        f.Height = cardH
+        f.Controls.AddRange({lblTitle, lblBody, lblPick, cbo, btnOk, btnCancel})
+
+        AddHandler f.Paint,
+            Sub(s As Object, e As PaintEventArgs)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rc As New Rectangle(0, 0, f.Width - 1, f.Height - 1)
+                Using pen As New Pen(Color.FromArgb(160, 195, 185), 1.2F)
+                    Using path As New Drawing2D.GraphicsPath()
+                        Dim d As Integer = 20
+                        path.AddArc(rc.X, rc.Y, d, d, 180, 90)
+                        path.AddArc(rc.Right - d, rc.Y, d, d, 270, 90)
+                        path.AddArc(rc.Right - d, rc.Bottom - d, d, d, 0, 90)
+                        path.AddArc(rc.X, rc.Bottom - d, d, d, 90, 90)
+                        path.CloseFigure()
+                        e.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+            End Sub
+        AddHandler f.KeyDown, Sub(s As Object, e As KeyEventArgs)
+                                  If e.KeyCode = Keys.Escape Then f.Close()
+                              End Sub
+        f.AcceptButton = btnOk
+
+        Try
+            Dim owner As Form = Form.ActiveForm
+            If owner Is Nothing OrElse owner Is f Then
+                f.StartPosition = FormStartPosition.CenterScreen
+                f.ShowDialog()
+            Else
+                f.ShowDialog(owner)
+            End If
+        Finally
+            f.Dispose()
+        End Try
+
+        Return chosen
+    End Function
 
     Private Shared Sub RemoveCategory(r As CategoryRecord)
         ' Re-check against the DB rather than trusting the cached row count —

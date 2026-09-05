@@ -582,6 +582,26 @@ Public Class LogIn
             SetBusy(False)
         End Try
 
+        ' A password an admin issued over the counter has been spoken aloud, so
+        ' it is replaced before the session goes anywhere. This sits AFTER the
+        ' Try block on purpose: the reader and connection are closed by now, and
+        ' SetBusy(False) has already run in the Finally, so the dialog does not
+        ' appear over a form still reading "Signing in...".
+        '
+        ' Nothing has been routed yet either - Session was populated, but no
+        ' dashboard exists - so declining leaves the user on the login screen
+        ' with the temporary password still requiring a change next time.
+        If AccountRequests.MustChangePassword(Session.CurrentUserId) Then
+            If Not ChangePasswordModal.Prompt(Session.CurrentUserId, Session.CurrentFullName) Then
+                Session.Clear()
+                txtPass.Text = ""
+                txtUser.Focus()
+                Return
+            End If
+            ActivityLog.Record("PASSWORD_CHANGE", "user", Session.CurrentUserId,
+                               "Set own password after admin reset")
+        End If
+
         ActivityLog.Record("LOGIN")
         RouteByRole(Session.CurrentRole)
     End Sub

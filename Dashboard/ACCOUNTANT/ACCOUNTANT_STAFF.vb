@@ -167,6 +167,33 @@ Public Class ACCOUNTANT_STAFF
             topPos += 58
         Next
 
+
+        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
+        ' Self-service password change, so a member of staff does not have to ask
+        ' an admin for a reset just to choose a new password. Built in code rather
+        ' than the designer because every dashboard needs the same one, and it
+        ' sits just above Logout where account-level actions belong.
+        Dim btnAccount As New Button With {
+            .Name = "account",
+            .Text = "My Account"
+        }
+        Nav.Controls.Add(btnAccount)
+        StyleButton(btnAccount)
+        btnAccount.Left = 14
+        btnAccount.Width = Nav.Width - 28
+        btnAccount.Height = 48
+        btnAccount.Top = Nav.Height - 168
+        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(btnAccount, 12)
+        AddHandler btnAccount.Click,
+            Sub()
+                ' Deliberately does NOT change the active nav highlight: this
+                ' opens a dialog, it does not navigate away from the panel the
+                ' user is looking at.
+                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
+                                                    Session.CurrentFullName)
+            End Sub
+
         StyleButton(logout)
         logout.Left = 14
         logout.Width = Nav.Width - 28
@@ -287,6 +314,7 @@ Public Class ACCOUNTANT_STAFF
             Case "ledger" : iconPath = "coins.png"
             Case "reports" : iconPath = "newspaper.png"
             Case "logout" : iconPath = "logout.png"
+            Case "account" : iconPath = "user.png"
         End Select
 
         If IO.File.Exists(iconPath) Then

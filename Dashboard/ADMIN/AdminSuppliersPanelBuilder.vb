@@ -230,7 +230,13 @@ Public Class AdminSuppliersPanelBuilder
         Dim topRegion As Panel = BuildTopRegion()
         topRegion.Dock = DockStyle.Top
 
+        Dim tileStrip As Panel = BuildTileStrip()
+        tileStrip.Dock = DockStyle.Top
+
+        ' Docked-Top children stack in reverse add order: table, then tiles,
+        ' then the title bar nearest the top.
         _container.Controls.Add(tableWrapper)
+        _container.Controls.Add(tileStrip)
         _container.Controls.Add(topRegion)
 
         _container.ResumeLayout()
@@ -243,7 +249,7 @@ Public Class AdminSuppliersPanelBuilder
     Private Shared Function CardHeightFor(rowCount As Integer) As Integer
         Dim contentH As Integer = If(rowCount = 0, 90, rowCount * ROW_H)
         Dim cardH As Integer = HDR_H + PAD_TOP + contentH + PAD_BOTTOM + 2
-        Dim maxH As Integer = _container.ClientSize.Height - 72 - 32
+        Dim maxH As Integer = _container.ClientSize.Height - 72 - (SUMMARY_H + 12) - 32
         If maxH > 160 AndAlso cardH > maxH Then cardH = maxH
         Return cardH
     End Function
@@ -251,6 +257,82 @@ Public Class AdminSuppliersPanelBuilder
     ' =========================================================================
     '  TOP REGION  —  72px title bar
     ' =========================================================================
+    ' =========================================================================
+    '  SUMMARY TILES  —  the supplier base at a glance
+    ' =========================================================================
+    Private Const SUMMARY_H As Integer = 140
+
+    Private Shared Function BuildTileStrip() As Panel
+        Dim bar As New Panel With {
+            .Height = SUMMARY_H + 12, .BackColor = MintBg,
+            .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
+        }
+        Dim grid As New TableLayoutPanel With {
+            .Dock = DockStyle.Fill, .ColumnCount = 4, .RowCount = 1,
+            .BackColor = Color.Transparent,
+            .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        }
+        For i As Integer = 0 To 3
+            grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25.0F))
+        Next
+        grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
+
+        Dim total As Integer = _allRows.Count
+        Dim active As Integer = 0
+        Dim totalPos As Integer = 0
+        For Each r In _allRows
+            If r.IsActive Then active += 1
+            totalPos += r.PoCount
+        Next
+        Dim inactive As Integer = total - active
+
+        Dim defs = {
+            ("Suppliers", total.ToString("N0"), "on file", MintPrimary, ""),
+            ("Active", active.ToString("N0"), "in use", MintDark, "Live"),
+            ("Inactive", inactive.ToString("N0"), "switched off", SubText,
+             If(inactive > 0, "Review", "")),
+            ("Purchase Orders", totalPos.ToString("N0"), "raised all-time",
+             Color.FromArgb(45, 80, 150), "")
+        }
+        For i As Integer = 0 To 3
+            Dim d = defs(i)
+            Dim card = MakeSummaryCard(d.Item1, d.Item4, d.Item2, d.Item3, d.Item5)
+            card.Margin = New Padding(0, 0, If(i < 3, 12, 0), 0)
+            grid.Controls.Add(card, i, 0)
+        Next
+        bar.Controls.Add(grid)
+        Return bar
+    End Function
+
+    Private Shared Function MakeSummaryCard(caption As String, valueClr As Color,
+                                            value As String, subLabel As String,
+                                            badgeText As String) As Panel
+        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
+        AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
+        card.Controls.Add(New Label With {
+            .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent})
+        card.Controls.Add(New Label With {
+            .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent})
+        If badgeText <> "" Then
+            Dim badge As New Label With {
+                .Text = badgeText, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+                .ForeColor = MintPrimary, .BackColor = Color.FromArgb(236, 248, 244),
+                .AutoSize = True, .Padding = New Padding(6, 3, 6, 3),
+                .Anchor = AnchorStyles.Right Or AnchorStyles.Top}
+            card.Controls.Add(badge)
+            AddHandler card.Resize, Sub()
+                                        badge.Left = card.Width - badge.Width - 14
+                                        badge.Top = 14
+                                    End Sub
+        End If
+        Return card
+    End Function
+
     Private Shared Function BuildTopRegion() As Panel
         Dim region As New Panel With {
             .BackColor = MintBg, .AutoSize = False, .Height = 72

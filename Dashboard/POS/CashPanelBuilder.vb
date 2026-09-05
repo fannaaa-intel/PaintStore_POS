@@ -148,10 +148,15 @@ Public Class CashPanelBuilder
 
                 If _shiftId <= 0 Then Return
 
-                ' Find the Cash payment method ID
+                ' Find the Cash payment method ID. Prefer the real type column
+                ' (added by migrations.sql section 8) so 'GCash' is never counted
+                ' as drawer cash; fall back to the old name match when the column
+                ' is absent, keeping an un-migrated database working.
                 Dim cashMethodId As Integer = 0
-                Using cmd As New MySqlCommand(
-                    "SELECT method_id FROM payment_methods WHERE LOWER(name) LIKE '%cash%' LIMIT 1", conn)
+                Dim cashSql As String = If(PaymentMethods.HasBehaviourColumns(),
+                    "SELECT method_id FROM payment_methods WHERE type = 'Cash' ORDER BY method_id LIMIT 1",
+                    "SELECT method_id FROM payment_methods WHERE LOWER(name) LIKE '%cash%' AND LOWER(name) NOT LIKE '%gcash%' LIMIT 1")
+                Using cmd As New MySqlCommand(cashSql, conn)
                     Dim result = cmd.ExecuteScalar()
                     If result IsNot Nothing Then cashMethodId = CInt(result)
                 End Using

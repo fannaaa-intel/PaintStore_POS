@@ -72,6 +72,7 @@ Public Class AdminUserPanelBuilder
         Public RequestedRoleId As Integer = 0
         Public RequestedRoleName As String = ""
         Public RejectReason As String = ""
+        Public ReviewedAt As DateTime = DateTime.MinValue
 
         Public ReadOnly Property IsPending As Boolean
             Get
@@ -103,6 +104,7 @@ Public Class AdminUserPanelBuilder
         AllUsers
         Pending
         ResetRequests
+        Rejected
         Disabled
     End Enum
 
@@ -142,6 +144,10 @@ Public Class AdminUserPanelBuilder
     Private Const SIDE_PAD As Integer = 24
     Private Const ROW_H As Integer = 64
     Private Const SEARCH_PLACEHOLDER As String = "Search by name or username…"
+
+    ' One ToolTip for the whole panel; a per-row instance would leak a
+    ' native handle every time the list re-renders.
+    Private Shared ReadOnly _tips As New ToolTip()
 
     ' =========================================================================
     '  ENTRY POINT
@@ -198,7 +204,7 @@ Public Class AdminUserPanelBuilder
                     "u.created_at, u.sales_quota, u.role_id, r.role_name" &
                     If(hasApproval,
                        ", u.status, u.requested_role_id, u.reject_reason, " &
-                       "rq.role_name AS requested_role_name", "") &
+                       "u.reviewed_at, rq.role_name AS requested_role_name", "") &
                     " FROM users u JOIN roles r ON u.role_id = r.role_id " &
                     If(hasApproval, "LEFT JOIN roles rq ON u.requested_role_id = rq.role_id ", "") &
                     "ORDER BY u.full_name"
@@ -221,6 +227,7 @@ Public Class AdminUserPanelBuilder
                                 rec.RequestedRoleId = If(IsDBNull(rdr("requested_role_id")), 0, Convert.ToInt32(rdr("requested_role_id")))
                                 rec.RequestedRoleName = If(IsDBNull(rdr("requested_role_name")), "", rdr("requested_role_name").ToString())
                                 rec.RejectReason = If(IsDBNull(rdr("reject_reason")), "", rdr("reject_reason").ToString())
+                                rec.ReviewedAt = If(IsDBNull(rdr("reviewed_at")), DateTime.MinValue, Convert.ToDateTime(rdr("reviewed_at")))
                             End If
                             _allRows.Add(rec)
                         End While
@@ -302,9 +309,14 @@ Public Class AdminUserPanelBuilder
         Select Case _tab
             Case Tab.Pending
                 Return r.IsPending
+            Case Tab.Rejected
+                ' Declined applications, kept so an admin can see who was
+                ' turned away and why. They are not accounts, so they stay
+                ' out of every other tab.
+                Return r.IsRejected
             Case Tab.Disabled
-                ' Rejected applications belong with the pending queue's history,
-                ' not here - this tab is about accounts an admin switched off.
+                ' Rejected applications have their own tab - this one is about
+                ' accounts an admin switched off.
                 Return (Not r.IsActive) AndAlso (Not r.IsPending) AndAlso (Not r.IsRejected)
             Case Tab.AllUsers
                 ' Applications are reviewed on their own tab; showing them here
@@ -522,14 +534,19 @@ Public Class AdminUserPanelBuilder
         Next
         grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
+        ' Applications are not accounts: a pending or rejected sign-up has
+        ' nothing to sign in with. Counting them here made Total Users
+        ' larger than Active + Disabled for no visible reason.
+        Dim accountTotal As Integer = ActiveCount() + DisabledCount()
+
         Dim defs = {
-            ("Total Users", _allRows.Count.ToString("N0"), "accounts on file",
+            ("Total Users", accountTotal.ToString("N0"), "accounts on file",
              MintPrimary, ""),
             ("Active", ActiveCount().ToString("N0"), "able to sign in",
              MintDark, "Live"),
             ("Awaiting Approval", PendingCount().ToString("N0"), "sign-ups to review",
              AccentOrange, "Review"),
-            ("Disabled", DisabledCount().ToString("N0"), "switched off",
+            ("Declined", TabCount(Tab.Rejected).ToString("N0"), "sign-ups turned away",
              AccentBlue, "")
         }
 
@@ -612,6 +629,7 @@ Public Class AdminUserPanelBuilder
             (Tab.AllUsers, "All Users", TabCount(Tab.AllUsers)),
             (Tab.Pending, "Pending Approval", PendingCount()),
             (Tab.ResetRequests, "Password Requests", _resetRows.Count),
+            (Tab.Rejected, "Rejected", TabCount(Tab.Rejected)),
             (Tab.Disabled, "Disabled", DisabledCount())
         }
 
@@ -766,14 +784,6 @@ Public Class AdminUserPanelBuilder
             End Sub
 
         Return strip
-    End Function
-
-    Private Shared Function RejectedCount() As Integer
-        Dim n As Integer = 0
-        For Each r In _allRows
-            If r.IsRejected Then n += 1
-        Next
-        Return n
     End Function
 
     ' Switching tab resets the role chip: a role filter carried over from
@@ -982,6 +992,11 @@ Public Class AdminUserPanelBuilder
             Case Tab.ResetRequests
                 captions = {"ACCOUNT", "USERNAME TYPED", "ROLE", "REQUESTED", "ACTIONS"}
                 stops = {0.0, 0.24, 0.44, 0.58, 0.72}
+            Case Tab.Rejected
+                ' The reason is the whole point of this tab, so it gets the
+                ' widest column rather than being hidden behind a hover.
+                captions = {"APPLICANT", "USERNAME", "REQUESTED ROLE", "DECLINED", "REASON"}
+                stops = {0.0, 0.20, 0.36, 0.52, 0.66}
             Case Else
                 captions = {"FULL NAME", "USERNAME", "ROLE", "STATUS", "CREATED", "ACTIONS"}
                 stops = {0.0, 0.2, 0.34, 0.45, 0.56, 0.7}
@@ -1082,9 +1097,15 @@ Public Class AdminUserPanelBuilder
         Else
             Dim y As Integer = 4
             For Each r As UserRecord In _visibleRows
-                Dim row As Panel = If(_tab = Tab.Pending,
-                                      BuildPendingRow(r, ROW_H),
-                                      BuildDataRow(r, ROW_H))
+                Dim row As Panel
+                Select Case _tab
+                    Case Tab.Pending
+                        row = BuildPendingRow(r, ROW_H)
+                    Case Tab.Rejected
+                        row = BuildRejectedRow(r, ROW_H)
+                    Case Else
+                        row = BuildDataRow(r, ROW_H)
+                End Select
                 row.Location = New Point(0, y)
                 row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 _scrollHost.Controls.Add(row)
@@ -1115,6 +1136,12 @@ Public Class AdminUserPanelBuilder
                            "to enable it."
                 End If
                 Return "No sign-ups are waiting for approval."
+            Case Tab.Rejected
+                If Not AccountRequests.HasApprovalColumns() Then
+                    Return "Sign-up approval is not set up yet. Run migrations.sql " &
+                           "to enable it."
+                End If
+                Return "No sign-ups have been declined."
             Case Tab.Disabled
                 Return "No disabled accounts."
             Case Else
@@ -1200,6 +1227,112 @@ Public Class AdminUserPanelBuilder
                 Dim ay As Integer = (height - btnApprove.Height) \ 2
                 btnApprove.Left = ax : btnApprove.Top = ay
                 btnReject.Left = btnApprove.Right + 6 : btnReject.Top = ay
+            End Sub
+
+        PropagateHover(p)
+        Return p
+    End Function
+
+    ' ── REJECTED APPLICATION ROW ─────────────────────────────────────────────
+    '
+    '  Read-only on purpose. The decision has been made, and the useful thing
+    '  now is the record of it - who applied, what they asked for, and the
+    '  reason that was given. Re-admitting someone is a fresh sign-up, not an
+    '  undo, so there is no Approve button here.
+    Private Shared Function BuildRejectedRow(r As UserRecord, height As Integer) As Panel
+        Dim p As New BufferedPanel With {
+            .Height = height,
+            .BackColor = Color.Transparent
+        }
+
+        AddHandler p.Paint,
+            Sub(sn, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                If TypeOf p.Tag Is Boolean AndAlso CBool(p.Tag) Then
+                    Dim rect As New Rectangle(8, 3, p.Width - 16, height - 6)
+                    Using path As GraphicsPath = RoundRect(rect, 10)
+                        Using b As New SolidBrush(RowHover)
+                            e.Graphics.FillPath(b, path)
+                        End Using
+                    End Using
+                End If
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
+                End Using
+            End Sub
+
+        Dim lblName As New Label With {
+            .Text = r.FullName,
+            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+            .ForeColor = SubText,
+            .AutoSize = True, .BackColor = Color.Transparent
+        }
+        Dim lblUser As New Label With {
+            .Text = r.Username,
+            .Font = New Font("Segoe UI", 11),
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
+        }
+
+        ' Same badge as the pending queue, in grey: it records what was asked
+        ' for, and nothing was granted.
+        Dim reqRole As String = If(r.RequestedRoleName <> "", r.RequestedRoleName, r.RoleName)
+        Dim badgeRole As New Label With {
+            .Text = If(reqRole <> "", reqRole, "-"),
+            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+            .ForeColor = BadgeDisabled.fore,
+            .BackColor = BadgeDisabled.back,
+            .AutoSize = True,
+            .Padding = New Padding(10, 4, 10, 4)
+        }
+        RoundLabel(badgeRole, 10)
+
+        ' reviewed_at is when the decision was taken; created_at is when they
+        ' applied. This column is headed DECLINED, so it has to be the former,
+        ' falling back only when an older row never recorded one.
+        Dim whenDecided As DateTime = If(r.ReviewedAt <> DateTime.MinValue, r.ReviewedAt, r.CreatedAt)
+        Dim lblWhen As New Label With {
+            .Text = RelativeTime(whenDecided),
+            .Font = New Font("Segoe UI", 11),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
+        }
+
+        ' A reason can be long, and an admin rejecting in a hurry may have left
+        ' none at all. Ellipsis rather than wrap keeps every row the same
+        ' height; the full text is on the tooltip.
+        Dim reason As String = If(String.IsNullOrWhiteSpace(r.RejectReason),
+                                  "No reason recorded", r.RejectReason.Trim())
+        Dim lblReason As New Label With {
+            .Text = reason,
+            .Font = New Font("Segoe UI", 10.5F,
+                             If(String.IsNullOrWhiteSpace(r.RejectReason),
+                                FontStyle.Italic, FontStyle.Regular)),
+            .ForeColor = If(String.IsNullOrWhiteSpace(r.RejectReason), FaintText, AccentRed),
+            .AutoSize = False,
+            .AutoEllipsis = True,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .BackColor = Color.Transparent
+        }
+        If Not String.IsNullOrWhiteSpace(r.RejectReason) Then
+            _tips.SetToolTip(lblReason, r.RejectReason.Trim())
+        End If
+
+        p.Controls.AddRange({lblName, lblUser, badgeRole, lblWhen, lblReason})
+
+        AddHandler p.Resize,
+            Sub()
+                Dim w = p.Width
+                lblName.Left = 24 : lblName.Top = (height - lblName.Height) \ 2
+                lblUser.Left = CInt(w * 0.2) : lblUser.Top = (height - lblUser.Height) \ 2
+                badgeRole.Left = CInt(w * 0.36) : badgeRole.Top = (height - badgeRole.Height) \ 2
+                lblWhen.Left = CInt(w * 0.52) : lblWhen.Top = (height - lblWhen.Height) \ 2
+
+                ' Runs to the right edge less the same 24px the first column
+                ' is indented by, so the text block stays visually centred.
+                Dim rx As Integer = CInt(w * 0.66)
+                lblReason.Left = rx
+                lblReason.Width = Math.Max(60, w - rx - 24)
+                lblReason.Height = 22
+                lblReason.Top = (height - lblReason.Height) \ 2
             End Sub
 
         PropagateHover(p)

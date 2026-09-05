@@ -48,6 +48,15 @@ q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.im
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.address,s.is_active,(SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos FROM suppliers s ORDER BY s.name ASC" "supplier list query (no image column)"
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active ORDER BY s.name ASC" "admin supplier grid (no image column)"
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path ORDER BY s.name ASC" "admin supplier grid (with image column)"
+q "SELECT method_id,name FROM payment_methods ORDER BY method_id" "payment methods load (fallback shape)"
+HASPM=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='payment_methods' AND column_name IN ('type','is_active','note');" 2>/dev/null)
+if [ "$HASPM" = "3" ]; then
+    q "SELECT method_id,name,type,is_active,note FROM payment_methods ORDER BY method_id" "payment methods load (with type/active/note)"
+    q "SELECT method_id FROM payment_methods WHERE type='Cash' ORDER BY method_id LIMIT 1" "cash drawer finds cash by type"
+    q "SELECT COUNT(*) FROM payment_methods WHERE type IN ('Cash','Reference')" "payment method type enum"
+else
+    echo "  SKIP  payment_methods behaviour columns not applied ($HASPM/3) - app falls back"
+fi
 
 # ── Sign-up approval + password reset (migrations.sql sections 6 and 7) ──────
 # These are optional: the app probes for them and falls back when absent, so a
@@ -56,9 +65,12 @@ HASAPP=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.
 HASPRR=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='password_reset_requests';" 2>/dev/null)
 
 if [ "$HASAPP" = "6" ]; then
-    q "SELECT u.user_id,u.full_name,u.username,u.is_active,u.created_at,u.sales_quota,u.role_id,r.role_name,u.status,u.requested_role_id,u.reject_reason,rq.role_name AS requested_role_name FROM users u JOIN roles r ON u.role_id=r.role_id LEFT JOIN roles rq ON u.requested_role_id=rq.role_id ORDER BY u.full_name" "user list incl. approval columns"
+    q "SELECT u.user_id,u.full_name,u.username,u.is_active,u.created_at,u.sales_quota,u.role_id,r.role_name,u.status,u.requested_role_id,u.reject_reason,u.reviewed_at,rq.role_name AS requested_role_name FROM users u JOIN roles r ON u.role_id=r.role_id LEFT JOIN roles rq ON u.requested_role_id=rq.role_id ORDER BY u.full_name" "user list incl. approval columns"
     q "SELECT COUNT(*) FROM users WHERE status IN ('Pending','Approved','Rejected')" "status enum accepts all three states"
     q "SELECT u.user_id,u.full_name,u.username,u.password_hash,u.is_active,u.status,r.role_name FROM users u JOIN roles r ON u.role_id=r.role_id WHERE u.username='__nobody__' LIMIT 1" "login query incl. status"
+    q "SELECT user_id,status,reviewed_at,reject_reason FROM users WHERE status='Rejected'" "rejected tab query (reason + decided-at)"
+    q "SELECT must_change_password FROM users WHERE user_id=0" "forced-change flag readable"
+    q "SELECT COUNT(*) FROM users WHERE must_change_password IN (0,1)" "forced-change flag is 0/1"
 else
     echo "  SKIP  approval columns not applied ($HASAPP/6) - app falls back"
 fi

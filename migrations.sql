@@ -148,6 +148,46 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+
+-- -----------------------------------------------------------------------------
+--  8. payment_methods — behaviour, availability and a note
+--
+--     A payment method used to be just a name, and the rest of the app GUESSED
+--     how it behaved from that name: anything containing "cash" was treated as
+--     cash (asks amount tendered, gives change, counts in the cash drawer),
+--     everything else asked for a reference number. That mis-handles real
+--     names — "GCash" contains "cash" but is an e-wallet that needs a
+--     reference, not change.
+--
+--     type       'Cash'      -> checkout asks amount tendered and gives change,
+--                              and the method counts in the cash drawer.
+--                'Reference' -> checkout asks for a reference number, no change.
+--                The DEFAULT is 'Reference': a brand-new method is the safe,
+--                non-cash kind until an admin says otherwise.
+--     is_active  0 hides the method from the till without deleting it, so old
+--                sales that reference it stay intact.
+--     note       Free text shown to the cashier at payment — e.g. the number
+--                to send an e-wallet transfer to.
+--
+--     Optional like the rest: the app checks whether these columns exist and
+--     falls back to the old name-guessing when they are absent, so an
+--     un-migrated database keeps working exactly as before.
+-- -----------------------------------------------------------------------------
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS type ENUM('Cash','Reference') NOT NULL DEFAULT 'Reference' AFTER name;
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER type;
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS note VARCHAR(255) DEFAULT NULL AFTER is_active;
+
+--  Backfill: the row whose name reads as cash becomes type='Cash'; every other
+--  existing method keeps the safe 'Reference' default. Runs harmlessly again.
+UPDATE payment_methods SET type = 'Cash'
+    WHERE LOWER(name) LIKE '%cash%' AND LOWER(name) NOT LIKE '%gcash%';
+
+
 -- -----------------------------------------------------------------------------
 --  Check the result — every column below should be listed.
 -- -----------------------------------------------------------------------------
@@ -161,3 +201,6 @@ SHOW COLUMNS FROM users LIKE 'status';
 SHOW COLUMNS FROM users LIKE 'requested_role_id';
 SHOW COLUMNS FROM users LIKE 'must_change_password';
 SHOW TABLES LIKE 'password_reset_requests';
+SHOW COLUMNS FROM payment_methods LIKE 'type';
+SHOW COLUMNS FROM payment_methods LIKE 'is_active';
+SHOW COLUMNS FROM payment_methods LIKE 'note';

@@ -136,6 +136,92 @@ Public Class QuietScrollFlowPanel
     End Sub
 End Class
 
+' =============================================================================
+'  QuietScrollPanel
+'  A plain Panel that scrolls its content with the mouse wheel but never shows a
+'  scrollbar. Same trick as QuietScrollFlowPanel, but for a panel whose children
+'  are positioned by hand (absolute .Top) rather than flow-stacked - which is
+'  what the Admin nav list needs: 12 buttons in named sections that must keep
+'  their exact positions while still scrolling on a short screen.
+' =============================================================================
+Public Class QuietScrollPanel
+    Inherits Panel
+
+    <System.Runtime.InteropServices.DllImport("user32.dll")>
+    Private Shared Function ShowScrollBar(hWnd As IntPtr, wBar As Integer,
+                                          bShow As Boolean) As Boolean
+    End Function
+
+    Private Const SB_BOTH As Integer = 3
+    Private Const WM_NCCALCSIZE As Integer = &H83
+
+    Public Sub New()
+        Me.SetStyle(ControlStyles.OptimizedDoubleBuffer Or
+                    ControlStyles.ResizeRedraw, True)
+        Me.UpdateStyles()
+        Me.DoubleBuffered = True
+        Me.AutoScroll = True
+    End Sub
+
+    ' True when there is content above or below the current viewport.
+    Private ReadOnly Property CanScroll As Boolean
+        Get
+            Return Me.DisplayRectangle.Height > Me.ClientSize.Height
+        End Get
+    End Property
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        ' Nothing to scroll: let the wheel through so hovering a short list does
+        ' not feel frozen.
+        If Not CanScroll Then
+            MyBase.OnMouseWheel(e)
+            Return
+        End If
+
+        Dim pos As Integer = -Me.AutoScrollPosition.Y
+        Dim maxPos As Integer = Math.Max(Me.DisplayRectangle.Height - Me.ClientSize.Height, 0)
+        Dim [next] As Integer = Math.Max(0, Math.Min(pos - CInt(e.Delta / 120.0 * 48), maxPos))
+        Me.AutoScrollPosition = New Point(0, [next])
+
+        Dim h = TryCast(e, HandledMouseEventArgs)
+        If h IsNot Nothing Then h.Handled = True
+    End Sub
+
+    Protected Overrides Sub WndProc(ByRef m As Message)
+        MyBase.WndProc(m)
+        ' Re-hide the bars after every frame change; WinForms re-shows them
+        ' whenever the scrollable area is recalculated.
+        If m.Msg = WM_NCCALCSIZE AndAlso Me.IsHandleCreated Then
+            ShowScrollBar(Me.Handle, SB_BOTH, False)
+        End If
+    End Sub
+
+    Protected Overrides Sub OnLayout(levent As LayoutEventArgs)
+        MyBase.OnLayout(levent)
+        If Me.IsHandleCreated Then ShowScrollBar(Me.Handle, SB_BOTH, False)
+    End Sub
+
+    ' Child controls receive the wheel instead of this panel, so every descendant
+    ' relays it back here.
+    Protected Overrides Sub OnControlAdded(e As ControlEventArgs)
+        MyBase.OnControlAdded(e)
+        HookDescendants(e.Control)
+    End Sub
+
+    Private Sub HookDescendants(c As Control)
+        AddHandler c.MouseWheel, AddressOf RelayWheel
+        AddHandler c.ControlAdded, Sub(s, ev) HookDescendants(ev.Control)
+        For Each child As Control In c.Controls
+            HookDescendants(child)
+        Next
+    End Sub
+
+    Private Sub RelayWheel(sender As Object, e As MouseEventArgs)
+        Me.OnMouseWheel(e)
+    End Sub
+End Class
+
+
 ' ─────────────────────────────────────────────────────────────────────────────
 '  CardTableBody
 '  Scrollable row host that lives inside a rounded card. Cards are drawn by

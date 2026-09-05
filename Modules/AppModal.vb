@@ -10,6 +10,8 @@ Public Module AppModal
     Private ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
     Private ReadOnly DividerClr As Color = Color.FromArgb(230, 238, 235)
     Private ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
+    Private ReadOnly FieldBg As Color = Color.FromArgb(244, 248, 246)
+    Private ReadOnly FieldBorder As Color = Color.FromArgb(210, 225, 220)
     Private ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
     Private ReadOnly LightBtn As Color = Color.FromArgb(243, 246, 244)
     Private ReadOnly LightBtnBorder As Color = Color.FromArgb(200, 215, 210)
@@ -326,15 +328,42 @@ Public Module AppModal
             .BackColor = Color.Transparent
         }
 
+        ' The field sits on a rounded, mint-bordered panel so it matches every
+        ' other input in the app. It used to be a bare FixedSingle box, which is
+        ' the grey Windows rectangle that looked out of place on this card.
+        Const FIELD_H As Integer = 40
+        Dim fieldPanel As New Panel With {
+            .Location = New Point(PAD, lblBody.Bottom + 12),
+            .Size = New Size(textW, FIELD_H),
+            .BackColor = FieldBg
+        }
         Dim txt As New TextBox With {
             .Font = New Font("Segoe UI", 11.0F),
             .Text = defaultValue,
-            .BorderStyle = BorderStyle.FixedSingle,
-            .Location = New Point(PAD, lblBody.Bottom + 12),
-            .Width = textW
+            .BorderStyle = BorderStyle.None,
+            .BackColor = FieldBg,
+            .ForeColor = TitleClr,
+            .Location = New Point(12, (FIELD_H - 20) \ 2),
+            .Width = textW - 24
         }
+        AddHandler fieldPanel.Paint,
+            Sub(sender As Object, ev As PaintEventArgs)
+                ev.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rc As New Rectangle(0, 0, fieldPanel.Width - 1, fieldPanel.Height - 1)
+                Using path As GraphicsPath = RoundedPath(rc, 8)
+                    Using b As New SolidBrush(FieldBg)
+                        ev.Graphics.FillPath(b, path)
+                    End Using
+                    Using pen As New Pen(If(txt.Focused, MintPrimary, FieldBorder), 1.2F)
+                        ev.Graphics.DrawPath(pen, path)
+                    End Using
+                End Using
+            End Sub
+        AddHandler txt.GotFocus, Sub() fieldPanel.Invalidate()
+        AddHandler txt.LostFocus, Sub() fieldPanel.Invalidate()
+        fieldPanel.Controls.Add(txt)
 
-        Dim dividerY As Integer = txt.Bottom + 18
+        Dim dividerY As Integer = fieldPanel.Bottom + 18
         Dim btnRowTop As Integer = dividerY + 16
         Dim btnH As Integer = 36
         Dim btnW As Integer = 100
@@ -357,7 +386,7 @@ Public Module AppModal
 
         f.Controls.Add(lblTitle)
         f.Controls.Add(lblBody)
-        f.Controls.Add(txt)
+        f.Controls.Add(fieldPanel)
 
         Dim cardH As Integer = btnRowTop + btnH + PAD
         f.Height = cardH

@@ -31,15 +31,17 @@ Public Class ADMIN_STAFF
     Private navIconBare As New Dictionary(Of Button, Image)
     Private NavTips As New ToolTip()
 
-
     ' ── Grouped nav list ────────────────────────────────────────────────────────
     ' Admin has 12 nav buttons + 4 section headers — far more than the other
     ' dashboards — so the buttons live in a scrollable panel between the logo and
     ' the pinned Logout instead of sitting directly on Nav. Keeps them from
     ' colliding with Logout on shorter screens.
-    Private NavList As Panel
+    Private NavList As QuietScrollPanel
     Private Const NAV_LIST_TOP As Integer = 92
-    Private Const NAV_LIST_BOTTOM_GAP As Integer = 120
+    ' Clears BOTH pinned buttons at the foot of the rail: My Account starts at
+    ' Nav.Height - 168, so the scrolling list has to stop above that or its
+    ' last item slides underneath.
+    Private Const NAV_LIST_BOTTOM_GAP As Integer = 178
 
     ' ===========================================================================
     ' FORM LOAD
@@ -59,7 +61,13 @@ Public Class ADMIN_STAFF
         AddHandler Nav.Paint,
     Sub(s As Object, pe As PaintEventArgs)
         Using pen As New Pen(Color.FromArgb(220, 230, 226), 1)
+            ' Right-hand edge divider.
             pe.Graphics.DrawLine(pen, Nav.Width - 1, 0, Nav.Width - 1, Nav.Height)
+            ' Separator above the pinned My Account / Logout region, so the
+            ' scrolling list reads as a distinct block and its last row never
+            ' looks like it is colliding with the account button.
+            Dim sepY As Integer = Nav.Height - 176
+            pe.Graphics.DrawLine(pen, 16, sepY, Nav.Width - 16, sepY)
         End Using
     End Sub
         ' Without this the divider keeps the x it was painted at for the previous
@@ -185,7 +193,7 @@ Public Class ADMIN_STAFF
         ' Width is Nav.Width - 1, not Nav.Width: that leaves the rightmost pixel
         ' column free so the divider drawn by Nav's own Paint handler at
         ' x = Nav.Width - 1 is never painted over by this panel's background.
-        NavList = New Panel With {
+        NavList = New QuietScrollPanel With {
             .Location = New Point(0, NAV_LIST_TOP),
             .Size = New Size(Nav.Width - 1, Nav.Height - NAV_LIST_TOP - NAV_LIST_BOTTOM_GAP),
             .Anchor = AnchorStyles.Top Or AnchorStyles.Left Or AnchorStyles.Bottom,
@@ -202,8 +210,9 @@ Public Class ADMIN_STAFF
                                         procurementOverview, financialReports, activityLogNav})
         }
 
-        ' 18px reserved on the right so the scrollbar never overlaps a button
-        Dim btnWidth As Integer = Nav.Width - 46
+        ' NavList hides its scrollbar (QuietScrollPanel), so buttons use the
+        ' same 28px side allowance as everywhere else - no reserve needed.
+        Dim btnWidth As Integer = Nav.Width - 28
         Dim y As Integer = 8
         For Each sec In sections
             NavList.Controls.Add(MakeSectionHeader(sec.Item1, y))
@@ -219,6 +228,45 @@ Public Class ADMIN_STAFF
             Next
             y += 10
         Next
+
+        ' A trailing spacer so the scrollable extent runs 12px past the last
+        ' button. AutoScroll then lets the final row clear the bottom edge
+        ' instead of being cut mid-height when the panel is not an exact
+        ' multiple of the row step.
+        NavList.Controls.Add(New Panel With {
+            .Left = 0, .Top = y, .Width = 1, .Height = 12, .BackColor = NavBg
+        })
+
+        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
+        ' Self-service password change, so a member of staff does not have to ask
+        ' an admin for a reset just to choose a new password. Built in code rather
+        ' than the designer because every dashboard needs the same one, and it
+        ' sits just above Logout where account-level actions belong.
+        Dim btnAccount As New Button With {
+            .Name = "account",
+            .Text = "My Account"
+        }
+        Nav.Controls.Add(btnAccount)
+        StyleButton(btnAccount)
+        ' StyleButton parents nav buttons into the scrolling NavList. This one
+        ' is pinned to the rail beside Logout instead, so it goes back to Nav
+        ' the same way Logout does - otherwise Nav.Height - 168 would position
+        ' it against the wrong container and scroll away with the menu.
+        btnAccount.Parent = Nav
+        btnAccount.Left = 14
+        btnAccount.Width = Nav.Width - 28
+        btnAccount.Height = 48
+        btnAccount.Top = Nav.Height - 168
+        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(btnAccount, 12)
+        AddHandler btnAccount.Click,
+            Sub()
+                ' Deliberately does NOT change the active nav highlight: this
+                ' opens a dialog, it does not navigate away from the panel the
+                ' user is looking at.
+                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
+                                                    Session.CurrentFullName)
+            End Sub
 
         StyleButton(logout)
         logout.Parent = Nav
@@ -321,10 +369,9 @@ Public Class ADMIN_STAFF
             End If
         Next
 
-        ' Collapsed, the icons are the only content and they fit without
-        ' scrolling; leaving AutoScroll on would add a horizontal bar for the
-        ' brief moment the buttons are still at their old width.
-        NavList.AutoScroll = navIsOpen
+        ' AutoScroll stays on so a genuinely short screen can still wheel
+        ' through the list; QuietScrollPanel keeps the bar itself hidden.
+        NavList.AutoScroll = True
 
         btnHamburger.BackColor = If(navIsOpen, Color.White, Color.Transparent)
         btnHamburger.Location = If(navIsOpen,
@@ -345,15 +392,13 @@ Public Class ADMIN_STAFF
     Private Sub ApplyNavButtonState(btn As Button, navWidth As Integer)
         If btn Is Nothing Then Return
 
-        ' Buttons inside the scrolling NavList keep an extra 18px clear on the
-        ' right so the scrollbar never sits on top of one. Logout is parented
-        ' straight onto Nav and has no scrollbar to avoid.
-        Dim inList As Boolean = (btn.Parent Is NavList)
+        ' No scrollbar reserve any more - NavList hides its bar - so list
+        ' buttons and the pinned ones (My Account, Logout) share one width.
 
         If navIsOpen Then
             btn.Text = NavCaption(btn)
             btn.Left = 14
-            btn.Width = navWidth - If(inList, 46, 28)
+            btn.Width = navWidth - 28
             btn.TextImageRelation = TextImageRelation.ImageBeforeText
             btn.ImageAlign = ContentAlignment.MiddleLeft
             btn.TextAlign = ContentAlignment.MiddleLeft
@@ -387,37 +432,6 @@ Public Class ADMIN_STAFF
     End Function
 
     ' ===========================================================================
-    ' PLACEHOLDER — centered "<section> — coming soon"
-    ' ===========================================================================
-    Private Sub LoadPlaceholder(title As String)
-        MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
-
-        Dim panel As New Panel With {
-            .Dock = DockStyle.Fill,
-            .BackColor = Color.White
-        }
-        Dim lblTitle As New Label With {
-            .Text = title & " — coming soon",
-            .Font = New Font("Segoe UI", 18, FontStyle.Bold),
-            .ForeColor = MintDarkTop,
-            .AutoSize = True
-        }
-        panel.Controls.Add(lblTitle)
-
-        Dim centre As Action =
-            Sub()
-                lblTitle.Left = (panel.Width - lblTitle.PreferredWidth) \ 2
-                lblTitle.Top = (panel.Height - lblTitle.PreferredHeight) \ 2
-            End Sub
-        AddHandler panel.Resize, Sub() centre()
-
-        MainContainer.Controls.Add(panel)
-        MainContainer.ResumeLayout()
-        centre()
-    End Sub
-
-    ' ===========================================================================
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
@@ -441,6 +455,7 @@ Public Class ADMIN_STAFF
             Case "procurementoverview" : iconPath = "quotation.png"
             Case "financialreports" : iconPath = "coins.png"
             Case "activitylognav" : iconPath = "recent.png"
+            Case "account" : iconPath = "user.png"
             Case "logout" : iconPath = "logout.png"
         End Select
 
@@ -584,18 +599,6 @@ Public Class ADMIN_STAFF
                 TextRenderer.DrawText(ev.Graphics, btn.Text, btn.Font, rect, Color.White,
                     TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
             End Sub
-    End Sub
-
-    ' ===========================================================================
-    ' NAV SWITCHING
-    ' ===========================================================================
-    Private Sub ShowSection(btn As Button, title As String)
-        SetActive(btn)
-        MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
-        LoadPlaceholder(title)
-        MainContainer.ResumeLayout()
-        MainContainer.Refresh()
     End Sub
 
     ' ===========================================================================

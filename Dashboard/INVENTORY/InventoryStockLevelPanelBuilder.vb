@@ -37,9 +37,8 @@ Imports MySql.Data.MySqlClient
 '     Low      : stock_qty > reorder_level but <= reorder_level * 1.25
 '     Healthy  : above that
 '
-'  Each row carries an "Adjust" link that will later open Stock Adjustment
-'  pre-loaded with that product. For now it is stubbed to a "coming soon"
-'  modal so the wiring is ready but never breaks.
+'  Each row carries an "Adjust" link that opens Stock Adjustment with that
+'  product already selected, via INVENTORY_STAFF.OpenStockAdjustmentFor.
 ' =============================================================================
 Public Class InventoryStockLevelPanelBuilder
 
@@ -1140,7 +1139,7 @@ Public Class InventoryStockLevelPanelBuilder
             .BackColor = Color.Transparent
         }
 
-        ' Col 6 — action (Adjust link -> Stock Adjustment, stubbed for now)
+        ' Col 6 — action (Adjust link -> Stock Adjustment, pre-loaded)
         Dim cAct As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         Dim btnAdjust As Label = MakeLink("Adjust", MintPrimary)
         cAct.Controls.Add(btnAdjust)

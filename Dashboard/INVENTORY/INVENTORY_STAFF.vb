@@ -28,7 +28,6 @@ Public Class INVENTORY_STAFF
     Private navIconBare As New Dictionary(Of Button, Image)
     Private NavTips As New ToolTip()
 
-
     ' ── Shift reference (kept for HomePanelBuilder parity) ───────────────────────
     Private shiftStartTime As DateTime
 
@@ -183,6 +182,33 @@ Public Class INVENTORY_STAFF
             topPos += 58
         Next
 
+
+        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
+        ' Self-service password change, so a member of staff does not have to ask
+        ' an admin for a reset just to choose a new password. Built in code rather
+        ' than the designer because every dashboard needs the same one, and it
+        ' sits just above Logout where account-level actions belong.
+        Dim btnAccount As New Button With {
+            .Name = "account",
+            .Text = "My Account"
+        }
+        Nav.Controls.Add(btnAccount)
+        StyleButton(btnAccount)
+        btnAccount.Left = 14
+        btnAccount.Width = Nav.Width - 28
+        btnAccount.Height = 48
+        btnAccount.Top = Nav.Height - 168
+        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(btnAccount, 12)
+        AddHandler btnAccount.Click,
+            Sub()
+                ' Deliberately does NOT change the active nav highlight: this
+                ' opens a dialog, it does not navigate away from the panel the
+                ' user is looking at.
+                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
+                                                    Session.CurrentFullName)
+            End Sub
+
         StyleButton(logout)
         logout.Left = 14
         logout.Width = Nav.Width - 28
@@ -296,39 +322,6 @@ Public Class INVENTORY_STAFF
     End Sub
 
     ' ===========================================================================
-    ' PLACEHOLDER
-    ' ===========================================================================
-    Private Sub LoadPlaceholder(title As String)
-        MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
-
-
-        Dim panel As New Panel With {
-            .Dock = DockStyle.Fill,
-            .BackColor = Color.FromArgb(220, 240, 235)
-        }
-        AddHandler panel.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
-        Dim lblTitle As New Label With {
-            .Text = title,
-            .Font = New Font("Segoe UI", 18, FontStyle.Bold),
-            .ForeColor = MintDarkTop,
-            .AutoSize = True,
-            .Location = New Point(30, 30)
-        }
-        Dim lblInfo As New Label With {
-            .Text = "Ready for integration...",
-            .Font = New Font("Segoe UI", 10),
-            .ForeColor = Color.Gray,
-            .AutoSize = True,
-            .Location = New Point(32, 70)
-        }
-        panel.Controls.Add(lblTitle)
-        panel.Controls.Add(lblInfo)
-        MainContainer.Controls.Add(panel)
-        MainContainer.ResumeLayout()
-    End Sub
-
-    ' ===========================================================================
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
@@ -347,6 +340,7 @@ Public Class INVENTORY_STAFF
             Case "putaway" : iconPath = "add.png"
             Case "lowstock" : iconPath = "notification.png"
             Case "logout" : iconPath = "logout.png"
+            Case "account" : iconPath = "user.png"
         End Select
 
         If IO.File.Exists(iconPath) Then
