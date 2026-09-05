@@ -402,9 +402,12 @@ Public Class ProcurementPOPanelBuilder
         btnRefresh.Left = 592
 
         ' ---- Filter tabs ----
-        Dim tabs() As String = {"All", "Draft", "Ordered", "Received", "Cancelled"}
+        ' "Partial" = Partially Received. Receiving splits a PO into that status,
+        ' but no tab matched it: such POs showed only under All Active and could
+        ' not be isolated -- which is the one status a buyer needs to chase.
+        Dim tabs() As String = {"All", "Draft", "Ordered", "Partial", "Received", "Cancelled"}
         Dim tabRow As New FlowLayoutPanel With {
-           .Left = 24, .Top = 88, .Height = 44, .AutoSize = False, .Width = 700,
+           .Left = 24, .Top = 88, .Height = 44, .AutoSize = False, .Width = 720,
             .BackColor = Color.Transparent, .WrapContents = False,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Top
         }
@@ -2207,6 +2210,10 @@ Public Class ProcurementPOPanelBuilder
                         Next
 
                         txn.Commit()
+
+                        ActivityLog.Record("PO_CREATE", "purchase_order", poId,
+                            poNo & " to " & sup.Name & ", " & newLines.Count &
+                            If(newLines.Count = 1, " line", " lines"))
                     Catch exInner As Exception
                         txn.Rollback()
                         If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
@@ -2908,13 +2915,28 @@ Public Class ProcurementPOPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                Dim affected As Integer
                 Using cmd As New MySqlCommand(
                     "UPDATE purchase_orders SET status = 'Ordered' " &
                     "WHERE po_id = @id AND status = 'Draft'", conn)
                     cmd.Parameters.AddWithValue("@id", poId)
-                    cmd.ExecuteNonQuery()
+                    affected = cmd.ExecuteNonQuery()
                 End Using
+
+                ' AND status = 'Draft' correctly stops a double-send, but with no
+                ' rows matched the screen just refreshed as if it had worked. Say
+                ' what happened instead.
+                If affected = 0 Then
+                    btn.Tag = ""
+                    AppModal.Show("This purchase order is no longer a draft, so it " &
+                                  "was not sent again.", "Already Ordered",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    LoadDetail(poId)
+                    Return
+                End If
             End Using
+
+            ActivityLog.Record("PO_ORDERED", "purchase_order", poId, "Marked as Ordered")
         Catch ex As Exception
             btn.Tag = ""
             AppModal.Show("Could not update the purchase order:" & Environment.NewLine & ex.Message,
@@ -2944,6 +2966,7 @@ Public Class ProcurementPOPanelBuilder
         Select Case filter
             Case "Draft" : Return "po.status = 'Draft'"
             Case "Ordered" : Return "po.status = 'Ordered'"
+            Case "Partial" : Return "po.status = 'Partially Received'"
             Case "Received" : Return "po.status = 'Received'"
             Case "Cancelled" : Return "po.status = 'Cancelled'"
             Case Else : Return "po.status NOT IN ('Cancelled','Received')"   ' All = active

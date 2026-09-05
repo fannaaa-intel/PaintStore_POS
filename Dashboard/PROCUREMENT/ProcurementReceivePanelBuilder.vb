@@ -860,6 +860,12 @@ Public Class ProcurementReceivePanelBuilder
                         End If
 
                         txn.Commit()
+
+                        ' Receiving is where goods are accepted from a supplier and
+                        ' the liability becomes real, so it belongs in the audit log.
+                        ActivityLog.Record("PO_RECEIVED", "purchase_order", currentPoId,
+                            If(fullyReceived, "Fully received", "Partially received") &
+                            ", " & toReceive.Sum(Function(l) l.ReceiveNow) & " unit(s)")
                     Catch exInner As Exception
                         txn.Rollback()
                         If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
