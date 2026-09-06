@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -86,11 +86,16 @@ Public Class AdminInventoryOverviewPanelBuilder
 
     Private Const SIDE_PAD As Integer = 24
     Private Const ROW_H As Integer = 72
-    Private Const SUMMARY_H As Integer = 110
+    ' Matches the house KPI band used by Users / Suppliers / Categories and
+    ' Sales Overview: 140px of card, caption 11pt at (22,14), value 26pt bold
+    ' at (20,36), sub-label 10pt at (22,100), 12px between cards. A card that
+    ' is nearly the same size as the rest of the system reads as a mistake.
+    Private Const SUMMARY_H As Integer = 140
     Private Const MAX_PAGE_SIZE As Integer = 50
-    ' topRegion 128 + summary 110 + spacers 16+16 + card padding 2
+    ' topRegion 128 + summary (140+12) + spacers 16+16 + card padding 2
     ' + colHeader 44 + pagerBar 52 + bottomPad 12
-    Private Const CHROME_H As Integer = 380
+    ' Keep in step with SUMMARY_H or the table misjudges its viewport.
+    Private Const CHROME_H As Integer = 422
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
 
     Private Shared _container As Panel
@@ -524,47 +529,37 @@ Public Class AdminInventoryOverviewPanelBuilder
             .Text = "Category", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(SIDE_PAD, 19), .BackColor = Color.Transparent
         }
-        Dim cboCat As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(190, 26),
-            .Location = New Point(SIDE_PAD + 66, 15)
-        }
+        ' _categories and this name list stay in the same order, so the picked
+        ' index maps straight back to the CategoryOption behind it.
+        Dim catNames As New List(Of String)
         For Each c In _categories
-            cboCat.Items.Add(c)
+            catNames.Add(c.ToString())
         Next
-        cboCat.SelectedIndex = 0
+        Dim boxCat As Panel = FilterFields.MakeSelectField(catNames, 196, 0,
+            Sub(i As Integer)
+                _categoryId = If(i >= 0 AndAlso i < _categories.Count,
+                                 _categories(i).CategoryId, 0)
+                ReQuery()
+            End Sub)
+        boxCat.Location = New Point(SIDE_PAD + 70, 11)
 
         Dim lblStock As New Label With {
             .Text = "Stock", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(cboCat.Right + 18, 19),
+            .AutoSize = True, .Location = New Point(boxCat.Right + 24, 19),
             .BackColor = Color.Transparent
         }
-        Dim cboStock As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(160, 26),
-            .Location = New Point(cboCat.Right + 62, 15)
+        Dim stockNames As New List(Of String) From {
+            STOCK_ALL, STOCK_IN, STOCK_LOW, STOCK_OUT
         }
-        cboStock.Items.AddRange({STOCK_ALL, STOCK_IN, STOCK_LOW, STOCK_OUT})
-        cboStock.SelectedIndex = 0
-
-        AddHandler cboCat.SelectedIndexChanged,
-            Sub()
-                Dim sel = TryCast(cboCat.SelectedItem, CategoryOption)
-                _categoryId = If(sel Is Nothing, 0, sel.CategoryId)
+        Dim boxStock As Panel = FilterFields.MakeSelectField(stockNames, 166, 0,
+            Sub(i As Integer)
+                _stockFilter = If(i >= 0 AndAlso i < stockNames.Count,
+                                  stockNames(i), STOCK_ALL)
                 ReQuery()
-            End Sub
-        AddHandler cboStock.SelectedIndexChanged,
-            Sub()
-                _stockFilter = If(cboStock.SelectedItem Is Nothing,
-                                  STOCK_ALL, cboStock.SelectedItem.ToString())
-                ReQuery()
-            End Sub
+            End Sub)
+        boxStock.Location = New Point(boxCat.Right + 76, 11)
 
-        filterBar.Controls.AddRange({lblCat, cboCat, lblStock, cboStock})
+        filterBar.Controls.AddRange({lblCat, boxCat, lblStock, boxStock})
 
         region.Controls.Add(filterBar)
         region.Controls.Add(titleBar)
@@ -575,8 +570,10 @@ Public Class AdminInventoryOverviewPanelBuilder
     '  SUMMARY STRIP
     ' =========================================================================
     Private Shared Function BuildSummaryStrip() As Panel
+        ' +12 so the 12px bottom padding does not eat into the card: the cards
+        ' must be a full SUMMARY_H tall or the sub-label at y=100 clips.
         Dim bar As New Panel With {
-            .Height = SUMMARY_H,
+            .Height = SUMMARY_H + 12,
             .BackColor = MintBg,
             .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
         }
@@ -602,10 +599,10 @@ Public Class AdminInventoryOverviewPanelBuilder
         Dim c4 = MakeSummaryCard("Stock Value", MintDeep,
                                  Money(_stockValue), "qty x unit price", _lblValue)
 
-        c1.Margin = New Padding(0, 0, 6, 0)
-        c2.Margin = New Padding(6, 0, 6, 0)
-        c3.Margin = New Padding(6, 0, 6, 0)
-        c4.Margin = New Padding(6, 0, 0, 0)
+        c1.Margin = New Padding(0, 0, 12, 0)
+        c2.Margin = New Padding(0, 0, 12, 0)
+        c3.Margin = New Padding(0, 0, 12, 0)
+        c4.Margin = New Padding(0, 0, 0, 0)
 
         grid.Controls.Add(c1, 0, 0)
         grid.Controls.Add(c2, 1, 0)
@@ -624,29 +621,29 @@ Public Class AdminInventoryOverviewPanelBuilder
 
         card.Controls.Add(New Label With {
             .Text = caption,
-            .Font = New Font("Segoe UI", 10),
+            .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 12),
+            .Location = New Point(22, 14),
             .BackColor = Color.Transparent
         })
 
         valueLabel = New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(18, 32),
+            .Location = New Point(20, 36),
             .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
 
         card.Controls.Add(New Label With {
             .Text = subLabel,
-            .Font = New Font("Segoe UI", 9),
-            .ForeColor = FaintText,
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 70),
+            .Location = New Point(22, 100),
             .BackColor = Color.Transparent
         })
         Return card

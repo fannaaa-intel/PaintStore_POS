@@ -335,48 +335,50 @@ Public Class AdminFinancialReportsPanelBuilder
             .Text = "From", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(SIDE_PAD, 19), .BackColor = Color.Transparent
         }
-        Dim dtpFrom As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(120, 26),
-            .Location = New Point(SIDE_PAD + 40, 15),
-            .Value = _fromDate
-        }
+        ' Declared first so each picker can nudge the other when the range
+        ' inverts; assigned immediately below. The old handlers moved the
+        ' backing date but left the other picker showing the stale value.
+        Dim boxFrom As Panel = Nothing, boxTo As Panel = Nothing
+        Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
+
+        boxFrom = FilterFields.MakeDateField(132, _fromDate,
+            Sub(d As Date)
+                _fromDate = d
+                If _fromDate > _toDate Then
+                    _toDate = _fromDate
+                    setTo(_toDate)
+                End If
+                ReloadForRange()
+            End Sub, setFrom)
+        boxFrom.Location = New Point(SIDE_PAD + 44, 11)
+
         Dim lblTo As New Label With {
             .Text = "To", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(dtpFrom.Right + 14, 19),
+            .AutoSize = True, .Location = New Point(boxFrom.Right + 16, 19),
             .BackColor = Color.Transparent
         }
-        Dim dtpTo As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(120, 26),
-            .Location = New Point(dtpFrom.Right + 44, 15),
-            .Value = _toDate
-        }
+
+        boxTo = FilterFields.MakeDateField(132, _toDate,
+            Sub(d As Date)
+                _toDate = d
+                If _toDate < _fromDate Then
+                    _fromDate = _toDate
+                    setFrom(_fromDate)
+                End If
+                ReloadForRange()
+            End Sub, setTo)
+        boxTo.Location = New Point(boxFrom.Right + 44, 11)
+
         Dim lblRange As New Label With {
             .Text = "Reporting period: " & RangeLabel(),
             .Font = New Font("Segoe UI", 9.5F, FontStyle.Italic),
             .ForeColor = FaintText,
             .AutoSize = True,
-            .Location = New Point(dtpTo.Right + 20, 20),
+            .Location = New Point(boxTo.Right + 24, 20),
             .BackColor = Color.Transparent
         }
 
-        AddHandler dtpFrom.ValueChanged,
-            Sub()
-                _fromDate = dtpFrom.Value.Date
-                If _fromDate > _toDate Then _toDate = _fromDate
-                ReloadForRange()
-            End Sub
-        AddHandler dtpTo.ValueChanged,
-            Sub()
-                _toDate = dtpTo.Value.Date
-                If _toDate < _fromDate Then _fromDate = _toDate
-                ReloadForRange()
-            End Sub
-
-        filterBar.Controls.AddRange({lblFrom, dtpFrom, lblTo, dtpTo, lblRange})
+        filterBar.Controls.AddRange({lblFrom, boxFrom, lblTo, boxTo, lblRange})
 
         region.Controls.Add(filterBar)
         region.Controls.Add(titleBar)
@@ -386,9 +388,16 @@ Public Class AdminFinancialReportsPanelBuilder
     ' =========================================================================
     '  SUMMARY CARDS  —  six figures in two rows of three
     ' =========================================================================
+    ' Two rows of 140px cards, the house KPI height used across the Admin
+    ' screens. The cards carry Padding(6) margins, so each row needs 140+12:
+    ' at the old 232 the cards were only 104 tall and the sub-label rode high.
+    Private Const SUMMARY_CARD_H As Integer = 140
+
     Private Shared Function BuildSummaryCards() As Panel
         Dim wrap As New Panel With {
-            .Dock = DockStyle.Top, .Height = 232, .BackColor = MintBg
+            .Dock = DockStyle.Top,
+            .Height = (SUMMARY_CARD_H + 12) * 2,
+            .BackColor = MintBg
         }
 
         Dim grid As New TableLayoutPanel With {
@@ -429,26 +438,26 @@ Public Class AdminFinancialReportsPanelBuilder
 
         card.Controls.Add(New Label With {
             .Text = caption,
-            .Font = New Font("Segoe UI", 10.5F),
+            .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 14),
+            .Location = New Point(22, 14),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 20, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(18, 36),
+            .Location = New Point(20, 36),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = subLabel,
-            .Font = New Font("Segoe UI", 9),
-            .ForeColor = FaintText,
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 74),
+            .Location = New Point(22, 100),
             .BackColor = Color.Transparent
         })
         Return card
@@ -728,10 +737,9 @@ Public Class AdminFinancialReportsPanelBuilder
     ' =========================================================================
     '  EXPORT  —  reuses Modules/ReportPrinter.vb (the app's only export path)
     '
-    '  Note: ReportPrinter.TwoColHeader hardcodes its first column caption to
-    '  "ACCOUNT", which suits a trial balance but not these breakdowns, so the
-    '  breakdown sections use Section + TwoCol rows and skip that header rather
-    '  than changing a printer the Accountant panels depend on.
+    '  The breakdown sections caption their columns with TwoColHeader, whose
+    '  row-label caption is now a parameter (it used to be hardcoded to
+    '  "ACCOUNT" in DrawRow, which is why these tables previously ran headless).
     ' =========================================================================
     Private Shared Sub ExportReport()
         Try
@@ -756,6 +764,7 @@ Public Class AdminFinancialReportsPanelBuilder
             If _methods.Count = 0 Then
                 doc.Rows.Add(ReportPrinter.Data("No completed sales in this period", ""))
             Else
+                doc.Rows.Add(ReportPrinter.TwoColHeader("TXNS", "AMOUNT", "METHOD"))
                 Dim mTotal As Decimal = 0D
                 Dim mCount As Integer = 0
                 For Each m In _methods
@@ -772,6 +781,7 @@ Public Class AdminFinancialReportsPanelBuilder
             If _days.Count = 0 Then
                 doc.Rows.Add(ReportPrinter.Data("No completed sales in this period", ""))
             Else
+                doc.Rows.Add(ReportPrinter.TwoColHeader("TXNS", "AMOUNT", "DATE"))
                 Dim dTotal As Decimal = 0D
                 Dim dCount As Integer = 0
                 For Each d In _days

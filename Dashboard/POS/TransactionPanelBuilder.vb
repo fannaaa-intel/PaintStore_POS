@@ -1788,6 +1788,14 @@ Public Class TransactionPanelBuilder
             ' ── Post-commit: snapshot, UI, print ──────────────────────────
             ' These run OUTSIDE the transaction so a UI/print error can
             ' never trigger a Rollback on an already-committed transaction.
+            ' Money changed hands: the audit trail records it. Logged after the
+            ' commit so a rolled-back sale never appears as one that happened.
+            ActivityLog.Record("SALE_COMPLETE", "sale", Nothing,
+                saleNo & " — " & items.Count.ToString() &
+                If(items.Count = 1, " item, ", " items, ") &
+                ChrW(8369) & total.ToString("N2") &
+                " via " & _payMethodName)
+
             _lastSaleNo = saleNo
             _lastSaleAt = DateTime.Now
             _lastSalePay = _payMethodName
@@ -2187,6 +2195,12 @@ Public Class TransactionPanelBuilder
                     End Try
                 End Using
             End Using
+            ' A void reverses a completed sale and restores stock, so it is the
+            ' action an audit is most likely to be looking for.
+            ActivityLog.Record("SALE_VOID", "sale", CInt(chosenId),
+                chosen.no & " — " & ChrW(8369) & chosen.total.ToString("N2") &
+                " (was " & chosen.status & ")")
+
             AppModal.Show("Sale " & chosen.no & " was voided.", "Voided", MessageBoxButtons.OK, MessageBoxIcon.Information)
             LoadTransaction(_mainContainer)
         Catch ex As Exception

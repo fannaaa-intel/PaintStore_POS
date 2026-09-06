@@ -1348,6 +1348,14 @@ Public Class ReturnsPanelBuilder
                     tx.Commit()
                     committed = True
 
+                    ' Refunds move cash out of the drawer; without this the log
+                    ' showed the sale but never the money going back.
+                    ActivityLog.Record("SALE_REFUND", "sale", CInt(_saleId),
+                        returnNo & " against " & _saleNo & " — " &
+                        ChrW(8369) & totalRefund.ToString("N2") &
+                        " via " & _selectedRefundMethod &
+                        If(reason = "", "", " (" & reason & ")"))
+
                     ' Snapshot for PRINT SLIP before the screen resets.
                     _lastRtnNo = returnNo
                     _lastRtnSaleNo = _saleNo

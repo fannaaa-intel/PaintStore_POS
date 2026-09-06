@@ -879,6 +879,11 @@ Public Class InventoryLowStockPanelBuilder
                 End Using
             End Using
 
+            ' A purchase request starts the spend approval chain, so its origin
+            ' belongs in the trail alongside the approval that follows it.
+            ActivityLog.Record("REQUEST_RAISE", "purchase_request", it.Id,
+                               it.Name & " — " & qty.ToString("N0") & " units")
+
             ' Update the pill in place — tag it so click handlers bail early.
             btnRequest.Text = "Requested " & ChrW(10003)
             btnRequest.ForeColor = FaintText

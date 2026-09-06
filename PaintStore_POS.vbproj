@@ -317,6 +317,7 @@
     <Compile Include="Dashboard\POS\TransactionPanelBuilder.vb" />
     <Compile Include="Dashboard\CategoriesPanelBuilder.vb" />
     <Compile Include="Dashboard\DashboardCards.vb" />
+    <Compile Include="Dashboard\FilterFields.vb" />
     <Compile Include="Dashboard\GraphicsExtensions.vb" />
     <Compile Include="Dashboard\FastMovingPanelBuilder.vb" />
     <Compile Include="Dashboard\MixPanelBuilder.vb" />

@@ -1134,6 +1134,12 @@ Public Class AccountantReportsPanelBuilder
                 doc.Title = "Report"
         End Select
 
+        ' Financial statements leaving the system is a reportable event;
+        ' the Admin export records one, so this one does too.
+        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
+                           _activeTab & " — " & _dateFrom.ToString("MMM d, yyyy") &
+                           " to " & _dateTo.ToString("MMM d, yyyy"))
+
         ReportPrinter.Preview(doc, companyName:="PAINT STORE", preparedBy:="Accountant")
     End Sub
 

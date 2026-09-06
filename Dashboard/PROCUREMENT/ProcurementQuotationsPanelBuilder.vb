@@ -816,6 +816,7 @@ Public Class ProcurementQuotationsPanelBuilder
             Return
         End If
 
+        Dim rejected As Integer = 0
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -832,14 +833,23 @@ Public Class ProcurementQuotationsPanelBuilder
                         "AND status IN ('Draft','Sent')", conn, tx)
                         cmd.Parameters.AddWithValue("@rid", q.RequestId)
                         cmd.Parameters.AddWithValue("@id", q.QuotationId)
-                        cmd.ExecuteNonQuery()
+                        rejected = cmd.ExecuteNonQuery()
                     End Using
 
                     tx.Commit()
                 End Using
             End Using
 
-            ActivityLog.Record("QUOTE_ACCEPTED", "quotations", q.QuotationId, q.QuotationNo)
+            ' Accepting one bid silently rejects the others. Choosing between
+            ' suppliers is exactly the decision an audit reviews, so the losing
+            ' count is recorded rather than left implicit.
+            ActivityLog.Record("QUOTE_ACCEPTED", "quotations", q.QuotationId,
+                               q.QuotationNo &
+                               If(rejected > 0,
+                                  " — " & rejected.ToString() &
+                                  If(rejected = 1, " competing quote rejected",
+                                                   " competing quotes rejected"),
+                                  ""))
             RenderDetail(q.QuotationId)
 
         Catch ex As Exception

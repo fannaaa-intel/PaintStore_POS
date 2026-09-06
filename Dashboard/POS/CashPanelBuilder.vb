@@ -855,6 +855,12 @@ Public Class CashPanelBuilder
                 End Using
             End Using
 
+            ' Pay-ins, pay-outs and drops all move cash without a sale behind
+            ' them, which is exactly the kind of movement an audit checks.
+            ActivityLog.Record("CASH_" & movementType.ToUpper(), "shift", _shiftId,
+                ChrW(8369) & res.amount.ToString("N2") &
+                If(String.IsNullOrWhiteSpace(res.note), "", " — " & res.note))
+
             AppModal.Show(title & " of ₱" & res.amount.ToString("N2") & " recorded.",
                             title, MessageBoxButtons.OK, MessageBoxIcon.Information)
             If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)   ' refresh expected cash
@@ -911,6 +917,16 @@ Public Class CashPanelBuilder
                     cmd.Parameters.AddWithValue("@sid", _shiftId)
                     affected = cmd.ExecuteNonQuery()
                 End Using
+                ' A counted drawer that disagrees with expected cash is the
+                ' headline number of any cash audit, so the variance is recorded
+                ' with the close rather than left only on the shift row.
+                If affected > 0 Then
+                    ActivityLog.Record("SHIFT_CLOSE", "shift", _shiftId,
+                        "Expected " & ChrW(8369) & expected.ToString("N2") &
+                        ", counted " & ChrW(8369) & counted.ToString("N2") &
+                        ", variance " & ChrW(8369) & variance.ToString("N2"))
+                End If
+
                 If affected = 0 Then
                     AppModal.Show("This shift has already been closed." & vbCrLf &
                                   "Its recorded count was left untouched.",

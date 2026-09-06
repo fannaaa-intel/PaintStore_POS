@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -111,11 +111,16 @@ Public Class AdminProcurementOverviewPanelBuilder
     Private Const ALL_STATUS As String = "All statuses"
     Private Const SIDE_PAD As Integer = 24
     Private Const ROW_H As Integer = 72
-    Private Const SUMMARY_H As Integer = 110
+    ' Matches the house KPI band used by Users / Suppliers / Categories and the
+    ' other oversight screens: 140px of card, caption 11pt at (22,14), value
+    ' 26pt bold at (20,36), sub-label 10pt at (22,100), 12px between cards.
+    ' A card that is nearly the same size as the rest reads as a mistake.
+    Private Const SUMMARY_H As Integer = 140
     Private Const MAX_PAGE_SIZE As Integer = 50
-    ' topRegion 180 + summary 110 + spacers 16+16 + card padding 2
+    ' topRegion 180 + summary (140+12) + spacers 16+16 + card padding 2
     ' + colHeader 44 + pagerBar 52 + bottomPad 12
-    Private Const CHROME_H As Integer = 432
+    ' Keep in step with SUMMARY_H or the table misjudges its viewport.
+    Private Const CHROME_H As Integer = 474
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
 
     Private Shared _container As Panel
@@ -136,6 +141,7 @@ Public Class AdminProcurementOverviewPanelBuilder
 
     ' Four generic summary slots, filled per tab.
     Private Shared _sumCaptions(3) As String
+    Private Shared _sumSubLabels(3) As Label
     Private Shared _sumValues(3) As String
     Private Shared _sumColors(3) As Color
     Private Shared _sumLabels(3) As Label
@@ -454,6 +460,24 @@ Public Class AdminProcurementOverviewPanelBuilder
         cmd.Parameters.AddWithValue("@off", _currentPage * _pageSize)
     End Sub
 
+    ' One line of context under each figure, keyed by the caption the tab set.
+    Private Shared Function SubLabelFor(caption As String) As String
+        Select Case caption
+            Case "Total POs" : Return "in the date range"
+            Case "Total Requests" : Return "raised by staff"
+            Case "Total Quotations" : Return "from suppliers"
+            Case "Pending" : Return "awaiting action"
+            Case "Received" : Return "delivered in full"
+            Case "Approved" : Return "cleared to order"
+            Case "Sent" : Return "out for pricing"
+            Case "Accepted" : Return "agreed with supplier"
+            Case "Converted" : Return "now purchase orders"
+            Case "Total Cost" : Return "ordered value"
+            Case "Total Amount" : Return "quoted value"
+            Case Else : Return ""
+        End Select
+    End Function
+
     Private Shared Sub SetSummary(i As Integer, caption As String, clr As Color, value As String)
         _sumCaptions(i) = caption
         _sumColors(i) = clr
@@ -692,74 +716,61 @@ Public Class AdminProcurementOverviewPanelBuilder
                 .Text = "From", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
                 .AutoSize = True, .Location = New Point(x, 19), .BackColor = Color.Transparent
             }
-            Dim dtpFrom As New DateTimePicker With {
-                .Format = DateTimePickerFormat.Short,
-                .Font = New Font("Segoe UI", 9.5F),
-                .Size = New Size(118, 26),
-                .Location = New Point(x + 40, 15),
-                .Value = _fromDate
-            }
-            Dim lblTo As New Label With {
-                .Text = "To", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-                .AutoSize = True, .Location = New Point(dtpFrom.Right + 14, 19),
-                .BackColor = Color.Transparent
-            }
-            Dim dtpTo As New DateTimePicker With {
-                .Format = DateTimePickerFormat.Short,
-                .Font = New Font("Segoe UI", 9.5F),
-                .Size = New Size(118, 26),
-                .Location = New Point(dtpFrom.Right + 42, 15),
-                .Value = _toDate
-            }
+            ' Declared first so each picker can nudge the other when the
+            ' range inverts; assigned immediately below.
+            Dim boxFrom As Panel = Nothing, boxTo As Panel = Nothing
+            Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
 
-            AddHandler dtpFrom.ValueChanged,
-                Sub()
-                    _fromDate = dtpFrom.Value.Date
+            boxFrom = FilterFields.MakeDateField(132, _fromDate,
+                Sub(d As Date)
+                    _fromDate = d
                     If _fromDate > _toDate Then
                         _toDate = _fromDate
-                        dtpTo.Value = _toDate
+                        setTo(_toDate)
                     End If
                     ReQuery()
-                End Sub
-            AddHandler dtpTo.ValueChanged,
-                Sub()
-                    _toDate = dtpTo.Value.Date
+                End Sub, setFrom)
+            boxFrom.Location = New Point(x + 44, 11)
+
+            Dim lblTo As New Label With {
+                .Text = "To", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(boxFrom.Right + 16, 19),
+                .BackColor = Color.Transparent
+            }
+
+            boxTo = FilterFields.MakeDateField(132, _toDate,
+                Sub(d As Date)
+                    _toDate = d
                     If _toDate < _fromDate Then
                         _fromDate = _toDate
-                        dtpFrom.Value = _fromDate
+                        setFrom(_fromDate)
                     End If
                     ReQuery()
-                End Sub
+                End Sub, setTo)
+            boxTo.Location = New Point(boxFrom.Right + 44, 11)
 
-            filterBar.Controls.AddRange({lblFrom, dtpFrom, lblTo, dtpTo})
-            x = dtpTo.Right + 18
+            filterBar.Controls.AddRange({lblFrom, boxFrom, lblTo, boxTo})
+            x = boxTo.Right + 24
         End If
 
         Dim lblStatus As New Label With {
             .Text = "Status", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(x, 19), .BackColor = Color.Transparent
         }
-        Dim cboStatus As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(180, 26),
-            .Location = New Point(x + 48, 15)
-        }
-        cboStatus.Items.Add(ALL_STATUS)
+        Dim statusNames As New List(Of String) From {ALL_STATUS}
         For Each st In StatusesForTab()
-            cboStatus.Items.Add(st)
+            statusNames.Add(st)
         Next
-        cboStatus.SelectedIndex = 0
-        AddHandler cboStatus.SelectedIndexChanged,
-            Sub()
-                _statusFilter = If(cboStatus.SelectedItem Is Nothing,
-                                   ALL_STATUS, cboStatus.SelectedItem.ToString())
+        Dim boxStatus As Panel = FilterFields.MakeSelectField(statusNames, 186, 0,
+            Sub(i As Integer)
+                _statusFilter = If(i >= 0 AndAlso i < statusNames.Count,
+                                   statusNames(i), ALL_STATUS)
                 ReQuery()
-            End Sub
+            End Sub)
+        boxStatus.Location = New Point(x + 52, 11)
 
         filterBar.Controls.Add(lblStatus)
-        filterBar.Controls.Add(cboStatus)
+        filterBar.Controls.Add(boxStatus)
 
         region.Controls.Add(filterBar)
         region.Controls.Add(tabBar)
@@ -779,8 +790,10 @@ Public Class AdminProcurementOverviewPanelBuilder
     '  SUMMARY STRIP
     ' =========================================================================
     Private Shared Function BuildSummaryStrip() As Panel
+        ' +12 so the 12px bottom padding does not eat into the card: the cards
+        ' must be a full SUMMARY_H tall or the sub-label at y=100 clips.
         Dim bar As New Panel With {
-            .Height = SUMMARY_H,
+            .Height = SUMMARY_H + 12,
             .BackColor = MintBg,
             .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
         }
@@ -799,13 +812,7 @@ Public Class AdminProcurementOverviewPanelBuilder
 
         For i As Integer = 0 To 3
             Dim card As Panel = MakeSummaryCard(i)
-            If i = 0 Then
-                card.Margin = New Padding(0, 0, 6, 0)
-            ElseIf i = 3 Then
-                card.Margin = New Padding(6, 0, 0, 0)
-            Else
-                card.Margin = New Padding(6, 0, 6, 0)
-            End If
+            card.Margin = New Padding(0, 0, If(i < 3, 12, 0), 0)
             grid.Controls.Add(card, i, 0)
         Next
 
@@ -819,22 +826,34 @@ Public Class AdminProcurementOverviewPanelBuilder
 
         card.Controls.Add(New Label With {
             .Text = If(_sumCaptions(i), ""),
-            .Font = New Font("Segoe UI", 10),
+            .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 16),
+            .Location = New Point(22, 14),
             .BackColor = Color.Transparent
         })
 
         _sumLabels(i) = New Label With {
             .Text = If(_sumValues(i), "—"),
-            .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
             .ForeColor = _sumColors(i),
             .AutoSize = True,
-            .Location = New Point(18, 40),
+            .Location = New Point(20, 36),
             .BackColor = Color.Transparent
         }
         card.Controls.Add(_sumLabels(i))
+
+        ' The captions are already tab-specific, so the sub-label is derived
+        ' from the caption rather than threaded through all 24 SetSummary calls.
+        _sumSubLabels(i) = New Label With {
+            .Text = SubLabelFor(If(_sumCaptions(i), "")),
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(22, 100),
+            .BackColor = Color.Transparent
+        }
+        card.Controls.Add(_sumSubLabels(i))
         Return card
     End Function
 
@@ -845,6 +864,9 @@ Public Class AdminProcurementOverviewPanelBuilder
             If _sumLabels(i) IsNot Nothing Then
                 _sumLabels(i).Text = If(_sumValues(i), "—")
                 _sumLabels(i).ForeColor = _sumColors(i)
+            End If
+            If _sumSubLabels(i) IsNot Nothing Then
+                _sumSubLabels(i).Text = SubLabelFor(If(_sumCaptions(i), ""))
             End If
         Next
     End Sub

@@ -58,8 +58,13 @@ Public Class ReportPrinter
         Return New Row With {.Kind = RowKind.StatusRow, .Label = label, .IsGood = isGood}
     End Function
 
-    Public Shared Function TwoColHeader(c1Header As String, c2Header As String) As Row
-        Return New Row With {.Kind = RowKind.TwoColHeader, .Col1 = c1Header, .Col2 = c2Header}
+    ' rowHeader captions the left-hand (label) column. It defaults to "ACCOUNT"
+    ' because the trial balance was the only caller when this was written, and
+    ' the caption used to be hardcoded in DrawRow.
+    Public Shared Function TwoColHeader(c1Header As String, c2Header As String,
+                                        Optional rowHeader As String = "ACCOUNT") As Row
+        Return New Row With {.Kind = RowKind.TwoColHeader, .Label = rowHeader,
+                             .Col1 = c1Header, .Col2 = c2Header}
     End Function
 
     Public Shared Function TwoCol(label As String, col1 As String, col2 As String) As Row
@@ -257,8 +262,11 @@ Public Class ReportPrinter
                     End Using
 
                 Case RowKind.TwoColHeader
+                    ' Label / Col1 / Col2 must sit on the same three positions as
+                    ' TwoColRow and TwoColTotalRow below, or the captions do not
+                    ' line up with the figures they head.
                     Using f As New Font(ReportFont, 9.5F, FontStyle.Bold)
-                        g.DrawString("ACCOUNT", f, New SolidBrush(InkMuted), left, y)
+                        g.DrawString(row.Label, f, New SolidBrush(InkMuted), left, y)
                         g.DrawString(row.Col1, f, New SolidBrush(InkMuted), col2X, y)
                         Dim sz = g.MeasureString(row.Col2, f)
                         g.DrawString(row.Col2, f, New SolidBrush(InkMuted), right - sz.Width, y)

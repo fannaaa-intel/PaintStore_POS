@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -80,13 +80,18 @@ Public Class AdminSalesOverviewPanelBuilder
     Private Const SEARCH_PLACEHOLDER As String = "Search sale no. or cashier…"
     Private Const SIDE_PAD As Integer = 24
     Private Const ROW_H As Integer = 76
-    Private Const SUMMARY_H As Integer = 110
+    ' Matches the house KPI band used by Users / Suppliers / Categories:
+    ' 140px of card, caption 11pt at (22,14), value 26pt bold at (20,36),
+    ' sub-label 10pt at (22,100), 12px between cards. A card that is nearly
+    ' the same size as the rest of the system reads as a mistake.
+    Private Const SUMMARY_H As Integer = 140
 
     Private Const MAX_PAGE_SIZE As Integer = 50
     ' Fixed chrome above and below the row viewport:
-    '   topRegion 128 + summary 110 + spacers 16+16 + card padding 2
+    '   topRegion 128 + summary (140+12) + spacers 16+16 + card padding 2
     '   + colHeader 44 + pagerBar 52 + bottomPad 12
-    Private Const CHROME_H As Integer = 380
+    ' Keep this in step with SUMMARY_H or the table misjudges its viewport.
+    Private Const CHROME_H As Integer = 422
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
 
     Private Shared _container As Panel
@@ -514,94 +519,73 @@ Public Class AdminSalesOverviewPanelBuilder
             .Text = "From", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(SIDE_PAD, 19), .BackColor = Color.Transparent
         }
-        Dim dtpFrom As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(118, 26),
-            .Location = New Point(SIDE_PAD + 40, 15),
-            .Value = _fromDate
-        }
+        ' Declared before the fields so each picker can nudge the other when
+        ' the range inverts; assigned immediately below.
+        Dim boxFrom As Panel = Nothing, boxTo As Panel = Nothing
+        Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
+
+        boxFrom = FilterFields.MakeDateField(132, _fromDate,
+            Sub(d As Date)
+                _fromDate = d
+                If _fromDate > _toDate Then
+                    _toDate = _fromDate
+                    setTo(_toDate)
+                End If
+                ReQuery()
+            End Sub, setFrom)
+        boxFrom.Location = New Point(SIDE_PAD + 44, 11)
+
         Dim lblTo As New Label With {
             .Text = "To", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(dtpFrom.Right + 14, 19),
+            .AutoSize = True, .Location = New Point(boxFrom.Right + 16, 19),
             .BackColor = Color.Transparent
         }
-        Dim dtpTo As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(118, 26),
-            .Location = New Point(dtpFrom.Right + 42, 15),
-            .Value = _toDate
-        }
+
+        boxTo = FilterFields.MakeDateField(132, _toDate,
+            Sub(d As Date)
+                _toDate = d
+                If _toDate < _fromDate Then
+                    _fromDate = _toDate
+                    setFrom(_fromDate)
+                End If
+                ReQuery()
+            End Sub, setTo)
+        boxTo.Location = New Point(boxFrom.Right + 44, 11)
 
         Dim lblCashier As New Label With {
             .Text = "Cashier", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(dtpTo.Right + 18, 19),
+            .AutoSize = True, .Location = New Point(boxTo.Right + 24, 19),
             .BackColor = Color.Transparent
         }
-        Dim cboCashier As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(180, 26),
-            .Location = New Point(dtpTo.Right + 72, 15)
-        }
+        ' _cashiers and this name list stay in the same order, so the picked
+        ' index maps straight back to the CashierOption behind it.
+        Dim cashierNames As New List(Of String)
         For Each c In _cashiers
-            cboCashier.Items.Add(c)
+            cashierNames.Add(c.Name)
         Next
-        cboCashier.SelectedIndex = 0
+        Dim boxCashier As Panel = FilterFields.MakeSelectField(cashierNames, 186, 0,
+            Sub(i As Integer)
+                _cashierId = If(i >= 0 AndAlso i < _cashiers.Count, _cashiers(i).UserId, 0)
+                ReQuery()
+            End Sub)
+        boxCashier.Location = New Point(boxTo.Right + 78, 11)
 
         Dim lblStatus As New Label With {
             .Text = "Status", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(cboCashier.Right + 18, 19),
+            .AutoSize = True, .Location = New Point(boxCashier.Right + 24, 19),
             .BackColor = Color.Transparent
         }
-        Dim cboStatus As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(150, 26),
-            .Location = New Point(cboCashier.Right + 66, 15)
-        }
-        For Each s In _statuses
-            cboStatus.Items.Add(s)
-        Next
-        cboStatus.SelectedIndex = 0
+        Dim statusNames As New List(Of String)(_statuses)
+        Dim boxStatus As Panel = FilterFields.MakeSelectField(statusNames, 158, 0,
+            Sub(i As Integer)
+                _statusFilter = If(i >= 0 AndAlso i < statusNames.Count,
+                                   statusNames(i), ALL_STATUS)
+                ReQuery()
+            End Sub)
+        boxStatus.Location = New Point(boxCashier.Right + 72, 11)
 
-        ' Filters re-query in place so the controls keep focus and value.
-        AddHandler dtpFrom.ValueChanged,
-            Sub()
-                _fromDate = dtpFrom.Value.Date
-                If _fromDate > _toDate Then
-                    _toDate = _fromDate
-                    dtpTo.Value = _toDate
-                End If
-                ReQuery()
-            End Sub
-        AddHandler dtpTo.ValueChanged,
-            Sub()
-                _toDate = dtpTo.Value.Date
-                If _toDate < _fromDate Then
-                    _fromDate = _toDate
-                    dtpFrom.Value = _fromDate
-                End If
-                ReQuery()
-            End Sub
-        AddHandler cboCashier.SelectedIndexChanged,
-            Sub()
-                Dim sel = TryCast(cboCashier.SelectedItem, CashierOption)
-                _cashierId = If(sel Is Nothing, 0, sel.UserId)
-                ReQuery()
-            End Sub
-        AddHandler cboStatus.SelectedIndexChanged,
-            Sub()
-                _statusFilter = If(cboStatus.SelectedItem Is Nothing,
-                                   ALL_STATUS, cboStatus.SelectedItem.ToString())
-                ReQuery()
-            End Sub
-
-        filterBar.Controls.AddRange({lblFrom, dtpFrom, lblTo, dtpTo,
-                                     lblCashier, cboCashier, lblStatus, cboStatus})
+        filterBar.Controls.AddRange({lblFrom, boxFrom, lblTo, boxTo,
+                                     lblCashier, boxCashier, lblStatus, boxStatus})
 
         region.Controls.Add(filterBar)
         region.Controls.Add(titleBar)
@@ -612,8 +596,10 @@ Public Class AdminSalesOverviewPanelBuilder
     '  SUMMARY STRIP  —  over the filtered set
     ' =========================================================================
     Private Shared Function BuildSummaryStrip() As Panel
+        ' +12 so the 12px bottom padding does not eat into the card: the cards
+        ' must be a full SUMMARY_H tall or the sub-label at y=100 clips.
         Dim bar As New Panel With {
-            .Height = SUMMARY_H,
+            .Height = SUMMARY_H + 12,
             .BackColor = MintBg,
             .Padding = New Padding(SIDE_PAD, 0, SIDE_PAD, 12)
         }
@@ -630,15 +616,19 @@ Public Class AdminSalesOverviewPanelBuilder
         Next
         grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        Dim c1 = MakeSummaryCard("Total Sales", MintPrimary, _lblSumTotal)
-        Dim c2 = MakeSummaryCard("Transactions", MintDark, _lblSumCount)
-        Dim c3 = MakeSummaryCard("Average Sale", MintDeep, _lblSumAvg)
-        Dim c4 = MakeSummaryCard("Total VAT", MintDeep, _lblSumVat)
+        Dim c1 = MakeSummaryCard("Total Sales", MintPrimary, _lblSumTotal,
+                                 "over the filtered set")
+        Dim c2 = MakeSummaryCard("Transactions", MintDark, _lblSumCount,
+                                 "sales in range")
+        Dim c3 = MakeSummaryCard("Average Sale", MintDeep, _lblSumAvg,
+                                 "per transaction")
+        Dim c4 = MakeSummaryCard("Total VAT", MintDeep, _lblSumVat,
+                                 "included in total")
 
-        c1.Margin = New Padding(0, 0, 6, 0)
-        c2.Margin = New Padding(6, 0, 6, 0)
-        c3.Margin = New Padding(6, 0, 6, 0)
-        c4.Margin = New Padding(6, 0, 0, 0)
+        c1.Margin = New Padding(0, 0, 12, 0)
+        c2.Margin = New Padding(0, 0, 12, 0)
+        c3.Margin = New Padding(0, 0, 12, 0)
+        c4.Margin = New Padding(0, 0, 0, 0)
 
         grid.Controls.Add(c1, 0, 0)
         grid.Controls.Add(c2, 1, 0)
@@ -650,28 +640,38 @@ Public Class AdminSalesOverviewPanelBuilder
     End Function
 
     Private Shared Function MakeSummaryCard(caption As String, valueClr As Color,
-                                            ByRef valueLabel As Label) As Panel
+                                            ByRef valueLabel As Label,
+                                            subLabel As String) As Panel
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
         card.Controls.Add(New Label With {
             .Text = caption,
-            .Font = New Font("Segoe UI", 10),
+            .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(20, 14),
+            .Location = New Point(22, 14),
             .BackColor = Color.Transparent
         })
 
         valueLabel = New Label With {
             .Text = "—",
-            .Font = New Font("Segoe UI", 19, FontStyle.Bold),
+            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(18, 36),
+            .Location = New Point(20, 36),
             .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+
+        card.Controls.Add(New Label With {
+            .Text = subLabel,
+            .Font = New Font("Segoe UI", 10),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(22, 100),
+            .BackColor = Color.Transparent
+        })
         Return card
     End Function
 

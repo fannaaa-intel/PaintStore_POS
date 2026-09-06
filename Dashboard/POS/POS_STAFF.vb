@@ -416,6 +416,10 @@ Public Class POS_STAFF
                     Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
                         Session.ShiftId = CInt(cmd.ExecuteScalar())
                     End Using
+                    ' Opening a drawer starts a period of cash accountability;
+                    ' the close is logged, so the open belongs in the trail too.
+                    ActivityLog.Record("SHIFT_OPEN", "shift", Session.ShiftId,
+                                       "Register 01")
                 End If
                 ' Load quota for this user
                 Using cmd As New MySqlCommand(

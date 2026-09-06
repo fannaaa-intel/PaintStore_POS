@@ -1192,6 +1192,12 @@ Public Class ProcurementSuppliersPanelBuilder
         End Try
 
         Dim savedId As Integer = editingId
+        ' Suppliers are master data behind every purchase order, so changing
+        ' one is recorded the same way categories and products already are.
+        ActivityLog.Record(If(editingId > 0, "SUPPLIER_EDIT", "SUPPLIER_ADD"),
+                           "supplier", If(editingId > 0, CType(editingId, Integer?), Nothing),
+                           name)
+
         AppModal.Show(If(editingId > 0, "Supplier updated.", "Supplier added."),
                       "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
         If savedId > 0 Then LoadDetail(savedId) Else RenderList()
@@ -1741,6 +1747,10 @@ Public Class ProcurementSuppliersPanelBuilder
                                 cmd.ExecuteNonQuery()
                             End Using
                         End Using
+                        ' Deleting master data is irreversible, so the name is
+                        ' kept in the trail even though the row is gone.
+                        ActivityLog.Record("SUPPLIER_DELETE", "supplier", supplierId, sup.Name)
+
                         AppModal.Show("Supplier deleted.", "Deleted",
                             MessageBoxButtons.OK, MessageBoxIcon.Information)
                         RenderList()

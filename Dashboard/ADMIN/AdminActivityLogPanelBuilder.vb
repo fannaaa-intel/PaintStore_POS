@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -42,6 +42,8 @@ Public Class AdminActivityLogPanelBuilder
         (Color.FromArgb(180, 40, 40), Color.FromArgb(255, 233, 233))
     Private Shared ReadOnly TintBlue As (fore As Color, back As Color) =
         (Color.FromArgb(45, 80, 150), Color.FromArgb(232, 238, 250))
+    Private Shared ReadOnly TintAmber As (fore As Color, back As Color) =
+        (Color.FromArgb(170, 105, 20), Color.FromArgb(255, 243, 224))
     Private Shared ReadOnly TintGrey As (fore As Color, back As Color) =
         (Color.FromArgb(90, 114, 107), Color.FromArgb(238, 242, 240))
 
@@ -69,6 +71,7 @@ Public Class AdminActivityLogPanelBuilder
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
     Private Const SIDE_PAD As Integer = 24
     Private Const ROW_H As Integer = 56
+    Private Const DAY_SEP_H As Integer = 40
     Private Const PAD_BOTTOM As Integer = 12
     Private Const SEARCH_PLACEHOLDER As String = "Search user, action or details…"
 
@@ -118,7 +121,11 @@ Public Class AdminActivityLogPanelBuilder
         If _container Is Nothing Then Return
         Dim viewport As Integer = _container.ClientSize.Height - CHROME_H
         If viewport < 120 Then Return          ' not laid out yet — keep the ceiling
-        Dim fits As Integer = (viewport - 4) \ ROW_H
+        ' Day separators occupy the same column as the rows, so a page of rows
+        ' spanning several days is taller than rows alone. Reserve room for a
+        ' couple of headings rather than pushing the last rows below the fold.
+        Dim usable As Integer = viewport - 4 - DAY_SEP_H * 2
+        Dim fits As Integer = usable \ ROW_H
         _pageSize = Math.Max(5, Math.Min(MAX_PAGE_SIZE, fits))
     End Sub
 
@@ -468,72 +475,63 @@ Public Class AdminActivityLogPanelBuilder
             .Text = "From", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
             .AutoSize = True, .Location = New Point(SIDE_PAD, 19), .BackColor = Color.Transparent
         }
-        Dim dtpFrom As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(120, 26),
-            .Location = New Point(SIDE_PAD + 40, 15),
-            .Value = _fromDate
-        }
+        ' Declared first so each picker can nudge the other when the range
+        ' inverts; assigned immediately below.
+        Dim boxFrom As Panel = Nothing, boxTo As Panel = Nothing
+        Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
+
+        boxFrom = FilterFields.MakeDateField(132, _fromDate,
+            Sub(d As Date)
+                _fromDate = d
+                If _fromDate > _toDate Then
+                    _toDate = _fromDate
+                    setTo(_toDate)
+                End If
+                ReQuery()
+            End Sub, setFrom)
+        boxFrom.Location = New Point(SIDE_PAD + 44, 11)
 
         Dim lblTo As New Label With {
             .Text = "To", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(dtpFrom.Right + 14, 19),
+            .AutoSize = True, .Location = New Point(boxFrom.Right + 16, 19),
             .BackColor = Color.Transparent
         }
-        Dim dtpTo As New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(120, 26),
-            .Location = New Point(dtpFrom.Right + 44, 15),
-            .Value = _toDate
-        }
+
+        boxTo = FilterFields.MakeDateField(132, _toDate,
+            Sub(d As Date)
+                _toDate = d
+                If _toDate < _fromDate Then
+                    _fromDate = _toDate
+                    setFrom(_fromDate)
+                End If
+                ReQuery()
+            End Sub, setTo)
+        boxTo.Location = New Point(boxFrom.Right + 44, 11)
 
         Dim lblAction As New Label With {
             .Text = "Action", .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(dtpTo.Right + 18, 19),
+            .AutoSize = True, .Location = New Point(boxTo.Right + 24, 19),
             .BackColor = Color.Transparent
         }
-        Dim cboAction As New ComboBox With {
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Size = New Size(190, 26),
-            .Location = New Point(dtpTo.Right + 66, 15)
-        }
-        For Each a In _actions
-            cboAction.Items.Add(a)
+        ' _actions holds the raw enum values (LOGIN, PAYMETHOD_DELETE). The rows
+        ' show friendly labels, so the filter shows them too and the picked
+        ' index maps back to the raw value the query needs.
+        Dim actionNames As New List(Of String)
+        For i As Integer = 0 To _actions.Count - 1
+            actionNames.Add(If(i = 0, _actions(i), FriendlyAction(_actions(i))))
         Next
         Dim selIdx As Integer = _actions.IndexOf(_actionFilter)
-        cboAction.SelectedIndex = If(selIdx >= 0, selIdx, 0)
+        If selIdx < 0 Then selIdx = 0
+        Dim boxAction As Panel = FilterFields.MakeSelectField(actionNames, 196, selIdx,
+            Sub(i As Integer)
+                _actionFilter = If(i >= 0 AndAlso i < _actions.Count,
+                                   _actions(i), ALL_ACTIONS)
+                ReQuery()
+            End Sub)
+        boxAction.Location = New Point(boxTo.Right + 76, 11)
 
-        ' Filters re-query without a full Render, so the controls keep their state.
-        AddHandler dtpFrom.ValueChanged,
-            Sub()
-                _fromDate = dtpFrom.Value.Date
-                If _fromDate > _toDate Then
-                    _toDate = _fromDate
-                    dtpTo.Value = _toDate
-                End If
-                ReQuery()
-            End Sub
-        AddHandler dtpTo.ValueChanged,
-            Sub()
-                _toDate = dtpTo.Value.Date
-                If _toDate < _fromDate Then
-                    _fromDate = _toDate
-                    dtpFrom.Value = _fromDate
-                End If
-                ReQuery()
-            End Sub
-        AddHandler cboAction.SelectedIndexChanged,
-            Sub()
-                _actionFilter = If(cboAction.SelectedItem Is Nothing,
-                                   ALL_ACTIONS, cboAction.SelectedItem.ToString())
-                ReQuery()
-            End Sub
-
-        filterBar.Controls.AddRange({lblFrom, dtpFrom, lblTo, dtpTo, lblAction, cboAction})
+        filterBar.Controls.AddRange({lblFrom, boxFrom, lblTo, boxTo,
+                                     lblAction, boxAction})
 
         region.Controls.Add(filterBar)
         region.Controls.Add(titleBar)
@@ -559,7 +557,7 @@ Public Class AdminActivityLogPanelBuilder
         Dim hdr As New Panel With {.Height = 44, .BackColor = Color.Transparent}
 
         Dim labels As Label() = {
-            MakeColLabel("WHEN", New Point(64, 13)),
+            MakeColLabel("TIME", New Point(30, 13)),
             MakeColLabel("USER", New Point(0, 13)),
             MakeColLabel("ACTION", New Point(0, 13)),
             MakeColLabel("DETAILS", New Point(0, 13))
@@ -569,10 +567,10 @@ Public Class AdminActivityLogPanelBuilder
         AddHandler hdr.Resize,
             Sub()
                 Dim w = hdr.Width
-                labels(0).Left = 64
-                labels(1).Left = CInt(w * 0.24)
+                labels(0).Left = 30
+                labels(1).Left = CInt(w * 0.16)
                 labels(2).Left = CInt(w * 0.38)
-                labels(3).Left = CInt(w * 0.55)
+                labels(3).Left = CInt(w * 0.56)
             End Sub
 
         AddHandler hdr.Paint,
@@ -617,7 +615,21 @@ Public Class AdminActivityLogPanelBuilder
                    "No activity matches the current filters.")))
         Else
             Dim y As Integer = 4
+            Dim lastDay As Date = Date.MinValue
             For Each r As LogEntry In _rows
+                ' One date heading per day instead of the same date repeated
+                ' down every row: the eye finds "yesterday" in one jump.
+                Dim thisDay As Date = r.CreatedAt.Date
+                If thisDay <> lastDay Then
+                    lastDay = thisDay
+                    Dim sep As Panel = BuildDaySeparator(thisDay)
+                    sep.Location = New Point(0, y)
+                    sep.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+                    _scrollHost.Controls.Add(sep)
+                    sep.Width = _scrollHost.ClientSize.Width - 4
+                    y += DAY_SEP_H
+                End If
+
                 Dim row As Panel = BuildDataRow(r, ROW_H)
                 row.Location = New Point(0, y)
                 row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
@@ -661,25 +673,24 @@ Public Class AdminActivityLogPanelBuilder
                 Using pen As New Pen(RowDivider, 1)
                     e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
                 End Using
+                ' An audit trail is read to find the unusual. Routine sign-ins
+                ' stay quiet; anything that changed an account or a setting
+                ' carries a short accent bar so it can be found by eye.
+                Dim sev = SeverityOf(r.Action)
+                If sev.notable Then
+                    Using br As New SolidBrush(sev.fore)
+                        e.Graphics.FillRoundedRectangle(br,
+                            New Rectangle(20, (height - 20) \ 2, 3, 20), 2)
+                    End Using
+                End If
             End Sub
 
-        Dim gl = GlyphFor(r.Action)
-        Dim glyph As New Label With {
-            .Text = gl.ch,
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = gl.tint.fore,
-            .BackColor = gl.tint.back,
-            .Size = New Size(30, 30),
-            .TextAlign = ContentAlignment.MiddleCenter,
-            .Location = New Point(22, (height - 30) \ 2)
-        }
-        RoundLabel(glyph, 15)
-
-        ' Absolute timestamp — this is the full record, not a live feed.
+        ' The date lives on the day separator above, so the row carries only
+        ' the time -- 13 repetitions of "Sep 6, 2026" told the reader nothing.
         Dim lblWhen As New Label With {
             .Text = If(r.CreatedAt = DateTime.MinValue, "—",
-                       r.CreatedAt.ToString("MMM d, yyyy  h:mm:ss tt")),
-            .Font = New Font("Segoe UI", 10),
+                       r.CreatedAt.ToString("h:mm:ss tt")),
+            .Font = New Font("Consolas", 10),
             .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblUser As New Label With {
@@ -692,32 +703,78 @@ Public Class AdminActivityLogPanelBuilder
         Dim lblAction As New Label With {
             .Text = FriendlyAction(r.Action),
             .Font = New Font("Segoe UI Semibold", 10.5F),
-            .ForeColor = gl.tint.fore, .AutoSize = True, .BackColor = Color.Transparent
+            .ForeColor = SeverityOf(r.Action).fore,
+            .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' Details are empty on the great majority of rows (every login and
+        ' logout), so an em-dash column of its own was mostly blank ink. It
+        ' now sits beside the action and simply is not drawn when absent.
         Dim lblDetails As New Label With {
-            .Text = If(r.Details = "", "—", r.Details),
+            .Text = r.Details,
             .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = If(r.Details = "", FaintText, Color.FromArgb(45, 60, 56)),
+            .ForeColor = Color.FromArgb(45, 60, 56),
             .AutoSize = False,
             .AutoEllipsis = True,
             .Height = 20,
+            .Visible = (r.Details <> ""),
             .BackColor = Color.Transparent
         }
 
-        p.Controls.AddRange({glyph, lblWhen, lblUser, lblAction, lblDetails})
+        p.Controls.AddRange({lblWhen, lblUser, lblAction, lblDetails})
 
         AddHandler p.Resize,
             Sub()
                 Dim w = p.Width
-                lblWhen.Left = 64 : lblWhen.Top = (height - lblWhen.Height) \ 2
-                lblUser.Left = CInt(w * 0.24) : lblUser.Top = (height - lblUser.Height) \ 2
+                lblWhen.Left = 30 : lblWhen.Top = (height - lblWhen.Height) \ 2
+                lblUser.Left = CInt(w * 0.16) : lblUser.Top = (height - lblUser.Height) \ 2
                 lblAction.Left = CInt(w * 0.38) : lblAction.Top = (height - lblAction.Height) \ 2
-                lblDetails.Left = CInt(w * 0.55)
+                lblDetails.Left = CInt(w * 0.56)
                 lblDetails.Top = (height - lblDetails.Height) \ 2
                 lblDetails.Width = Math.Max(40, w - lblDetails.Left - 24)
             End Sub
 
         PropagateHover(p)
+        Return p
+    End Function
+
+    ' A quiet date heading between days. "Today" and "Yesterday" are named
+    ' rather than dated, because that is how anyone investigating an incident
+    ' actually thinks about when it happened.
+    Private Shared Function BuildDaySeparator(d As Date) As Panel
+        Dim p As New BufferedPanel With {
+            .Height = DAY_SEP_H, .BackColor = Color.Transparent
+        }
+
+        Dim caption As String
+        If d = Date.Today Then
+            caption = "Today  ·  " & d.ToString("MMM d, yyyy")
+        ElseIf d = Date.Today.AddDays(-1) Then
+            caption = "Yesterday  ·  " & d.ToString("MMM d, yyyy")
+        Else
+            caption = d.ToString("dddd  ·  MMM d, yyyy")
+        End If
+
+        Dim lbl As New Label With {
+            .Text = caption,
+            .Font = New Font("Segoe UI Semibold", 9.5F),
+            .ForeColor = TintMint.fore,
+            .AutoSize = True,
+            .Location = New Point(30, DAY_SEP_H - 22),
+            .BackColor = Color.Transparent
+        }
+        p.Controls.Add(lbl)
+
+        AddHandler p.Paint,
+            Sub(sn, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                ' Rule running from just after the caption to the right margin.
+                Dim x As Integer = lbl.Right + 12
+                Dim yy As Integer = DAY_SEP_H - 22 + lbl.Height \ 2
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, x, yy, p.Width - 24, yy)
+                End Using
+            End Sub
+
         Return p
     End Function
 
@@ -823,33 +880,123 @@ Public Class AdminActivityLogPanelBuilder
     ' =========================================================================
     '  ACTION PRESENTATION
     ' =========================================================================
-    Private Shared Function GlyphFor(action As String) As (ch As String, tint As (fore As Color, back As Color))
+    ' What the action means for an auditor: colour, and whether it is worth
+    ' flagging. Sign-in traffic is the bulk of the table and is deliberately
+    ' unflagged, so the rows that changed something stand out.
+    Private Shared Function SeverityOf(action As String) As (fore As Color, notable As Boolean)
         Select Case action.ToUpper()
-            Case "LOGIN" : Return ("→", TintMint)
-            Case "LOGOUT" : Return ("←", TintGrey)
-            Case "USER_CREATE" : Return ("+", TintMint)
-            Case "USER_EDIT" : Return ("✎", TintBlue)
-            Case "USER_ENABLE" : Return ("✓", TintMint)
-            Case "USER_DISABLE" : Return ("✕", TintRed)
-            Case "USER_RESET_PW" : Return ("⟳", TintBlue)
+            ' Routine traffic: the bulk of the table, deliberately unflagged so
+            ' the rows that changed something can be found by eye.
+            Case "LOGIN", "LOGOUT", "SHIFT_OPEN", "SHIFT_CLOSED_ON_EXIT",
+                 "SALE_COMPLETE", "PASSWORD_CHANGE"
+                Return (SubText, False)
+
+            ' Reversals, deletions and failed access: what an audit hunts for.
+            Case "SALE_VOID", "SALE_REFUND", "USER_DISABLE", "USER_DELETE",
+                 "USER_REJECT", "ADMIN_REAUTH_FAILED", "PRODUCT_DELETE",
+                 "CATEGORY_DELETE", "FORMULA_DELETE", "PAYMETHOD_DELETE",
+                 "SUPPLIER_DELETE", "QUOTE_DELETE", "QUOTE_REJECTED",
+                 "PO_CANCELLED"
+                Return (TintRed.fore, True)
+
+            ' Cash moving without a sale behind it.
+            Case "CASH_PAYIN", "CASH_PAYOUT", "CASH_DROP", "SHIFT_CLOSE",
+                 "PO_PAID", "STOCK_ADJUST"
+                Return (TintAmber.fore, True)
+
+            ' Access granted or accounts created.
+            Case "USER_CREATE", "USER_ENABLE", "USER_APPROVE"
+                Return (TintMint.fore, True)
+
+            Case "USER_RESET_PW", "USER_PASSWORD_RESET", "REPORT_EXPORT"
+                Return (TintBlue.fore, True)
+
             Case Else
-                If action.ToUpper().StartsWith("SALE") Then Return (ChrW(8369), TintMint)
-                Return ("•", TintGrey)
+                ' Anything else is a change to master data or settings.
+                Return (MintDark, True)
         End Select
     End Function
 
     ' Raw enum -> readable label.
+    ' Every action the system records, in the words a person would use. The
+    ' fallback below only catches genuinely new actions; anything listed here
+    ' reads properly in both the table and the Action filter.
     Private Shared Function FriendlyAction(action As String) As String
         Select Case action.ToUpper()
-            Case "LOGIN" : Return "Logged in"
-            Case "LOGOUT" : Return "Logged out"
+            ' ── Access ──────────────────────────────────────────────────
+            Case "LOGIN" : Return "Signed in"
+            Case "LOGOUT" : Return "Signed out"
+            Case "PASSWORD_CHANGE" : Return "Changed own password"
+            Case "ADMIN_REAUTH_FAILED" : Return "Failed admin re-auth"
+
+            ' ── Accounts ────────────────────────────────────────────────
             Case "USER_CREATE" : Return "Created user"
             Case "USER_EDIT" : Return "Edited user"
             Case "USER_ENABLE" : Return "Enabled user"
             Case "USER_DISABLE" : Return "Disabled user"
             Case "USER_RESET_PW" : Return "Reset password"
+            Case "USER_PASSWORD_RESET" : Return "Reset password"
+            Case "USER_RESET_DISMISS" : Return "Dismissed reset request"
+            Case "USER_APPROVE" : Return "Approved sign-up"
+            Case "USER_REJECT" : Return "Rejected sign-up"
+            Case "SIGN-UP REQUESTED" : Return "Requested sign-up"
+
+            ' ── Selling ─────────────────────────────────────────────────
+            Case "SALE_COMPLETE" : Return "Completed sale"
+            Case "SALE_VOID" : Return "Voided sale"
+            Case "SALE_REFUND" : Return "Refunded sale"
+
+            ' ── Cash drawer ─────────────────────────────────────────────
+            Case "SHIFT_OPEN" : Return "Opened drawer"
+            Case "SHIFT_CLOSE" : Return "Closed drawer"
+            Case "SHIFT_CLOSED_ON_EXIT" : Return "Drawer closed on exit"
+            Case "CASH_PAYIN" : Return "Cash pay-in"
+            Case "CASH_PAYOUT" : Return "Cash pay-out"
+            Case "CASH_DROP" : Return "Cash drop"
+
+            ' ── Stock ───────────────────────────────────────────────────
+            Case "PRODUCT_ADD" : Return "Added product"
+            Case "PRODUCT_EDIT" : Return "Edited product"
+            Case "PRODUCT_DELETE" : Return "Deleted product"
+            Case "STOCK_ADJUST" : Return "Adjusted stock"
+            Case "STOCK_PUTAWAY" : Return "Put away stock"
+            Case "REQUEST_RAISE" : Return "Raised purchase request"
+
+            ' ── Buying ──────────────────────────────────────────────────
+            Case "PO_CREATE" : Return "Created purchase order"
+            Case "PO_ORDERED" : Return "Marked PO ordered"
+            Case "PO_RECEIVED" : Return "Received purchase order"
+            Case "PO_CANCELLED" : Return "Cancelled purchase order"
+            Case "PO_PAID" : Return "Paid purchase order"
+            Case "QUOTE_CREATE" : Return "Created quotation"
+            Case "QUOTE_ACCEPTED" : Return "Accepted quotation"
+            ' The status change path records "QUOTE_" & the new status, so the
+            ' rest of the quotation enum needs labels of its own.
+            Case "QUOTE_SENT" : Return "Sent quotation"
+            Case "QUOTE_REJECTED" : Return "Rejected quotation"
+            Case "QUOTE_DRAFT" : Return "Reverted quotation to draft"
+            Case "QUOTE_EXPIRED" : Return "Expired quotation"
+            Case "QUOTE_DELETE" : Return "Deleted quotation"
+            Case "SUPPLIER_ADD" : Return "Added supplier"
+            Case "SUPPLIER_EDIT" : Return "Edited supplier"
+            Case "SUPPLIER_DELETE" : Return "Deleted supplier"
+
+            ' ── Master data & settings ──────────────────────────────────
+            Case "CATEGORY_ADD" : Return "Added category"
+            Case "CATEGORY_EDIT" : Return "Edited category"
+            Case "CATEGORY_DELETE" : Return "Deleted category"
+            Case "CATEGORY_MERGE" : Return "Merged categories"
+            Case "FORMULA_ADD" : Return "Added colour formula"
+            Case "FORMULA_EDIT" : Return "Edited colour formula"
+            Case "FORMULA_DELETE" : Return "Deleted colour formula"
+            Case "PAYMETHOD_ADD" : Return "Added payment method"
+            Case "PAYMETHOD_EDIT" : Return "Edited payment method"
+            Case "PAYMETHOD_DELETE" : Return "Deleted payment method"
+            Case "SETTINGS_UPDATE" : Return "Updated store settings"
+            Case "REPORT_EXPORT" : Return "Exported report"
+
             Case Else
-                ' Unknown action: "SOME_THING" -> "Some thing"
+                ' Genuinely new action: "SOME_THING" -> "Some thing"
                 If action = "" Then Return "—"
                 Dim s As String = action.Replace("_", " ").ToLower()
                 Return Char.ToUpper(s(0)) & s.Substring(1)
