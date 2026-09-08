@@ -271,6 +271,7 @@
     <Compile Include="Modules\POS\ConfirmSaleModal.vb" />
     <Compile Include="Modules\AccountRequests.vb" />
     <Compile Include="Modules\ChangePasswordModal.vb" />
+    <Compile Include="Modules\ReceiveConfirmModal.vb" />
     <Compile Include="Modules\ActivityLog.vb" />
     <Compile Include="Modules\Db.vb" />
     <Compile Include="Modules\DocNumber.vb" />
@@ -317,7 +318,7 @@
     <Compile Include="Dashboard\POS\TransactionPanelBuilder.vb" />
     <Compile Include="Dashboard\CategoriesPanelBuilder.vb" />
     <Compile Include="Dashboard\DashboardCards.vb" />
-    <Compile Include="Dashboard\FilterFields.vb" />
+    <Compile Include="Dashboard\FilterFields.vb" />
     <Compile Include="Dashboard\GraphicsExtensions.vb" />
     <Compile Include="Dashboard\FastMovingPanelBuilder.vb" />
     <Compile Include="Dashboard\MixPanelBuilder.vb" />

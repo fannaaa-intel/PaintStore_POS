@@ -47,7 +47,8 @@ Public Module SupplierLogo
 
     ''' <summary>Every optional supplier column, in the order a SELECT lists them.</summary>
     Private ReadOnly OptionalColumns As String() =
-        {"image_path", "tin", "payment_terms", "notes"}
+        {"image_path", "tin", "payment_terms", "notes",
+         "company_name", "head_name", "dti_no", "bir_no"}
 
     ''' <summary>True when suppliers.image_path exists.</summary>
     Public ReadOnly Property HasColumn As Boolean
@@ -60,6 +61,22 @@ Public Module SupplierLogo
     Public ReadOnly Property HasCommercial As Boolean
         Get
             Return Has("tin") AndAlso Has("payment_terms") AndAlso Has("notes")
+        End Get
+    End Property
+
+    ''' <summary>
+    ''' True when the business-registration fields exist — registered company
+    ''' name, head of company, DTI and BIR numbers.
+    '''
+    ''' Checked as a group because the form offers them as one "Business
+    ''' Registration" section, and half a section is worse than none: a form
+    ''' that asks for DTI but has nowhere to put BIR invites the number being
+    ''' typed into whichever box is showing.
+    ''' </summary>
+    Public ReadOnly Property HasRegistration As Boolean
+        Get
+            Return Has("company_name") AndAlso Has("head_name") AndAlso
+                   Has("dti_no") AndAlso Has("bir_no")
         End Get
     End Property
 
@@ -82,7 +99,8 @@ Public Module SupplierLogo
                     "SELECT column_name FROM information_schema.columns " &
                     "WHERE table_schema = DATABASE() " &
                     "  AND table_name = 'suppliers' " &
-                    "  AND column_name IN ('image_path','tin','payment_terms','notes')", conn)
+                    "  AND column_name IN ('image_path','tin','payment_terms','notes'," &
+                    "                     'company_name','head_name','dti_no','bir_no')", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             _present.Add(rdr.GetString(0))

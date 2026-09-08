@@ -48,6 +48,30 @@ q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.im
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.address,s.is_active,(SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos FROM suppliers s ORDER BY s.name ASC" "supplier list query (no image column)"
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active ORDER BY s.name ASC" "admin supplier grid (no image column)"
 q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path ORDER BY s.name ASC" "admin supplier grid (with image column)"
+# ── Supplier business registration + goods-receipt attestation (sections 9,10) ─
+# Optional like the rest: the app probes and falls back, so absent = NOT APPLIED
+# rather than a failure.
+HASREG=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='suppliers' AND column_name IN ('company_name','head_name','dti_no','bir_no');" 2>/dev/null)
+HASGR=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='goods_receipts';" 2>/dev/null)
+
+q "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='suppliers' AND column_name IN ('image_path','tin','payment_terms','notes','company_name','head_name','dti_no','bir_no')" "supplier 8-column probe"
+
+if [ "$HASREG" = "4" ]; then
+    q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.address,s.is_active,s.image_path,s.tin,s.payment_terms,s.notes,s.company_name,s.head_name,s.dti_no,s.bir_no,(SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos FROM suppliers s ORDER BY s.name ASC" "supplier list query (incl. registration)"
+    q "SELECT s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path,s.tin,s.payment_terms,s.notes,s.company_name,s.head_name,s.dti_no,s.bir_no,COUNT(DISTINCT p.product_id) AS product_count,COUNT(DISTINCT po.po_id) AS po_count FROM suppliers s LEFT JOIN products p ON p.supplier_id=s.supplier_id LEFT JOIN purchase_orders po ON po.supplier_id=s.supplier_id GROUP BY s.supplier_id,s.name,s.contact_person,s.phone,s.email,s.is_active,s.image_path,s.tin,s.payment_terms,s.notes,s.company_name,s.head_name,s.dti_no,s.bir_no ORDER BY s.name ASC" "admin supplier grid (incl. registration)"
+    q "UPDATE suppliers SET company_name=company_name, head_name=head_name, dti_no=dti_no, bir_no=bir_no WHERE supplier_id=0" "supplier UPDATE shape (registration cols)"
+else
+    echo "  SKIP  supplier registration columns not applied ($HASREG/4) - form omits them"
+fi
+
+if [ "$HASGR" = "1" ]; then
+    q "SELECT receipt_id,po_id,received_by,receiver_name,condition_note,remarks,attested,total_units,received_at FROM goods_receipts WHERE po_id=0" "goods receipt attestation read"
+    q "SELECT COUNT(*) FROM goods_receipts WHERE condition_note IN ('Good','Discrepancy')" "receipt condition enum"
+    q "SELECT g.receipt_id,g.receiver_name,g.condition_note,u.full_name FROM goods_receipts g LEFT JOIN users u ON g.received_by=u.user_id WHERE g.po_id=0" "receipt joins its confirming user"
+else
+    echo "  SKIP  goods_receipts not created - receive saves without stored attestation"
+fi
+
 q "SELECT method_id,name FROM payment_methods ORDER BY method_id" "payment methods load (fallback shape)"
 HASPM=$("$MYSQL" -u root -D $DB -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='payment_methods' AND column_name IN ('type','is_active','note');" 2>/dev/null)
 if [ "$HASPM" = "3" ]; then
@@ -92,6 +116,17 @@ if [ "$HASIMG" = "4" ]; then
     "$MYSQL" -u root -D $DB -e "SELECT s.supplier_id,s.name,s.image_path,(SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.supplier_id AND po.status NOT IN ('Cancelled','Received')) AS active_pos FROM suppliers s ORDER BY s.name ASC;" 2>/dev/null
 else
     echo "  supplier columns PARTIAL ($HASIMG/4) -> missing ones are simply not offered (safe default)"
+fi
+if [ "$HASREG" = "4" ]; then
+    echo "  supplier registration APPLIED (4/4) -> company, head, DTI, BIR on the form"
+else
+    echo "  supplier registration NOT applied ($HASREG/4) -> those fields are not offered"
+fi
+if [ "$HASGR" = "1" ]; then
+    echo "  goods_receipts APPLIED -> receive requires a signed attestation"
+    "$MYSQL" -u root -D $DB -e "SELECT COUNT(*) AS receipts_recorded FROM goods_receipts;" 2>/dev/null
+else
+    echo "  goods_receipts NOT applied -> receive still prompts, but stores no attestation row"
 fi
 if [ "$HASAPP" = "6" ]; then
     echo "  sign-up approval APPLIED (6/6) -> pending queue live in User Management"

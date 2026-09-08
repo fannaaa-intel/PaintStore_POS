@@ -189,6 +189,92 @@ UPDATE payment_methods SET type = 'Cash'
 
 
 -- -----------------------------------------------------------------------------
+--  9. suppliers - business registration
+--
+--     A supplier is a REGISTERED BUSINESS, not just a contact. Accounting and
+--     BIR audit both work from the registration papers, and until now the form
+--     only held a trading name and a TIN, so none of the rest could be
+--     recorded against the row it belongs to.
+--
+--     company_name  The registered business name on the DTI/SEC papers, which
+--                   is often NOT the name the store calls them by. "name"
+--                   stays the everyday trading name so nothing that already
+--                   displays a supplier changes.
+--     head_name     Proprietor / President / authorised signatory - the person
+--                   who actually signs a contract. Distinct from
+--                   contact_person, who is only the day-to-day contact
+--                   (a sales rep cannot bind the company).
+--     dti_no        DTI Certificate of Business Name Registration number
+--                   (SEC registration for a corporation).
+--     bir_no        BIR Certificate of Registration (Form 2303) number. Kept
+--                   apart from tin: the TIN identifies the taxpayer, the COR
+--                   number identifies the registration document, and an audit
+--                   asks for both.
+--
+--     All optional and NULL by default, like every other section here: the
+--     app probes for them and simply does not offer the fields when they are
+--     absent, so an un-migrated database behaves exactly as before.
+-- -----------------------------------------------------------------------------
+ALTER TABLE suppliers
+    ADD COLUMN IF NOT EXISTS company_name VARCHAR(150) DEFAULT NULL AFTER name;
+
+ALTER TABLE suppliers
+    ADD COLUMN IF NOT EXISTS head_name VARCHAR(120) DEFAULT NULL AFTER contact_person;
+
+ALTER TABLE suppliers
+    ADD COLUMN IF NOT EXISTS dti_no VARCHAR(60) DEFAULT NULL AFTER tin;
+
+ALTER TABLE suppliers
+    ADD COLUMN IF NOT EXISTS bir_no VARCHAR(60) DEFAULT NULL AFTER dti_no;
+
+
+-- -----------------------------------------------------------------------------
+--  10. goods_receipts - who accepted a delivery, and their attestation
+--
+--     Receiving goods is the moment the store takes ownership and the payable
+--     becomes real. Before this table the only trace was stock_movements.user_id
+--     - whoever happened to be signed in. That is not an attestation: it does
+--     not say a person looked at the delivery, nor that the goods were sound,
+--     and a till left signed in could accept a delivery on someone else's name.
+--
+--     One row per RECEIPT EVENT (a PO received in two deliveries gets two
+--     rows), so a partial-delivery history stays intact.
+--
+--     received_by     The signed-in user who confirmed. They re-enter their own
+--                     password in the confirm dialog, so this is an
+--                     authenticated identity rather than an ambient session.
+--     receiver_name   The name typed on the dialog - the person who physically
+--                     checked the goods at the dock, who may be a warehouse
+--                     hand rather than the account holder.
+--     condition_note  'Good'       - complete and undamaged.
+--                     'Discrepancy' - short, damaged or wrong; remarks say what.
+--     remarks         Free text detailing any discrepancy.
+--     attested        Always 1 for a saved receipt: the dialog will not commit
+--                     without the certification ticked. Stored so the record
+--                     carries the attestation itself and not just its effect.
+--     total_units     Units accepted in THIS event, so the row is meaningful
+--                     without re-deriving it from stock_movements.
+--
+--     Optional like the rest - the app checks the table exists and falls back
+--     to the previous no-attestation behaviour when it does not.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS goods_receipts (
+    receipt_id     INT(11)      NOT NULL AUTO_INCREMENT,
+    po_id          INT(11)      NOT NULL,
+    received_by    INT(11)      DEFAULT NULL,
+    receiver_name  VARCHAR(120) NOT NULL,
+    condition_note ENUM('Good','Discrepancy') NOT NULL DEFAULT 'Good',
+    remarks        VARCHAR(500) DEFAULT NULL,
+    attested       TINYINT(1)   NOT NULL DEFAULT 1,
+    total_units    INT(11)      NOT NULL DEFAULT 0,
+    received_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (receipt_id),
+    KEY idx_gr_po (po_id),
+    KEY idx_gr_user (received_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- -----------------------------------------------------------------------------
 --  Check the result — every column below should be listed.
 -- -----------------------------------------------------------------------------
 SHOW COLUMNS FROM products LIKE 'image_path';
@@ -204,3 +290,8 @@ SHOW TABLES LIKE 'password_reset_requests';
 SHOW COLUMNS FROM payment_methods LIKE 'type';
 SHOW COLUMNS FROM payment_methods LIKE 'is_active';
 SHOW COLUMNS FROM payment_methods LIKE 'note';
+SHOW COLUMNS FROM suppliers LIKE 'company_name';
+SHOW COLUMNS FROM suppliers LIKE 'head_name';
+SHOW COLUMNS FROM suppliers LIKE 'dti_no';
+SHOW COLUMNS FROM suppliers LIKE 'bir_no';
+SHOW TABLES LIKE 'goods_receipts';

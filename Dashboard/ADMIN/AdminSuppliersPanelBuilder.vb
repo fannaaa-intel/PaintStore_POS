@@ -59,6 +59,9 @@ Public Class AdminSuppliersPanelBuilder
         Public Phone As String
         Public Email As String
         Public ImagePath As String
+        ' The registered business name, which is often not the trading name in
+        ' Name. Carried so the search can find a supplier by either.
+        Public CompanyName As String
         Public IsActive As Boolean
         Public ProductCount As Integer
         Public PoCount As Integer
@@ -70,7 +73,7 @@ Public Class AdminSuppliersPanelBuilder
     Private Const HDR_H As Integer = 44
     Private Const PAD_TOP As Integer = 4
     Private Const PAD_BOTTOM As Integer = 12
-    Private Const SEARCH_PLACEHOLDER As String = "Search by name or contact…"
+    Private Const SEARCH_PLACEHOLDER As String = "Search by name, company or contact…"
 
     Private Shared _container As Panel
     Private Shared _scrollHost As Panel
@@ -127,6 +130,7 @@ Public Class AdminSuppliersPanelBuilder
                                 .Phone = SafeStr(rdr("phone")),
                                 .Email = SafeStr(rdr("email")),
                                 .ImagePath = SupplierLogo.ReadPath(rdr),
+                                .CompanyName = SupplierLogo.ReadColumn(rdr, "company_name"),
                                 .IsActive = (Not IsDBNull(rdr("is_active"))) AndAlso
                                             Convert.ToBoolean(rdr("is_active")),
                                 .ProductCount = SafeInt(rdr("product_count")),
@@ -153,7 +157,11 @@ Public Class AdminSuppliersPanelBuilder
         Else
             Dim q As String = _searchQuery.ToLower()
             For Each r In _allRows
-                If r.Name.ToLower().Contains(q) OrElse r.ContactPerson.ToLower().Contains(q) Then
+                ' Registered name included: a supplier filed under its trading
+                ' name is otherwise unfindable by the name on its invoices.
+                If r.Name.ToLower().Contains(q) OrElse
+                   r.ContactPerson.ToLower().Contains(q) OrElse
+                   (r.CompanyName IsNot Nothing AndAlso r.CompanyName.ToLower().Contains(q)) Then
                     _visibleRows.Add(r)
                 End If
             Next

@@ -63,6 +63,20 @@ PaintStore_POS
 <member name="M:PaintStore_POS.CashPanelBuilder.PromptAmount(System.String,System.String)">
  <summary>Modal amount + note prompt. Returns (ok, amount, note).</summary>
 </member>
+<member name="T:PaintStore_POS.ReceiveConfirmModal.Attestation">
+ <summary>
+ What the receiver attested to. Returned by Prompt so the caller can
+ store it alongside the stock movements it writes.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.ReceiveConfirmModal.HasTable">
+ <summary>
+ True when the goods_receipts table exists. Probed per commit rather
+ than cached, because it is one cheap round-trip against a screen the
+ user reaches a handful of times a day, and a cached False would
+ outlive the migration being applied mid-session.
+ </summary>
+</member>
 <member name="M:PaintStore_POS.DocNumber.Generate(System.String)">
  <summary>
  Build a document number: prefix + timestamp + the current user id,
@@ -111,6 +125,17 @@ PaintStore_POS
 </member>
 <member name="P:PaintStore_POS.SupplierLogo.HasCommercial">
  <summary>True when the commercial fields (tin / terms / notes) exist.</summary>
+</member>
+<member name="P:PaintStore_POS.SupplierLogo.HasRegistration">
+ <summary>
+ True when the business-registration fields exist — registered company
+ name, head of company, DTI and BIR numbers.
+
+ Checked as a group because the form offers them as one "Business
+ Registration" section, and half a section is worse than none: a form
+ that asks for DTI but has nowhere to put BIR invites the number being
+ typed into whichever box is showing.
+ </summary>
 </member>
 <member name="M:PaintStore_POS.SupplierLogo.Has(System.String)">
  <summary>True when a specific optional column is present.</summary>
@@ -185,6 +210,14 @@ PaintStore_POS
  <summary>
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.
  Not a standards-compliant barcode — purely decorative / scannable aesthetic.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.PanelRenderer.Draw(System.Windows.Forms.Panel,System.Windows.Forms.PaintEventArgs,System.Boolean,System.Boolean)">
+ <summary>
+ Paint a card. When <paramref name="elevated"/> is set the card is drawn
+ inset by ShadowPad with a soft drop shadow around it, which is what
+ separates a white card from the near-white page behind it — at the old
+ single 14-alpha layer the two read as one flat surface.
  </summary>
 </member>
 <member name="P:PaintStore_POS.CardTableBody.CornerRadius">

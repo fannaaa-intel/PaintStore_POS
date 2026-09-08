@@ -55,6 +55,12 @@ Public Class ProcurementSuppliersPanelBuilder
         Public Tin As String
         Public PaymentTerms As String
         Public Notes As String
+        ' Business registration. CompanyName is the REGISTERED name on the
+        ' DTI/SEC papers, which is often not the trading name in Name.
+        Public CompanyName As String
+        Public HeadName As String
+        Public DtiNo As String
+        Public BirNo As String
         Public IsActive As Boolean
         Public ActivePoCount As Integer
     End Class
@@ -77,6 +83,10 @@ Public Class ProcurementSuppliersPanelBuilder
     Private Shared txtEmail As TextBox
     Private Shared txtAddress As TextBox
     Private Shared txtTin As TextBox
+    Private Shared txtCompany As TextBox
+    Private Shared txtHead As TextBox
+    Private Shared txtDti As TextBox
+    Private Shared txtBir As TextBox
     Private Shared txtNotes As TextBox
     Private Shared cboTerms As ComboBox
     Private Shared cboStatus As ComboBox
@@ -510,121 +520,191 @@ Public Class ProcurementSuppliersPanelBuilder
         picBackF.Top = lblTitle.Top + (lblTitle.PreferredHeight - picBackF.Height) \ 2
 
         ' ── Body ──────────────────────────────────────────────────────────────
-        ' Scrollable: the grouped form is taller than a short window, and a form
-        ' whose Save button is off-screen cannot be used.
+        ' AutoScroll stays on as a safety net for a small or scaled display, but
+        ' the layout below is sized so it never actually engages at the normal
+        ' window size: a registration form the user has to scroll to finish is
+        ' a form where the Save button is easy to miss.
         Dim body As New Panel With {
             .Dock = DockStyle.Fill, .BackColor = MintBg, .AutoScroll = True
         }
 
-        ' Wider than the old single column, so two fields fit side by side.
-        Dim cardWidth As Integer = 760
-        Dim card As New BufferedPanel With {.Width = cardWidth, .BackColor = CardBg}
-        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        ' THREE columns rather than two. The form carries fifteen inputs once
+        ' registration is in, and at two columns that stacked to ~1100px — well
+        ' past the ~730px of body a maximised window leaves, so every visit
+        ' began with a scroll. Three columns fold the same fields into six rows
+        ' and bring the whole form, Save button included, onto one screen.
+        ' The card paints itself inset by ShadowPad with a drop shadow around
+        ' it, so the panel is that much wider than the content and its
+        ' background is the PAGE colour — a white panel would show as a square
+        ' behind the shadow instead of letting it fall on the mint.
+        Dim contentW As Integer = 1040
+        Dim cardWidth As Integer = contentW + PanelRenderer.ShadowPad * 2
+        Dim card As New BufferedPanel With {.Width = cardWidth, .BackColor = MintBg}
+        AddHandler card.Paint, Sub(s, e) PaintElevatedCard(CType(s, Panel), e)
 
         ' Seeded from the row being edited, so opening Edit and saving without
         ' touching the photo keeps it rather than clearing it.
         pickedImagePath = If(existing IsNot Nothing, If(existing.ImagePath, ""), "")
 
-        ' Column geometry: two equal fields with a gutter between them.
-        Dim padX As Integer = 32
-        Dim gutter As Integer = 24
-        Dim colW As Integer = (cardWidth - padX * 2 - gutter) \ 2
+        ' Column geometry: three equal fields with a gutter between each.
+        ' Every x starts at ShadowPad rather than 0, because the painted card
+        ' is inset by that much — content laid out from 0 would sit on the
+        ' shadow, outside the white surface.
+        Dim inset As Integer = PanelRenderer.ShadowPad
+        Dim padX As Integer = inset + 30
+        Dim gutter As Integer = 18
+        Dim colW As Integer = (contentW - 30 * 2 - gutter * 2) \ 3
         Dim colRX As Integer = padX + colW + gutter
+        Dim col3X As Integer = padX + (colW + gutter) * 2
 
-        Dim yy As Integer = 30
+        ' Vertical rhythm. A field is 66px tall (22 label + 44 tile), so ROW is
+        ' that plus a 4px gap. Header and divider are tighter than the old
+        ' values for the same reason the columns changed: to buy back height.
+        Dim ROW As Integer = 70
+        Dim yy As Integer = inset + 20
 
-        ' ── Section: Identity ─────────────────────────────────────────────────
+        ' ── Section: Identity ────────────────────────────────────────
         ' The logo sits beside the name rather than above the whole form: the
         ' two together are what identifies the supplier, so they read as one
         ' block instead of the photo looking like a separate step.
         yy = AddSectionHeader(card, "Identity", "Who the supplier is.", yy, padX)
 
-        Dim logoSize As Integer = 104
+        Dim logoSize As Integer = 96
         AddLogoPicker(card, If(existing IsNot Nothing, existing.Name, ""), padX, yy, logoSize)
 
-        Dim idX As Integer = padX + logoSize + 26
+        ' The two names share the space beside the logo, stacked, because the
+        ' trading name and the registered name are read as a pair.
+        Dim idX As Integer = padX + logoSize + 22
         Dim idW As Integer = cardWidth - idX - padX
         txtName = AddFormField(card, "Supplier Name *", idX, yy, idW,
                                If(existing IsNot Nothing, existing.Name, ""),
                                False, "e.g. ABC Paint Supplies")
 
-        If SupplierLogo.HasCommercial Then
-            txtTin = AddFormField(card, "TIN", idX, yy + 78, idW,
-                                  If(existing IsNot Nothing, existing.Tin, ""),
-                                  False, "e.g. 123-456-789-000")
+        If SupplierLogo.HasRegistration Then
+            txtCompany = AddFormField(card, "Company Name", idX, yy + ROW, idW,
+                                      If(existing IsNot Nothing, existing.CompanyName, ""),
+                                      False, "Registered business name on the DTI/SEC papers")
         Else
-            txtTin = Nothing
+            txtCompany = Nothing
         End If
 
-        ' The logo tile is the tallest thing in this section.
-        yy += Math.Max(logoSize, If(SupplierLogo.HasCommercial, 156, 78)) + 26
+        ' Whichever is taller — the logo tile or the stacked names — ends the row.
+        yy += Math.Max(logoSize, If(SupplierLogo.HasRegistration, ROW * 2 - 4, 66)) + 16
         yy = AddSectionDivider(card, yy, padX)
 
-        ' ── Section: Contact ──────────────────────────────────────────────────
+        ' ── Section: Contact ─────────────────────────────────────────
         yy = AddSectionHeader(card, "Contact", "How to reach them.", yy, padX)
 
-        ' Phone and email are short, so they pair on one row.
+        ' Head of Company sits directly beside Contact Person so the difference
+        ' between "who signs" and "who you ring" is visible rather than inferred.
         txtContact = AddFormField(card, "Contact Person *", padX, yy, colW,
                                   If(existing IsNot Nothing, existing.Contact, ""),
                                   False, "e.g. Juan dela Cruz")
-        txtPhone = AddFormField(card, "Phone *", colRX, yy, colW,
+        If SupplierLogo.HasRegistration Then
+            txtHead = AddFormField(card, "Head of Company", colRX, yy, colW,
+                                   If(existing IsNot Nothing, existing.HeadName, ""),
+                                   False, "Owner / President / signatory")
+        Else
+            txtHead = Nothing
+        End If
+        txtPhone = AddFormField(card, "Phone *", col3X, yy, colW,
                                 If(existing IsNot Nothing, existing.Phone, ""),
                                 False, "e.g. 09171234567")
-        yy += 78
+        yy += ROW
 
         txtEmail = AddFormField(card, "Email *", padX, yy, colW,
                                 If(existing IsNot Nothing, existing.Email, ""),
                                 False, "e.g. supplier@gmail.com")
         txtAddress = AddFormField(card, "Address *", colRX, yy, colW,
                                   If(existing IsNot Nothing, existing.Address, ""),
-                                  False, "e.g. 123 Rizal St., Aparri, Cagayan")
-        yy += 78
-
-        ' ── Section: Commercial ───────────────────────────────────────────────
+                                  False, "e.g. 123 Rizal St., Aparri")
+        ' Payment terms rides the third column here rather than opening a
+        ' section of its own for a single dropdown.
         If SupplierLogo.HasCommercial Then
-            yy = AddSectionDivider(card, yy, padX)
-            yy = AddSectionHeader(card, "Commercial",
-                                  "Terms this supplier is dealt with on.", yy, padX)
-
-            cboTerms = AddFormCombo(card, "Payment Terms", padX, yy, colW,
+            cboTerms = AddFormCombo(card, "Payment Terms", col3X, yy, colW,
                                     SupplierLogo.PaymentTermOptions,
                                     If(existing IsNot Nothing, existing.PaymentTerms, ""),
                                     "Not specified")
-            cboStatus = AddFormCombo(card, "Status", colRX, yy, colW,
+        Else
+            cboTerms = Nothing
+        End If
+        yy += ROW
+
+        ' ── Section: Business Registration ───────────────────────────────
+        ' TIN, DTI and BIR are three different documents an audit asks for by
+        ' name, and at three columns they land on exactly one row together.
+        If SupplierLogo.HasRegistration Then
+            yy = AddSectionDivider(card, yy, padX)
+            yy = AddSectionHeader(card, "Business Registration",
+                                  "As printed on the certificates.", yy, padX)
+
+            txtTin = AddFormField(card, "TIN", padX, yy, colW,
+                                  If(existing IsNot Nothing, existing.Tin, ""),
+                                  False, "e.g. 123-456-789-000")
+            txtDti = AddFormField(card, "DTI Registration No.", colRX, yy, colW,
+                                  If(existing IsNot Nothing, existing.DtiNo, ""),
+                                  False, "DTI / SEC certificate no.")
+            txtBir = AddFormField(card, "BIR Registration No.", col3X, yy, colW,
+                                  If(existing IsNot Nothing, existing.BirNo, ""),
+                                  False, "BIR Form 2303 no.")
+            yy += ROW
+        ElseIf SupplierLogo.HasCommercial Then
+            ' Un-migrated for registration but migrated for TIN: keep TIN
+            ' offered rather than losing a field that already works.
+            yy = AddSectionDivider(card, yy, padX)
+            yy = AddSectionHeader(card, "Business Registration",
+                                  "As printed on the certificates.", yy, padX)
+            txtTin = AddFormField(card, "TIN", padX, yy, colW,
+                                  If(existing IsNot Nothing, existing.Tin, ""),
+                                  False, "e.g. 123-456-789-000")
+            yy += ROW
+            txtDti = Nothing
+            txtBir = Nothing
+        Else
+            txtTin = Nothing
+            txtDti = Nothing
+            txtBir = Nothing
+        End If
+
+        ' ── Notes + Status ──────────────────────────────────────────
+        ' Notes spans the first two columns and Status takes the third, so the
+        ' free-text box gets the room it needs without costing another row.
+        If SupplierLogo.HasCommercial Then
+            txtNotes = AddFormField(card, "Notes", padX, yy, colW * 2 + gutter,
+                                    If(existing IsNot Nothing, existing.Notes, ""),
+                                    False, "Delivery quirks, minimum order, best time to call…")
+            cboStatus = AddFormCombo(card, "Status", col3X, yy, colW,
                                      New String() {"Active", "Inactive"},
                                      If(existing Is Nothing OrElse existing.IsActive, "Active", "Inactive"),
                                      "")
-            yy += 78
-
-            txtNotes = AddFormField(card, "Notes", padX, yy, cardWidth - padX * 2,
-                                    If(existing IsNot Nothing, existing.Notes, ""),
-                                    True, "Delivery quirks, minimum order, best time to call…")
-            yy += 96
+            yy += ROW
         Else
-            cboTerms = Nothing
             cboStatus = Nothing
             txtNotes = Nothing
         End If
 
         ' ── Button bar ────────────────────────────────────────────────────────
-        Dim btnBarH As Integer = 72
-        Dim btnBarY As Integer = yy + 4
+        Dim btnBarH As Integer = 64
+        Dim btnBarY As Integer = yy + 2
 
+        ' Spans the card's white surface, not the whole panel: the outer
+        ' ShadowPad ring is page colour, so a transparent bar stretched across
+        ' it would pick up mint at both ends.
         Dim btnBar As New Panel With {
-            .BackColor = Color.Transparent, .Location = New Point(0, btnBarY),
-            .Height = btnBarH, .Width = cardWidth
+            .BackColor = CardBg, .Location = New Point(inset, btnBarY),
+            .Height = btnBarH, .Width = contentW
         }
         AddHandler btnBar.Paint,
             Sub(s, e)
                 Using pen As New Pen(CardBorder, 1)
-                    e.Graphics.DrawLine(pen, padX, 0, CType(s, Panel).Width - padX, 0)
+                    e.Graphics.DrawLine(pen, 30, 0, CType(s, Panel).Width - 30, 0)
                 End Using
             End Sub
 
         Dim lblRequired As New Label With {
             .Text = "* Required", .Font = New Font("Segoe UI", 9),
             .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
-            .Location = New Point(padX, (btnBarH - 18) \ 2)
+            .Location = New Point(30, (btnBarH - 18) \ 2)
         }
 
         Dim btnCancel As New Button With {
@@ -672,27 +752,54 @@ Public Class ProcurementSuppliersPanelBuilder
             Sub()
                 Dim t As Integer = (btnBar.Height - btnSaveRef.Height) \ 2
                 btnSaveRef.Top = t
-                btnSaveRef.Left = btnBar.Width - padX - btnSaveRef.Width
+                btnSaveRef.Left = btnBar.Width - 30 - btnSaveRef.Width
                 btnCancel.Top = t
                 btnCancel.Left = btnSaveRef.Left - btnCancel.Width - 12
             End Sub
         AddHandler btnBar.Resize, Sub() PositionButtons()
         PositionButtons()
 
-        card.Height = btnBarY + btnBarH + 12
+        ' + inset so the bottom shadow has room; the top inset is already
+        ' inside btnBarY, which started from yy = inset + 20.
+        card.Height = btnBarY + btnBarH + 10 + inset
         card.Controls.Add(btnBar)
 
-        ' Nudged above centre so the card reads as sitting under the title
-        ' rather than floating. A card taller than the viewport pins to the top
-        ' instead, and the body scrolls.
-        Dim verticalOffset As Integer = -20
+        ' Centring has to work on the VISIBLE white surface, not on the panel.
+        ' The panel is ShadowPad larger on every side and PanelRenderer lifts
+        ' its painted rect 2px, so centring the panel left the white card
+        ' sitting ~29px low — which is what read as "too far down".
+        Dim visibleTopPad As Integer = inset - 2
+
+        ' The card hangs from the title rather than floating in the middle of
+        ' the body. On a tall screen there is far more body than card, and
+        ' true centring then strands it low with a large void under the
+        ' header — the eye anchors to the title, so that void reads as the
+        ' card being pushed down even when it is geometrically centred.
+        '
+        ' So: centre it, but never let the gap above exceed MaxTopGap.
+        '
+        ' 90 is tuned, not arbitrary. True centring on a 1080px screen puts the
+        ' gap at ~156 and the card reads as sunk; clamping hard to 28 pins it
+        ' under the subtitle and reads as top-heavy. 90 sits between the two —
+        ' clearly below the header, still visibly settled on the page.
+        Dim MaxTopGap As Integer = 90
 
         Dim PositionCard As Action =
             Sub()
                 Dim bw As Integer = body.ClientSize.Width
                 Dim bh As Integer = body.ClientSize.Height
-                card.Left = Math.Max(24, (bw - cardWidth) \ 2)
-                card.Top = Math.Max(16, (bh - card.Height) \ 2 + verticalOffset)
+                ' Centred while the window is wide enough, pinned to a 20px
+                ' margin once it is not. Without the clamp a narrow window put
+                ' the card at a negative x, hiding the first column off-screen
+                ' behind the nav rather than scrolling to it.
+                card.Left = Math.Max(20, (bw - card.Width) \ 2)
+
+                ' Solve for the panel top that places the VISIBLE white
+                ' surface, which starts visibleTopPad into the panel and is
+                ' inset*2 shorter than it.
+                Dim visH As Integer = card.Height - inset * 2
+                Dim wantVisTop As Integer = Math.Min((bh - visH) \ 2, MaxTopGap)
+                card.Top = Math.Max(-visibleTopPad, wantVisTop - visibleTopPad)
             End Sub
 
         AddHandler body.Resize, Sub() PositionCard()
@@ -723,7 +830,7 @@ Public Class ProcurementSuppliersPanelBuilder
             .Location = New Point(padX, y + 17)
         }
         parent.Controls.AddRange({lblTitle, lblCaption})
-        Return y + 44
+        Return y + 36
     End Function
 
     ' A hairline between two sections.
@@ -735,9 +842,11 @@ Public Class ProcurementSuppliersPanelBuilder
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
         parent.Controls.Add(line)
+        ' padX already carries any shadow inset, so mirroring it on the right
+        ' keeps the rule inside the card's white surface at any width.
         AddHandler parent.Resize, Sub() line.Width = parent.Width - padX * 2
         line.Width = Math.Max(200, parent.Width - padX * 2)
-        Return y + 24
+        Return y + 18
     End Function
 
     ' ── LOGO PICKER ──────────────────────────────────────────────────────────
@@ -1068,6 +1177,12 @@ Public Class ProcurementSuppliersPanelBuilder
         ' The commercial controls only exist once their columns do.
         Dim tin As String = If(txtTin IsNot Nothing, txtTin.Text.Trim(), "")
         Dim notes As String = If(txtNotes IsNot Nothing, txtNotes.Text.Trim(), "")
+
+        ' Registration fields, likewise only present once their columns are.
+        Dim companyName As String = If(txtCompany IsNot Nothing, txtCompany.Text.Trim(), "")
+        Dim headName As String = If(txtHead IsNot Nothing, txtHead.Text.Trim(), "")
+        Dim dtiNo As String = If(txtDti IsNot Nothing, txtDti.Text.Trim(), "")
+        Dim birNo As String = If(txtBir IsNot Nothing, txtBir.Text.Trim(), "")
         Dim terms As String = ""
         If cboTerms IsNot Nothing AndAlso cboTerms.SelectedIndex > 0 Then
             terms = CStr(cboTerms.SelectedItem)
@@ -1122,6 +1237,21 @@ Public Class ProcurementSuppliersPanelBuilder
             txtTin.Focus() : Return
         End If
 
+        ' DTI and BIR are optional, but a typed one must look like a
+        ' certificate number. They are alphanumeric — a DTI number can carry a
+        ' branch letter — so this rejects punctuation and stray symbols rather
+        ' than demanding digits the way TIN does.
+        If dtiNo <> "" AndAlso Not System.Text.RegularExpressions.Regex.IsMatch(dtiNo, "^[A-Za-z0-9\-\s]+$") Then
+            AppModal.Show("DTI Registration No. may contain letters, digits and dashes only.",
+                          "Invalid DTI Number", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            txtDti.Focus() : Return
+        End If
+        If birNo <> "" AndAlso Not System.Text.RegularExpressions.Regex.IsMatch(birNo, "^[A-Za-z0-9\-\s]+$") Then
+            AppModal.Show("BIR Registration No. may contain letters, digits and dashes only.",
+                          "Invalid BIR Number", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            txtBir.Focus() : Return
+        End If
+
         btnSaveRef.Tag = "done"
         Try
             Using conn = Db.GetConnection()
@@ -1135,6 +1265,9 @@ Public Class ProcurementSuppliersPanelBuilder
                         If(SupplierLogo.HasColumn, ", image_path = @img", "") &
                         If(SupplierLogo.HasCommercial,
                            ", tin = @tin, payment_terms = @terms, notes = @notes", "") &
+                        If(SupplierLogo.HasRegistration,
+                           ", company_name = @company, head_name = @head, " &
+                           "dti_no = @dti, bir_no = @bir", "") &
                         " WHERE supplier_id = @id", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
@@ -1153,6 +1286,12 @@ Public Class ProcurementSuppliersPanelBuilder
                             cmd.Parameters.AddWithValue("@terms", NullIfBlank(terms))
                             cmd.Parameters.AddWithValue("@notes", NullIfBlank(notes))
                         End If
+                        If SupplierLogo.HasRegistration Then
+                            cmd.Parameters.AddWithValue("@company", NullIfBlank(companyName))
+                            cmd.Parameters.AddWithValue("@head", NullIfBlank(headName))
+                            cmd.Parameters.AddWithValue("@dti", NullIfBlank(dtiNo))
+                            cmd.Parameters.AddWithValue("@bir", NullIfBlank(birNo))
+                        End If
                         cmd.Parameters.AddWithValue("@id", editingId)
                         cmd.ExecuteNonQuery()
                     End Using
@@ -1161,9 +1300,12 @@ Public Class ProcurementSuppliersPanelBuilder
                         "INSERT INTO suppliers (name, contact_person, phone, email, address" &
                         If(SupplierLogo.HasColumn, ", image_path", "") &
                         If(SupplierLogo.HasCommercial, ", tin, payment_terms, notes", "") &
+                        If(SupplierLogo.HasRegistration,
+                           ", company_name, head_name, dti_no, bir_no", "") &
                         ", is_active) VALUES (@n, @c, @p, @e, @a" &
                         If(SupplierLogo.HasColumn, ", @img", "") &
                         If(SupplierLogo.HasCommercial, ", @tin, @terms, @notes", "") &
+                        If(SupplierLogo.HasRegistration, ", @company, @head, @dti, @bir", "") &
                         ", @act)", conn)
                         cmd.Parameters.AddWithValue("@n", name)
                         cmd.Parameters.AddWithValue("@c", contact)
@@ -1179,6 +1321,12 @@ Public Class ProcurementSuppliersPanelBuilder
                             cmd.Parameters.AddWithValue("@tin", NullIfBlank(tin))
                             cmd.Parameters.AddWithValue("@terms", NullIfBlank(terms))
                             cmd.Parameters.AddWithValue("@notes", NullIfBlank(notes))
+                        End If
+                        If SupplierLogo.HasRegistration Then
+                            cmd.Parameters.AddWithValue("@company", NullIfBlank(companyName))
+                            cmd.Parameters.AddWithValue("@head", NullIfBlank(headName))
+                            cmd.Parameters.AddWithValue("@dti", NullIfBlank(dtiNo))
+                            cmd.Parameters.AddWithValue("@bir", NullIfBlank(birNo))
                         End If
                         cmd.ExecuteNonQuery()
                     End Using
@@ -1505,17 +1653,39 @@ Public Class ProcurementSuppliersPanelBuilder
         }
         ' Only offered once the columns exist, so an un-migrated database shows
         ' the same four fields it always did.
+        ' Registration detail comes before the commercial terms: it identifies
+        ' WHO the business legally is, which is what a reader checking papers
+        ' is looking for, and the head of company sits next to the contact
+        ' person so the difference between the two is visible at a glance.
+        If SupplierLogo.HasRegistration Then
+            fieldDefs.Add((TintIcon("group.png"), "Company Name",
+                           If(String.IsNullOrWhiteSpace(sup.CompanyName), Dash, sup.CompanyName)))
+            fieldDefs.Add((TintIcon("user.png"), "Head of Company",
+                           If(String.IsNullOrWhiteSpace(sup.HeadName), Dash, sup.HeadName)))
+        End If
         If SupplierLogo.HasCommercial Then
             fieldDefs.Add((TintIcon("clipboard.png"), "TIN",
                            If(String.IsNullOrWhiteSpace(sup.Tin), Dash, sup.Tin)))
+        End If
+        If SupplierLogo.HasRegistration Then
+            fieldDefs.Add((TintIcon("newspaper.png"), "DTI Registration No.",
+                           If(String.IsNullOrWhiteSpace(sup.DtiNo), Dash, sup.DtiNo)))
+            fieldDefs.Add((TintIcon("task-checklist.png"), "BIR Registration No.",
+                           If(String.IsNullOrWhiteSpace(sup.BirNo), Dash, sup.BirNo)))
+        End If
+        If SupplierLogo.HasCommercial Then
             fieldDefs.Add((TintIcon("wallet-income.png"), "Payment Terms",
                            If(String.IsNullOrWhiteSpace(sup.PaymentTerms), Dash, sup.PaymentTerms)))
         End If
 
-        ' Two columns: the list is six fields once TIN and terms are in, and a
-        ' single column of six pushes the buttons well below the fold.
-        Dim colGap As Integer = 24
-        Dim fieldCols As Integer = 2
+        ' Three columns. The list reaches eight fields once registration is in,
+        ' and at two columns that was four rows — taller than the card was
+        ' before these fields existed, pushing the history card off the fold.
+        ' At three it is three rows, so the view gains the new detail without
+        ' costing any height. Two columns is kept for the shorter pre-migration
+        ' list, where three would leave a ragged single item on the last row.
+        Dim colGap As Integer = 20
+        Dim fieldCols As Integer = If(fieldDefs.Count >= 7, 3, 2)
 
         Dim yf As Integer = fieldStartY
         Dim idx As Integer = -1
@@ -1569,7 +1739,10 @@ Public Class ProcurementSuppliersPanelBuilder
             Dim RePlace As Action =
                 Sub()
                     Dim usable As Integer = infoCard.Width - 44
-                    Dim cw As Integer = (usable - colGap) \ fieldCols
+                    ' N columns have N-1 gaps between them. Subtracting a single
+                    ' gap regardless of the count made every column too wide, so
+                    ' at three the rightmost one ran past the edge of the card.
+                    Dim cw As Integer = (usable - colGap * (fieldCols - 1)) \ fieldCols
                     Dim x As Integer = 22 + capCol * (cw + colGap)
                     iconTile.Left = x
                     lblFieldCap.Left = x + 44
@@ -1965,6 +2138,10 @@ Public Class ProcurementSuppliersPanelBuilder
             .Tin = SupplierLogo.ReadColumn(rdr, "tin"),
             .PaymentTerms = SupplierLogo.ReadColumn(rdr, "payment_terms"),
             .Notes = SupplierLogo.ReadColumn(rdr, "notes"),
+            .CompanyName = SupplierLogo.ReadColumn(rdr, "company_name"),
+            .HeadName = SupplierLogo.ReadColumn(rdr, "head_name"),
+            .DtiNo = SupplierLogo.ReadColumn(rdr, "dti_no"),
+            .BirNo = SupplierLogo.ReadColumn(rdr, "bir_no"),
             .IsActive = (Not IsDBNull(rdr("is_active"))) AndAlso Convert.ToBoolean(rdr("is_active")),
             .ActivePoCount = If(withCount, SafeInt(rdr("active_pos")), 0)
         }
@@ -2057,6 +2234,18 @@ Public Class ProcurementSuppliersPanelBuilder
     ' =========================================================================
     Private Shared Sub PaintCard(panel As Panel, e As PaintEventArgs)
         PanelRenderer.Draw(panel, e, True)
+    End Sub
+
+    ' A card that sits ON the page rather than in it. The white form card was
+    ' otherwise near-invisible against the mint background, which is what made
+    ' the screen read as one flat surface with fields floating on it.
+    Private Shared Sub PaintElevatedCard(panel As Panel, e As PaintEventArgs)
+        ' The panel's own background is the page colour, so the shadow has
+        ' something to fall on instead of a white square.
+        Using bg As New SolidBrush(MintBg)
+            e.Graphics.FillRectangle(bg, panel.ClientRectangle)
+        End Using
+        PanelRenderer.Draw(panel, e, True, True)
     End Sub
 
     ' Outlined rounded button, centred label. Same reasoning as

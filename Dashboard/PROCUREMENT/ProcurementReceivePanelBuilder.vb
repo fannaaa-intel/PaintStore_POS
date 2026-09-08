@@ -798,6 +798,26 @@ Public Class ProcurementReceivePanelBuilder
         Dim newStatus As String = If(fullyReceived, "Received", "Partially Received")
         Dim note As String = "Received via PO " & currentPoNo
 
+        ' ── ATTESTATION GATE ─────────────────────────────────────────────────
+        ' Nothing is written until a named person confirms they inspected this
+        ' delivery AND re-enters their own password. Receiving is what makes
+        ' the payable real, so it must not be possible from an unattended
+        ' terminal, and "who received it" must be a recorded claim rather than
+        ' an inference from whoever was signed in.
+        '
+        ' Placed after every validation above so the receiver is only asked to
+        ' certify a receipt that would actually save.
+        Dim unitsNow As Integer = toReceive.Sum(Function(l) l.ReceiveNow)
+        Dim att As ReceiveConfirmModal.Attestation =
+            ReceiveConfirmModal.Prompt(currentPoNo, currentSupplierName,
+                                       toReceive.Count, unitsNow)
+        If att Is Nothing Then Return   ' backed out — nothing written
+
+        ' The attestation row only lands where the table exists; on an
+        ' un-migrated database the receipt still saves, it just carries no
+        ' stored attestation, which is the pre-existing behaviour.
+        Dim canStoreAttestation As Boolean = ReceiveConfirmModal.HasTable()
+
         btnSaveRef.Tag = "done"
         Try
             Using conn As MySqlConnection = Db.GetConnection()
@@ -839,13 +859,26 @@ Public Class ProcurementReceivePanelBuilder
                             End Using
                         End If
 
+                        ' The attestation commits with the movements it
+                        ' describes: an attestation for goods never booked in,
+                        ' or movements with no attestation, are both worse than
+                        ' the old behaviour, so they share one transaction.
+                        If canStoreAttestation Then
+                            ReceiveConfirmModal.Save(conn, txn, currentPoId, att, unitsNow)
+                        End If
+
                         txn.Commit()
 
                         ' Receiving is where goods are accepted from a supplier and
                         ' the liability becomes real, so it belongs in the audit log.
+                        ' The receiver's name is recorded here too, so the log
+                        ' answers "who accepted this" without a second lookup.
                         ActivityLog.Record("PO_RECEIVED", "purchase_order", currentPoId,
                             If(fullyReceived, "Fully received", "Partially received") &
-                            ", " & toReceive.Sum(Function(l) l.ReceiveNow) & " unit(s)")
+                            ", " & unitsNow & " unit(s)" &
+                            ", received by " & att.ReceiverName &
+                            If(att.ConditionNote = "Discrepancy",
+                               " (DISCREPANCY: " & att.Remarks & ")", " (good condition)"))
                     Catch exInner As Exception
                         txn.Rollback()
                         If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
@@ -862,7 +895,7 @@ Public Class ProcurementReceivePanelBuilder
             Return
         End Try
 
-        ShowReceiveReceipt(currentPoNo, currentSupplierName, toReceive, newStatus)
+        ShowReceiveReceipt(currentPoNo, currentSupplierName, toReceive, newStatus, att)
         RenderList()
     End Sub
 
@@ -908,13 +941,22 @@ Public Class ProcurementReceivePanelBuilder
     ' =========================================================================
     Private Shared Sub ShowReceiveReceipt(poNo As String, supplierName As String,
                                           receivedLines As List(Of ReceiveLine),
-                                          newStatus As String)
+                                          newStatus As String,
+                                          att As ReceiveConfirmModal.Attestation)
         Dim lines As New List(Of RLine)
 
         lines.Add(New RLine("Purchase Order", poNo, LineStyle.Bold))
         lines.Add(New RLine("Supplier", supplierName))
         lines.Add(New RLine("Date Received", DateTime.Now.ToString("MMM d, yyyy  h:mm tt")))
         lines.Add(New RLine("Status", newStatus))
+        ' Who accepted the delivery, on the document itself — a receipt that
+        ' does not name its receiver cannot be used to settle a dispute later.
+        If att IsNot Nothing Then
+            lines.Add(New RLine("Received By", att.ReceiverName, LineStyle.Bold))
+            lines.Add(New RLine("Condition",
+                                If(att.ConditionNote = "Discrepancy",
+                                   "With discrepancy", "Good condition")))
+        End If
         lines.Add(Divider())
 
         lines.Add(Section("Items Received"))
@@ -931,6 +973,29 @@ Public Class ProcurementReceivePanelBuilder
         Dim totalLines As Integer = receivedLines.Where(Function(l) l.ReceiveNow > 0).Count()
         lines.Add(New RLine("Total Products", totalLines & If(totalLines = 1, " product", " products")))
         lines.Add(New RLine("Total Units", totalUnits & If(totalUnits = 1, " unit", " units"), LineStyle.Bold))
+
+        ' The attestation printed on the document. A discrepancy is called out
+        ' rather than tucked away: it is the part someone will need to act on.
+        If att IsNot Nothing Then
+            lines.Add(Spacer())
+            If att.ConditionNote = "Discrepancy" AndAlso att.Remarks <> "" Then
+                lines.Add(Section("Discrepancy Noted"))
+                lines.Add(New RLine(att.Remarks, "", LineStyle.Normal))
+            ElseIf att.Remarks <> "" Then
+                lines.Add(Section("Remarks"))
+                lines.Add(New RLine(att.Remarks, "", LineStyle.Normal))
+            End If
+            lines.Add(Spacer())
+            ' The wording follows the condition: claiming the goods were
+            ' "correct" under a discrepancy note would contradict the line
+            ' printed directly above it.
+            lines.Add(New RLine(
+                If(att.ConditionNote = "Discrepancy",
+                   "Inspected by " & att.ReceiverName & ", received with the discrepancy noted above.",
+                   "Certified by " & att.ReceiverName & " as inspected and correct."),
+                "", LineStyle.Muted))
+        End If
+
         lines.Add(Spacer())
         lines.Add(New RLine("Goods are pending Put Away by Inventory staff.", "", LineStyle.Muted))
 
