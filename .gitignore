@@ -3,9 +3,3 @@ obj/
 bin/
 objcheckbuild*/
 Tests/bin/
-
-# Real connection strings live here and must never be committed -- a password
-# in git stays in the history even after it is edited out. Copy the .example
-# files and fill in your own credentials.
-App.config
-PaintStore_POS.exe.config

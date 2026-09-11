@@ -12,7 +12,7 @@ Three things you will ever need to do:
 
 # A. First time on a new laptop
 
-Six steps, once.
+Four steps, once.
 
 ## 1. Install XAMPP and start MySQL
 
@@ -35,57 +35,7 @@ Open <http://localhost/phpmyadmin> → **Import** tab → **Choose File** →
 
 The file creates the database itself, so there is nothing to create first.
 
-## 4. Create the app's MySQL login
-
-phpMyAdmin → **SQL** tab → paste this → **Go**:
-
-```sql
-CREATE USER 'pos_app'@'localhost' IDENTIFIED BY 'mypassword123';
-GRANT SELECT, INSERT, UPDATE, DELETE ON paint_store_pos.* TO 'pos_app'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-Change `mypassword123` to anything you like — just remember it for step 5.
-
-<details>
-<summary>Why this step exists</summary>
-
-The app does not connect to MySQL as `root`. It uses a limited account,
-`pos_app`, that can read and write rows but cannot `DROP` or `ALTER` anything —
-so a bug or an injected statement cannot destroy the schema.
-
-That account lives in **MySQL's own user list**, not inside the
-`paint_store_pos` database. Importing the database therefore does not bring it
-along, and it has to be created once per machine.
-
-</details>
-
-## 5. Tell the app that password
-
-In the project folder:
-
-- Rename `App.config.example` → **`App.config`**
-- Rename `PaintStore_POS.exe.config.example` → **`PaintStore_POS.exe.config`**
-
-Open **both** in Notepad and find the line containing `pwd=`. Make it read:
-
-```
-uid=pos_app;pwd=mypassword123;
-```
-
-> ⚠️ The password must be **identical** in step 4 and step 5. That is the whole
-> trick — step 4 creates the login, step 5 tells the app what it is.
-
-<details>
-<summary>Why these files are not in the repo</summary>
-
-They hold a real password. Anything committed to git stays in the history even
-after it is edited out, so these two are gitignored and the `.example` copies
-are committed in their place.
-
-</details>
-
-## 6. Run it
+## 4. Run it
 
 Open `PaintStore_POS.sln` in Visual Studio 2022 → press **F5**.
 
@@ -140,7 +90,6 @@ When in doubt, have them run `migrations.sql`. It is harmless.
 | Your code — new screens, fixes, buttons | ✅ yes |
 | Their data — sales, products, stock counts | ❌ no, stays on their machine |
 | Database shape — new columns and tables | ❌ no, that is what `migrations.sql` is for |
-| `App.config` | ❌ no, deliberately — it holds a password |
 
 Their sales staying on their machine is the behaviour you want. Two laptops
 selling at once are two separate shops; for one shared set of live data, point
@@ -163,12 +112,7 @@ replaces it with the exported data — real sales included.
 # Troubleshooting
 
 **"Could not reach the database"**
-MySQL is not started in the XAMPP Control Panel, or `App.config` is missing.
-
-**"Access denied for user 'pos_app'"**
-Step 4 was skipped, or the password in `App.config` does not match the one in
-the `CREATE USER` statement. Re-run step 4 with the password that is actually in
-`App.config`.
+MySQL is not started in the XAMPP Control Panel.
 
 **"Unknown database 'paint_store_pos'"**
 The import in step 3 did not run.
@@ -189,6 +133,4 @@ header of `migrations.sql` explains the cause and how to avoid it.
 |---|---|
 | `paint_store_pos_full.sql` | Complete database — schema and data. First install only. |
 | `migrations.sql` | Schema changes only. Safe to re-run; use for updates. |
-| `setup-database-user.sql` | The step 4 `CREATE USER`, as a file you can paste. |
-| `App.config.example` | Template for the connection file you create in step 5. |
 | `Tests\run-tests.cmd` | Runs the 47 sale-math tests (VAT, discounts, change). |
