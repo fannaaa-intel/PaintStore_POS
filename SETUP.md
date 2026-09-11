@@ -1,125 +1,194 @@
-# Setting up on another computer
+# PaintStore POS — Setup Guide
 
-Everything the app needs is in this repo except one file: `App.config`, which
-holds the database password and is deliberately **not** committed (a password in
-git stays in the history forever, even after it is edited out).
+Three things you will ever need to do:
 
-So a fresh clone needs three things done by hand: install XAMPP, import the
-database, and create `App.config`.
-
----
-
-## 1. Install XAMPP
-
-Download XAMPP and start **MySQL** from the XAMPP Control Panel.
-
-The app expects MariaDB on `localhost:3306`, which is XAMPP's default.
-
-> **Use XAMPP's MySQL, not MySQL Server 8.0.** If both are installed they fight
-> over port 3306, and running this project's SQL through the MySQL 8.0 client
-> against a MariaDB server corrupts tables. See the warning at the top of
-> `migrations.sql`.
+| | |
+|---|---|
+| [**A. First time on a new laptop**](#a-first-time-on-a-new-laptop) | Once per machine |
+| [**B. Working on your own laptop**](#b-working-on-your-own-laptop) | Every time you finish a change |
+| [**C. Updating someone else's laptop**](#c-updating-someone-elses-laptop) | When they want your changes |
 
 ---
 
-## 2. Import the database
+# A. First time on a new laptop
 
-`paint_store_pos_full.sql` in this repo is a complete export — schema, data and
-all migrations already applied.
+Six steps, once.
 
-**In phpMyAdmin** (http://localhost/phpmyadmin):
+## 1. Install XAMPP and start MySQL
 
-1. Click **Import** at the top
-2. Choose `paint_store_pos_full.sql`
-3. Press **Go**
+Install XAMPP, open the **XAMPP Control Panel**, press **Start** next to MySQL.
 
-The file creates the `paint_store_pos` database itself, so there is no need to
-make it first.
+> **Use XAMPP's MySQL.** If MySQL Server 8.0 is also on the machine, do not use
+> it for this project. Running this project's SQL through the MySQL 8.0 client
+> against XAMPP's MariaDB corrupts tables and needs a manual rebuild to recover.
 
-**Or on the command line:**
+## 2. Get the code
 
 ```
-C:\xampp\mysql\bin\mysql.exe -u root < paint_store_pos_full.sql
+git clone https://github.com/fannaaa-intel/PaintStore_POS.git
 ```
 
-> The file starts with `DROP DATABASE IF EXISTS paint_store_pos`. On a machine
-> that already has data in that database, this **replaces** it.
+## 3. Import the database
+
+Open <http://localhost/phpmyadmin> → **Import** tab → **Choose File** →
+`paint_store_pos_full.sql` → **Go**.
+
+The file creates the database itself, so there is nothing to create first.
+
+## 4. Create the app's MySQL login
+
+phpMyAdmin → **SQL** tab → paste this → **Go**:
+
+```sql
+CREATE USER 'pos_app'@'localhost' IDENTIFIED BY 'mypassword123';
+GRANT SELECT, INSERT, UPDATE, DELETE ON paint_store_pos.* TO 'pos_app'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+Change `mypassword123` to anything you like — just remember it for step 5.
+
+<details>
+<summary>Why this step exists</summary>
+
+The app does not connect to MySQL as `root`. It uses a limited account,
+`pos_app`, that can read and write rows but cannot `DROP` or `ALTER` anything —
+so a bug or an injected statement cannot destroy the schema.
+
+That account lives in **MySQL's own user list**, not inside the
+`paint_store_pos` database. Importing the database therefore does not bring it
+along, and it has to be created once per machine.
+
+</details>
+
+## 5. Tell the app that password
+
+In the project folder:
+
+- Rename `App.config.example` → **`App.config`**
+- Rename `PaintStore_POS.exe.config.example` → **`PaintStore_POS.exe.config`**
+
+Open **both** in Notepad and find the line containing `pwd=`. Make it read:
+
+```
+uid=pos_app;pwd=mypassword123;
+```
+
+> ⚠️ The password must be **identical** in step 4 and step 5. That is the whole
+> trick — step 4 creates the login, step 5 tells the app what it is.
+
+<details>
+<summary>Why these files are not in the repo</summary>
+
+They hold a real password. Anything committed to git stays in the history even
+after it is edited out, so these two are gitignored and the `.example` copies
+are committed in their place.
+
+</details>
+
+## 6. Run it
+
+Open `PaintStore_POS.sln` in Visual Studio 2022 → press **F5**.
+
+Sign in with the same app accounts as the original machine — those came across
+in the import.
 
 ---
 
-## 3. Create the database account
+# B. Working on your own laptop
 
-The app does not connect as root. It uses a limited account that can read and
-write rows but cannot drop or alter tables, so a bug or an injected statement
-cannot destroy the schema.
+After finishing a change:
 
-Open `setup-database-user.sql` from this repo, replace `CHANGE_THIS_PASSWORD`
-(it appears twice) with a password of your choosing, then run it in
-phpMyAdmin's **SQL** tab.
-
-To keep the same password as the original machine, open that machine's
-`App.config` and copy the value after `pwd=`.
+```
+git add -A
+git commit -m "what you changed"
+git push origin main
+```
 
 ---
 
-## 4. Create App.config
+# C. Updating someone else's laptop
 
-Copy `App.config.example` to `App.config`, then put the same password in it:
-
-```xml
-<add name="PosDb"
-     connectionString="server=localhost;port=3306;database=paint_store_pos;uid=pos_app;pwd=put-a-strong-password-here;"
-     providerName="MySql.Data.MySqlClient" />
+```
+git pull
 ```
 
-Do the same for `PaintStore_POS.exe.config` (copy from
-`PaintStore_POS.exe.config.example`). Both files are gitignored, so they stay on
-that machine only.
+Then rebuild in Visual Studio (**F5**).
+
+## If your change touched the database
+
+`git pull` brings **code**. It does not change the shape of their database. So
+if you added a column or a table, they must also run:
+
+> phpMyAdmin → **SQL** tab → paste the contents of **`migrations.sql`** → **Go**
+
+Safe to run any number of times: every statement is written `IF NOT EXISTS`, so
+anything already applied is skipped and existing data is never touched.
+
+| You changed | They run |
+|---|---|
+| Only VB code — screens, logic, colours | `git pull` |
+| Anything in `migrations.sql` | `git pull` **+ `migrations.sql`** |
+
+When in doubt, have them run `migrations.sql`. It is harmless.
 
 ---
 
-## 5. Build and run
+# What git does and does not carry
 
-Open `PaintStore_POS.sln` in Visual Studio 2022 and press **F5**.
+| | Travels with git? |
+|---|---|
+| Your code — new screens, fixes, buttons | ✅ yes |
+| Their data — sales, products, stock counts | ❌ no, stays on their machine |
+| Database shape — new columns and tables | ❌ no, that is what `migrations.sql` is for |
+| `App.config` | ❌ no, deliberately — it holds a password |
 
-Sign in with the same accounts as on the original machine — the users came
-across in the import.
-
----
-
-## Keeping two machines in sync
-
-**Code** syncs through git as normal:
-
-```
-git pull            # get the other machine's changes
-git push            # send yours
-```
-
-**The database does not.** Git carries no data. To move a database between
-machines, export it on the source and import it on the target:
-
-```
-C:\xampp\mysql\bin\mysqldump.exe -u root --databases paint_store_pos > paint_store_pos_full.sql
-```
-
-Two people selling on two machines will drift apart immediately — each has its
-own sales, stock counts and shifts. For genuine shared use, point both machines
-at one MySQL server by putting that server's address in `App.config` instead of
-`localhost`, and grant the `pos_app` account from the other machine's host.
+Their sales staying on their machine is the behaviour you want. Two laptops
+selling at once are two separate shops; for one shared set of live data, point
+both `App.config` files at one MySQL server instead of `localhost`.
 
 ---
 
-## If something goes wrong
+# 🚨 Never import paint_store_pos_full.sql onto a working machine
 
-**"Could not reach the database"** — MySQL is not running in the XAMPP Control
-Panel, or `App.config` is missing or has the wrong password.
+That file begins with `DROP DATABASE`. Importing it **erases everything** and
+replaces it with the exported data — real sales included.
 
-**"Access denied for user 'pos_app'"** — the account was not created (step 3),
-or its password does not match `App.config`.
+| File | When to use it |
+|---|---|
+| `paint_store_pos_full.sql` | **First install only**, on an empty machine |
+| `migrations.sql` | Every update that changes the database shape |
 
-**"Unknown database 'paint_store_pos'"** — the import in step 2 did not run.
+---
 
-**"#1932 doesn't exist in engine"** — a table's metadata was written by the wrong
-client. Recovering needs a DISCARD/IMPORT TABLESPACE rebuild; the header of
-`migrations.sql` explains the cause.
+# Troubleshooting
+
+**"Could not reach the database"**
+MySQL is not started in the XAMPP Control Panel, or `App.config` is missing.
+
+**"Access denied for user 'pos_app'"**
+Step 4 was skipped, or the password in `App.config` does not match the one in
+the `CREATE USER` statement. Re-run step 4 with the password that is actually in
+`App.config`.
+
+**"Unknown database 'paint_store_pos'"**
+The import in step 3 did not run.
+
+**"Unknown column ..." right after an update**
+The code was pulled but the schema was not — run `migrations.sql`.
+
+**"#1932 — Table doesn't exist in engine"**
+A table's metadata was written by the wrong MySQL client. The data file is
+usually intact; recovery needs a `DISCARD` / `IMPORT TABLESPACE` rebuild. The
+header of `migrations.sql` explains the cause and how to avoid it.
+
+---
+
+# Files in this repo
+
+| File | What it is |
+|---|---|
+| `paint_store_pos_full.sql` | Complete database — schema and data. First install only. |
+| `migrations.sql` | Schema changes only. Safe to re-run; use for updates. |
+| `setup-database-user.sql` | The step 4 `CREATE USER`, as a file you can paste. |
+| `App.config.example` | Template for the connection file you create in step 5. |
+| `Tests\run-tests.cmd` | Runs the 47 sale-math tests (VAT, discounts, change). |
