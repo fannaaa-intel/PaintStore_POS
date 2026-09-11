@@ -1,5 +1,23 @@
 Imports MySql.Data.MySqlClient
 
+' *****************************************************************************
+'  NOT IN USE YET — this file is not listed in PaintStore_POS.vbproj, so it is
+'  not compiled, and nothing calls it.
+'
+'  It is the start of real role permissions (see the header below). Two things
+'  are still missing before it does anything:
+'
+'    1. Add it to the project:
+'         <Compile Include="Modules\Permissions.vb" />
+'
+'    2. Call it at the points that need guarding, e.g. in VoidSale:
+'         If Not Permissions.Require(Permissions.VoidSale, "void a sale") Then Return
+'
+'  Until then roles work as they always have: CurrentRole only picks which
+'  dashboard opens at login and is never checked again. Kept in the repo so the
+'  design is not lost, not because it is live.
+' *****************************************************************************
+
 ' =============================================================================
 '  Permissions  —  what the signed-in user is allowed to do.
 '
