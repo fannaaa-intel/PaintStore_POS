@@ -26,19 +26,19 @@ Imports MySql.Data.MySqlClient
 Public Class AdminUserPanelBuilder
 
     ' ── PALETTE  (matches the Accountant/Inventory panels exactly) ────────────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
+    Private Shared ReadOnly MintBg As Color = Theme.PageBg
     Private Shared ReadOnly CardBg As Color = Color.White
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
-    Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
-    Private Shared ReadOnly RowHover As Color = Color.FromArgb(224, 242, 235)
-    Private Shared ReadOnly AccentRed As Color = Color.FromArgb(210, 60, 60)
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly FaintText As Color = Theme.FaintText
+    Private Shared ReadOnly RowDivider As Color = Theme.RowDivider
+    Private Shared ReadOnly RowHover As Color = Theme.RowHover
+    Private Shared ReadOnly AccentRed As Color = Theme.Danger
     Private Shared ReadOnly AccentOrange As Color = Color.FromArgb(230, 126, 34)
     Private Shared ReadOnly AccentBlue As Color = Color.FromArgb(70, 120, 200)
-    Private Shared ReadOnly FieldBg As Color = Color.FromArgb(244, 248, 246)
-    Private Shared ReadOnly FieldBorder As Color = Color.FromArgb(210, 225, 220)
+    Private Shared ReadOnly FieldBg As Color = Theme.PageBg
+    Private Shared ReadOnly FieldBorder As Color = Theme.BorderMuted
     Private Shared ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
     Private Shared ReadOnly DividerClr As Color = Color.FromArgb(230, 238, 235)
     Private Shared ReadOnly TitleClr As Color = Color.FromArgb(25, 40, 35)

@@ -3,7 +3,7 @@ Imports System.Drawing.Drawing2D
 
 Public Class INVENTORY_STAFF
 
-    Private MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    Private MintPrimary As Color = Theme.Primary
     Private MintDarkTop As Color = Color.FromArgb(0, 120, 110)
     Private MintMid As Color = Color.FromArgb(0, 170, 150)
     Private MintLight As Color = Color.FromArgb(220, 255, 245)

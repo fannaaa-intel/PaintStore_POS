@@ -9,11 +9,11 @@ Public Module AppModal
     Private ReadOnly BodyClr As Color = Color.FromArgb(80, 100, 94)
     Private ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
     Private ReadOnly DividerClr As Color = Color.FromArgb(230, 238, 235)
-    Private ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private ReadOnly FieldBg As Color = Color.FromArgb(244, 248, 246)
-    Private ReadOnly FieldBorder As Color = Color.FromArgb(210, 225, 220)
-    Private ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private ReadOnly LightBtn As Color = Color.FromArgb(243, 246, 244)
+    Private ReadOnly MintPrimary As Color = Theme.Primary
+    Private ReadOnly FieldBg As Color = Theme.PageBg
+    Private ReadOnly FieldBorder As Color = Theme.BorderMuted
+    Private ReadOnly MintDark As Color = Theme.Dark
+    Private ReadOnly LightBtn As Color = Theme.FieldBg
     Private ReadOnly LightBtnBorder As Color = Color.FromArgb(200, 215, 210)
     Private ReadOnly LightBtnText As Color = Color.FromArgb(70, 86, 80)
 

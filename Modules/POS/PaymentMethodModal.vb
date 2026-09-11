@@ -18,11 +18,11 @@ Public Module PaymentMethodModal
     Private ReadOnly TitleClr As Color = Color.FromArgb(25, 40, 35)
     Private ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
     Private ReadOnly DividerClr As Color = Color.FromArgb(230, 238, 235)
-    Private ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private ReadOnly FieldBg As Color = Color.FromArgb(244, 248, 246)
-    Private ReadOnly FieldBorder As Color = Color.FromArgb(210, 225, 220)
+    Private ReadOnly MintPrimary As Color = Theme.Primary
+    Private ReadOnly MintDark As Color = Theme.Dark
+    Private ReadOnly SubText As Color = Theme.SubText
+    Private ReadOnly FieldBg As Color = Theme.PageBg
+    Private ReadOnly FieldBorder As Color = Theme.BorderMuted
 
     Private Const RADIUS As Integer = 10
     Private Const CARD_W As Integer = 440

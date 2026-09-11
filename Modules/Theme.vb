@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 
 ' =============================================================================
 '  Theme  —  the single source of truth for colour and type.
@@ -62,7 +62,7 @@ Public Module Theme
     Public ReadOnly DangerBg As Color = Color.FromArgb(251, 234, 234)   ' behind a danger message
     Public ReadOnly Warning As Color = Color.FromArgb(232, 120, 30)     ' AccentOrange
     Public ReadOnly WarningBg As Color = Color.FromArgb(252, 240, 228)
-    Public ReadOnly Info As Color = Color.FromArgb(45, 80, 150)         ' AccentBlue
+    Public ReadOnly Accent As Color = Color.FromArgb(45, 80, 150)         ' AccentBlue
     Public ReadOnly Success As Color = Color.FromArgb(0, 160, 106)
     Public ReadOnly SuccessBg As Color = Color.FromArgb(200, 240, 225)
 

@@ -50,18 +50,18 @@ Imports MySql.Data.MySqlClient
 Public Class InventoryPutAwayPanelBuilder
 
     ' ── PALETTE  (identical to the other inventory panels) ────────────────────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private Shared ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
-    Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
+    Private Shared ReadOnly MintDeep As Color = Theme.Deep
+    Private Shared ReadOnly MintBg As Color = Theme.PageBg
     Private Shared ReadOnly CardBg As Color = Color.White
-    Private Shared ReadOnly CardBorder As Color = Color.FromArgb(228, 232, 230)
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
-    Private Shared ReadOnly TileBg As Color = Color.FromArgb(236, 248, 244)
-    Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
-    Private Shared ReadOnly PositiveClr As Color = Color.FromArgb(0, 160, 106)
-    Private Shared ReadOnly WarningClr As Color = Color.FromArgb(232, 120, 30)
+    Private Shared ReadOnly CardBorder As Color = Theme.BorderSoft
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly FaintText As Color = Theme.FaintText
+    Private Shared ReadOnly TileBg As Color = Theme.TileBg
+    Private Shared ReadOnly RowDivider As Color = Theme.RowDivider
+    Private Shared ReadOnly PositiveClr As Color = Theme.Success
+    Private Shared ReadOnly WarningClr As Color = Theme.Warning
     ' Border for the quantity field — dark enough to read as an editable input.
     Private Shared ReadOnly InputBorder As Color = Color.FromArgb(196, 214, 206)
     Private Const PaintCategory As String = "Paint"

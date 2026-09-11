@@ -11,8 +11,8 @@ Public Module PaymentPromptModal
 
     Private ReadOnly CardBg As Color = Color.White
     Private ReadOnly SubText As Color = Color.FromArgb(120, 140, 134)
-    Private ReadOnly FieldBg As Color = Color.FromArgb(244, 248, 246)
-    Private ReadOnly FieldBorder As Color = Color.FromArgb(210, 225, 220)
+    Private ReadOnly FieldBg As Color = Theme.PageBg
+    Private ReadOnly FieldBorder As Color = Theme.BorderMuted
     Private ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
 
     Private Const RADIUS As Integer = 10

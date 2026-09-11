@@ -1,4 +1,4 @@
-Imports System.Drawing.Drawing2D
+﻿Imports System.Drawing.Drawing2D
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
@@ -31,14 +31,14 @@ Public Class SignUp
     End Sub
 
     ' ===== COLORS =====
-    Private MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private MintDark As Color = Theme.Dark
+    Private MintPrimary As Color = Theme.Primary
+    Private MintBg As Color = Theme.PageBg
     Private CardBg As Color = Color.White
-    Private CardBorder As Color = Color.FromArgb(228, 232, 230)
-    Private SubText As Color = Color.FromArgb(90, 114, 107)
-    Private FaintText As Color = Color.FromArgb(150, 165, 160)
-    Private TileBg As Color = Color.FromArgb(236, 248, 244)
+    Private CardBorder As Color = Theme.BorderSoft
+    Private SubText As Color = Theme.SubText
+    Private FaintText As Color = Theme.FaintText
+    Private TileBg As Color = Theme.TileBg
     Private ErrClr As Color = Color.FromArgb(198, 40, 40)
     Private OkClr As Color = Color.FromArgb(0, 140, 100)
 

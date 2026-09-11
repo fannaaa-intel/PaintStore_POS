@@ -88,9 +88,9 @@ Public Class ReportPrinter
 
     ' ── BRAND PALETTE — used only for the Preview window chrome (title bar,
     '    Print button), so it matches the Paint Store app's mint theme. ─────
-    Private Shared ReadOnly BrandDark As Color = Color.FromArgb(10, 79, 66)      ' title bar / button (rest state)
-    Private Shared ReadOnly BrandDeep As Color = Color.FromArgb(0, 130, 109)     ' button hover
-    Private Shared ReadOnly BrandPrimary As Color = Color.FromArgb(0, 168, 142)  ' button pressed
+    Private Shared ReadOnly BrandDark As Color = Theme.Dark  ' title bar / button (rest state)
+    Private Shared ReadOnly BrandDeep As Color = Theme.Deep  ' button hover
+    Private Shared ReadOnly BrandPrimary As Color = Theme.Primary  ' button pressed
 
     ' ── ENTRY POINT ──────────────────────────────────────────────────────
     ' NOTE on the "Print" button: it reuses this same PrintDocument/OnPrintPage

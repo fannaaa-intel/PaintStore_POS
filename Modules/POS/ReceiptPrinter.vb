@@ -45,18 +45,18 @@ Public Module ReceiptPrinter
     ' =========================================================================
     '  COLOUR PALETTE
     ' =========================================================================
-    Private ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)   ' #0A4F42
-    Private ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)   ' #00A88E
-    Private ReadOnly MintStripe As Color = Color.FromArgb(0, 168, 142)   ' dash stripe
+    Private ReadOnly MintDark As Color = Theme.Dark  ' #0A4F42
+    Private ReadOnly MintPrimary As Color = Theme.Primary  ' #00A88E
+    Private ReadOnly MintStripe As Color = Theme.Primary  ' dash stripe
     Private ReadOnly BgColor As Color = Color.FromArgb(237, 241, 240)   ' scroll area
     Private ReadOnly CardBg As Color = Color.White
     Private ReadOnly BorderClr As Color = Color.FromArgb(208, 220, 216)
-    Private ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
+    Private ReadOnly SubText As Color = Theme.SubText
     Private ReadOnly ReceiptInk As Color = Color.FromArgb(28, 32, 30)
     Private ReadOnly ReceiptGray As Color = Color.FromArgb(115, 128, 123)
     Private ReadOnly ReceiptDiv As Color = Color.FromArgb(200, 218, 212)
     Private ReadOnly MetaBg As Color = Color.FromArgb(247, 250, 249)   ' meta row bg
-    Private ReadOnly SectionInk As Color = Color.FromArgb(10, 79, 66)   ' section head
+    Private ReadOnly SectionInk As Color = Theme.Dark  ' section head
 
     ' =========================================================================
     '  CONSTANTS

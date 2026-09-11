@@ -5,18 +5,18 @@ Imports MySql.Data.MySqlClient
 
 Public Class HomePanelBuilder
 
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
+    Private Shared ReadOnly MintBg As Color = Theme.PageBg
     Private Shared ReadOnly CardBg As Color = Color.White
-    Private Shared ReadOnly CardBorder As Color = Color.FromArgb(228, 232, 230)
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly TileBg As Color = Color.FromArgb(236, 248, 244)
+    Private Shared ReadOnly CardBorder As Color = Theme.BorderSoft
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly TileBg As Color = Theme.TileBg
     Private Shared ReadOnly MintGreen As Color = Color.FromArgb(0, 195, 115)
     Private Shared ReadOnly AccentYellow As Color = Color.FromArgb(220, 170, 0)
-    Private Shared ReadOnly AccentOrange As Color = Color.FromArgb(232, 120, 30)
+    Private Shared ReadOnly AccentOrange As Color = Theme.Warning
     Private Shared ReadOnly AccentBlue As Color = Color.FromArgb(80, 160, 255)
-    Private Shared ReadOnly AccentRed As Color = Color.FromArgb(210, 60, 60)
+    Private Shared ReadOnly AccentRed As Color = Theme.Danger
 
     ' ── LIVE CONTROLS ──────────────────────────────────────────────────────────
     Private Shared clockTimer As Timer

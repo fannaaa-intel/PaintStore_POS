@@ -6,12 +6,12 @@ Public Class LogIn
     Private _signUpForm As SignUp
 
     ' ===== COLORS =====
-    Private MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private MintDark As Color = Theme.Dark
+    Private MintPrimary As Color = Theme.Primary
+    Private MintBg As Color = Theme.PageBg
     Private CardBg As Color = Color.White
     Private CardBorder As Color = Color.FromArgb(205, 212, 208)
-    Private SubText As Color = Color.FromArgb(90, 114, 107)
+    Private SubText As Color = Theme.SubText
     Private TextOnDark As Color = Color.White
     Private SubTextOnDark As Color = Color.FromArgb(210, 235, 227)
     Private CheckOnDark As Color = Color.FromArgb(220, 240, 232)

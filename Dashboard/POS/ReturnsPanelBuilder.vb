@@ -9,15 +9,15 @@ Imports MySql.Data.MySqlClient
 ' =============================================================================
 Public Class ReturnsPanelBuilder
 
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
+    Private Shared ReadOnly MintBg As Color = Theme.PageBg
     Private Shared ReadOnly CardBg As Color = Color.White
     Private Shared ReadOnly CardBorder As Color = Color.FromArgb(220, 232, 228)
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly TileBg As Color = Color.FromArgb(236, 248, 244)
-    Private Shared ReadOnly SoftBorder As Color = Color.FromArgb(210, 225, 220)
-    Private Shared ReadOnly TextDark As Color = Color.FromArgb(45, 45, 45)
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly TileBg As Color = Theme.TileBg
+    Private Shared ReadOnly SoftBorder As Color = Theme.BorderMuted
+    Private Shared ReadOnly TextDark As Color = Theme.TextDark
     Private Shared ReadOnly HeaderBg As Color = Color.FromArgb(0, 100, 84)
     Private Shared ReadOnly DangerBack As Color = Color.FromArgb(252, 235, 235)
     Private Shared ReadOnly DangerFore As Color = Color.FromArgb(163, 45, 45)

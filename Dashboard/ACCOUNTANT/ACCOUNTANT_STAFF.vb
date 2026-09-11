@@ -4,7 +4,7 @@ Imports System.Drawing.Drawing2D
 
 Public Class ACCOUNTANT_STAFF
 
-    Private MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    Private MintPrimary As Color = Theme.Primary
     Private MintDarkTop As Color = Color.FromArgb(0, 80, 72)
     Private MintMid As Color = Color.FromArgb(0, 170, 150)
     Private MintLight As Color = Color.FromArgb(220, 255, 245)

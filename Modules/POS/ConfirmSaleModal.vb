@@ -6,7 +6,7 @@ Public Module ConfirmSaleModal
 
     Private ReadOnly CardBg As Color = Color.White
     Private ReadOnly SubText As Color = Color.FromArgb(120, 140, 134)
-    Private ReadOnly TextDark As Color = Color.FromArgb(35, 50, 46)
+    Private ReadOnly TextDark As Color = Theme.DeepInk
     Private ReadOnly RowDivider As Color = Color.FromArgb(232, 238, 236)
     Private ReadOnly BorderClr As Color = Color.FromArgb(160, 195, 185)
 

@@ -66,37 +66,3 @@ C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantSal
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantReportsPanelBuilder.resources
 C:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.AccountantLedgerPanelBuilder.resources
 c:\Users\DELL\source\repos\PaintStore_POS\obj\Debug\PaintStore_POS.ADMIN_STAFF.resources
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\PaintStore_POS.exe.config
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\PaintStore_POS.exe
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\PaintStore_POS.pdb
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\PaintStore_POS.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\BouncyCastle.Cryptography.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\Google.Protobuf.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Compression.LZ4.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Compression.LZ4.Streams.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Hash.xxHash.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\Microsoft.Bcl.AsyncInterfaces.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\MySql.Data.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Buffers.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Configuration.ConfigurationManager.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.IO.Pipelines.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Memory.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Numerics.Vectors.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Runtime.CompilerServices.Unsafe.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Threading.Tasks.Extensions.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\ZstdSharp.dll
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\BouncyCastle.Cryptography.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\Google.Protobuf.pdb
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\Google.Protobuf.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Compression.LZ4.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Compression.LZ4.Streams.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\K4os.Hash.xxHash.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\Microsoft.Bcl.AsyncInterfaces.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\MySql.Data.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Buffers.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Configuration.ConfigurationManager.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.IO.Pipelines.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Memory.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Numerics.Vectors.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Runtime.CompilerServices.Unsafe.xml
-C:\Users\DELL\source\repos\PaintStore_POS\objcheckbuild 2\System.Threading.Tasks.Extensions.xml

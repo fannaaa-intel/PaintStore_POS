@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 
@@ -24,11 +24,11 @@ Public NotInheritable Class FilterFields
     End Sub
 
     ' ── Palette (matches the Admin oversight screens) ────────────────────────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
     Private Shared ReadOnly CardBg As Color = Color.White
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly RowHover As Color = Color.FromArgb(224, 242, 235)
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly RowHover As Color = Theme.RowHover
     Private Shared ReadOnly FieldBorder As Color = Color.FromArgb(214, 226, 222)
 
     Public Const FIELD_H As Integer = 34

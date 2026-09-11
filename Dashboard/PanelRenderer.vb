@@ -3,7 +3,7 @@ Imports System.Drawing.Drawing2D
 
 Public Class PanelRenderer
 
-    Public Shared MintPrimary As Color = Color.FromArgb(0, 200, 170)
+    Public Shared MintPrimary As Color = Theme.Primary
     Public Shared MintLight As Color = Color.FromArgb(220, 255, 245)
 
     ' How far the shadow reaches past the card on each side. A caller that

@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports MySql.Data.MySqlClient
@@ -34,14 +34,14 @@ Imports MySql.Data.MySqlClient
 Public Class AdminRolesPanelBuilder
 
     ' ── PALETTE  (matches AdminUserPanelBuilder / the Accountant panels) ──────
-    Private Shared ReadOnly MintDark As Color = Color.FromArgb(10, 79, 66)
-    Private Shared ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private Shared ReadOnly MintBg As Color = Color.FromArgb(244, 248, 246)
+    Private Shared ReadOnly MintDark As Color = Theme.Dark
+    Private Shared ReadOnly MintPrimary As Color = Theme.Primary
+    Private Shared ReadOnly MintBg As Color = Theme.PageBg
     Private Shared ReadOnly CardBg As Color = Color.White
-    Private Shared ReadOnly SubText As Color = Color.FromArgb(90, 114, 107)
-    Private Shared ReadOnly FaintText As Color = Color.FromArgb(150, 165, 160)
-    Private Shared ReadOnly RowDivider As Color = Color.FromArgb(238, 242, 240)
-    Private Shared ReadOnly RowHover As Color = Color.FromArgb(224, 242, 235)
+    Private Shared ReadOnly SubText As Color = Theme.SubText
+    Private Shared ReadOnly FaintText As Color = Theme.FaintText
+    Private Shared ReadOnly RowDivider As Color = Theme.RowDivider
+    Private Shared ReadOnly RowHover As Color = Theme.RowHover
 
     ' Per-role badge tints, keyed by role_id (1 Admin … 5 Procurement).
     Private Shared ReadOnly TintMint As (fore As Color, back As Color) =

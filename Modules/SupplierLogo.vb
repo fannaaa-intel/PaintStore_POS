@@ -33,8 +33,8 @@ Imports MySql.Data.MySqlClient
 Public Module SupplierLogo
 
     ' ── PALETTE  (the mint the avatar gradient falls back to) ────────────────
-    Private ReadOnly MintPrimary As Color = Color.FromArgb(0, 168, 142)
-    Private ReadOnly MintDeep As Color = Color.FromArgb(0, 130, 109)
+    Private ReadOnly MintPrimary As Color = Theme.Primary
+    Private ReadOnly MintDeep As Color = Theme.Deep
 
     ' Scaled avatars keyed by "full path|size". Rebuilding a view re-reads every
     ' logo otherwise, and each decode is a fresh GDI+ handle.

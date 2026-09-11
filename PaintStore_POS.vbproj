@@ -287,6 +287,7 @@
     <Compile Include="Modules\ReportPrinter.vb" />
     <Compile Include="Modules\Session.vb" />
     <Compile Include="Modules\StoreSettings.vb" />
+    <Compile Include="Modules\Theme.vb" />
     <Compile Include="Resources\Dashboard.Designer.vb">
       <DependentUpon>Dashboard.vb</DependentUpon>
     </Compile>
