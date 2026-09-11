@@ -53,13 +53,12 @@ The app does not connect as root. It uses a limited account that can read and
 write rows but cannot drop or alter tables, so a bug or an injected statement
 cannot destroy the schema.
 
-Run this once, in phpMyAdmin's **SQL** tab (pick your own password):
+Open `setup-database-user.sql` from this repo, replace `CHANGE_THIS_PASSWORD`
+(it appears twice) with a password of your choosing, then run it in
+phpMyAdmin's **SQL** tab.
 
-```sql
-CREATE USER 'pos_app'@'localhost' IDENTIFIED BY 'put-a-strong-password-here';
-GRANT SELECT, INSERT, UPDATE, DELETE ON paint_store_pos.* TO 'pos_app'@'localhost';
-FLUSH PRIVILEGES;
-```
+To keep the same password as the original machine, open that machine's
+`App.config` and copy the value after `pwd=`.
 
 ---
 
