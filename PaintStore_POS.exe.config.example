@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+<!--
+  SETUP
+  Copy this file to App.config and fill in your database credentials.
+
+  App.config is deliberately NOT tracked by git: it holds a real password, and
+  anything committed stays in the history even after a later edit.
+
+  Create the account the app connects as (run once, as root):
+
+      CREATE USER 'pos_app'@'localhost' IDENTIFIED BY 'choose-a-strong-password';
+      GRANT SELECT, INSERT, UPDATE, DELETE ON paint_store_pos.* TO 'pos_app'@'localhost';
+      FLUSH PRIVILEGES;
+
+  Only those four privileges are granted on purpose. The app never needs to
+  DROP or ALTER anything at runtime, so a bug or an injected statement cannot
+  destroy a table. Schema changes are applied by hand from migrations.sql.
+
+  Do NOT point this at the MySQL root account.
+-->
+
+	<startup>
+		<supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.7.2" />
+	</startup>
+	<connectionStrings>
+		<add name="PosDb"
+             connectionString="server=localhost;port=3306;database=paint_store_pos;uid=YOUR_DB_USER;pwd=YOUR_DB_PASSWORD;"
+             providerName="MySql.Data.MySqlClient" />
+	</connectionStrings>
+	<runtime>
+		<assemblyBinding xmlns="urn:schemas-microsoft-com:asm.v1">
+			<dependentAssembly>
+				<assemblyIdentity name="System.Runtime.CompilerServices.Unsafe" publicKeyToken="b03f5f7f11d50a3a" culture="neutral" />
+				<bindingRedirect oldVersion="0.0.0.0-6.0.0.0" newVersion="6.0.0.0" />
+			</dependentAssembly>
+			<dependentAssembly>
+				<assemblyIdentity name="System.Memory" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" />
+				<bindingRedirect oldVersion="0.0.0.0-4.0.1.2" newVersion="4.0.1.2" />
+			</dependentAssembly>
+		</assemblyBinding>
+	</runtime>
+</configuration>
