@@ -115,6 +115,8 @@ Public Class TransactionPanelBuilder
     Private Shared _lblSubtotal As Label
     ' Cart-dependent actions, disabled while the cart is empty.
     Private Shared _btnDiscount As Button
+    ' Held so the F3 shortcut can put the caret in the product search.
+    Private Shared _txtSearch As TextBox
     Private Shared _btnHold As Button
     Private Shared ReadOnly _payButtons As New List(Of Button)
     Private Shared _lblDiscount As Label
@@ -191,6 +193,7 @@ Public Class TransactionPanelBuilder
         _activePayNormalClr = Color.Transparent
         _lblItems = Nothing : _lblSubtotal = Nothing
         _btnDiscount = Nothing : _btnHold = Nothing
+        _txtSearch = Nothing
         _payButtons.Clear()
         _lblDiscount = Nothing : _lblVat = Nothing : _lblGrandTotal = Nothing
         _catalogHost = Nothing : _cartHost = Nothing : _lblCatalogCount = Nothing
@@ -612,14 +615,15 @@ Public Class TransactionPanelBuilder
                 End Using
             End Sub
         Dim showingPlaceholder As Boolean = True
-        Dim txtSearch As New TextBox With {
+        _txtSearch = New TextBox With {
             .Font = New Font("Segoe UI", 10.5F), .BorderStyle = BorderStyle.None,
-            .BackColor = TileBg, .ForeColor = SubText, .Text = "Search products by name or SKU...",
+            .BackColor = TileBg, .ForeColor = SubText, .Text = "Search products by name or SKU...  (F3)",
             .Location = New Point(38, 9), .Width = 300}
         ' The placeholder is drawn by writing it into the TextBox itself, so every
         ' handler below must keep _searchText in sync with the REAL query only -
         ' otherwise the placeholder string leaks into the filter and hides every
         ' product (and a stale term survives after the box is cleared).
+        Dim txtSearch As TextBox = _txtSearch
         AddHandler txtSearch.Enter,
             Sub()
                 focused = True
@@ -639,7 +643,7 @@ Public Class TransactionPanelBuilder
                     If _searchDebounce IsNot Nothing Then _searchDebounce.Stop()
                     _searchText = ""
                     showingPlaceholder = True
-                    txtSearch.Text = "Search products by name or SKU..." : txtSearch.ForeColor = SubText
+                    txtSearch.Text = "Search products by name or SKU...  (F3)" : txtSearch.ForeColor = SubText
                     RenderCatalog()
                 End If
                 searchBox.Invalidate()
@@ -1531,10 +1535,12 @@ Public Class TransactionPanelBuilder
         layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 32.0F))
         layout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
 
-        Dim btnVoid = MakeActionBtn("VOID", DangerBack, DangerFore, 0)
-        Dim btnDiscount = MakeActionBtn("DISCOUNT", Color.FromArgb(232, 238, 237), SubText, 6)
-        Dim btnHold = MakeActionBtn("HOLD", Color.FromArgb(232, 238, 237), SubText, 6)
-        Dim btnRetrieve = MakeActionBtn("RETRIEVE", Color.FromArgb(232, 238, 237), SubText, 6)
+        ' The key hint is part of the caption so the shortcuts are discoverable
+        ' without a manual -- an unlabelled shortcut is one nobody learns.
+        Dim btnVoid = MakeActionBtn("VOID  (F6)", DangerBack, DangerFore, 0)
+        Dim btnDiscount = MakeActionBtn("DISCOUNT  (F2)", Color.FromArgb(232, 238, 237), SubText, 6)
+        Dim btnHold = MakeActionBtn("HOLD  (F4)", Color.FromArgb(232, 238, 237), SubText, 6)
+        Dim btnRetrieve = MakeActionBtn("RETRIEVE  (F5)", Color.FromArgb(232, 238, 237), SubText, 6)
         Dim btnPrint = MakePrimaryBtn("REPRINT", 6)
         _btnDiscount = btnDiscount
         _btnHold = btnHold
@@ -1849,6 +1855,78 @@ Public Class TransactionPanelBuilder
         End Try
     End Sub
 
+    ' =========================================================================
+    '  KEYBOARD SHORTCUTS
+    '
+    '  A till is a keyboard-first tool: a cashier with a queue should not have
+    '  to find a button with the mouse to take payment. Called from the POS
+    '  form ProcessCmdKey, which sees the key before any focused control does.
+    '
+    '  Returns True when the key was consumed, so the form can stop it there.
+    ' =========================================================================
+    Friend Shared Function HandleShortcut(keyData As Keys) As Boolean
+        ' Only act while the transaction screen is actually the one on show --
+        ' otherwise F4 would void a sale from the Returns or Cash tab.
+        If _mainContainer Is Nothing OrElse _mainContainer.IsDisposed Then Return False
+        If _cartHost Is Nothing OrElse _cartHost.IsDisposed Then Return False
+
+        Select Case keyData
+            Case Keys.F2
+                ' Discount. Disabled with an empty cart, same as the button.
+                If _btnDiscount IsNot Nothing AndAlso _btnDiscount.Enabled Then ApplyDiscount()
+                Return True
+
+            Case Keys.F3
+                If _txtSearch IsNot Nothing AndAlso Not _txtSearch.IsDisposed Then
+                    _txtSearch.Focus()
+                    _txtSearch.SelectAll()
+                End If
+                Return True
+
+            Case Keys.F4
+                If _btnHold IsNot Nothing AndAlso _btnHold.Enabled Then HoldSale()
+                Return True
+
+            Case Keys.F5
+                RetrieveSale()
+                Return True
+
+            Case Keys.F6
+                ' Voiding reverses stock and money, so it keeps its own confirmation
+                ' dialog -- the shortcut only opens it, it never voids outright.
+                VoidSale()
+                Return True
+
+            Case Keys.F7
+                PrintReceipt()
+                Return True
+
+            Case Keys.F9
+                ' Take payment with the first available method. With several
+                ' enabled the cashier still picks, so F9 is a fast path for the
+                ' common single-method till rather than a blind charge.
+                For Each pb In _payButtons
+                    If pb.Enabled Then
+                        pb.PerformClick()
+                        Exit For
+                    End If
+                Next
+                Return True
+
+            Case Keys.Escape
+                ' Clear the search filter rather than the cart: Escape wiping a
+                ' part-built order would be a destructive surprise.
+                If _txtSearch IsNot Nothing AndAlso Not _txtSearch.IsDisposed AndAlso _searchText <> "" Then
+                    _txtSearch.Text = ""
+                    _searchText = ""
+                    RenderCatalog()
+                    Return True
+                End If
+                Return False
+        End Select
+
+        Return False
+    End Function
     ' =========================================================================
     '  DISCOUNT
     ' =========================================================================

@@ -40,6 +40,24 @@ Public Class POS_STAFF
     ' ===========================================================================
     ' FORM LOAD
     ' ===========================================================================
+    ' =========================================================================
+    '  KEYBOARD SHORTCUTS
+    '
+    '  ProcessCmdKey rather than KeyPreview/KeyDown: function keys reach this
+    '  override before any focused control gets a chance to swallow them, so a
+    '  shortcut works even while the cashier is typing in the search box.
+    '
+    '  The POS screen had no shortcuts at all -- every checkout needed the
+    '  mouse, which is the slowest part of serving a queue.
+    '
+    '    F2  discount      F3  search      F4  hold       F5  retrieve
+    '    F6  void          F7  reprint     F9  pay        Esc clear search
+    ' =========================================================================
+    Protected Overrides Function ProcessCmdKey(ByRef msg As Message, keyData As Keys) As Boolean
+        If TransactionPanelBuilder.HandleShortcut(keyData) Then Return True
+        Return MyBase.ProcessCmdKey(msg, keyData)
+    End Function
+
     Private Sub POS_STAFF_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
         Me.SetStyle(ControlStyles.AllPaintingInWmPaint Or
