@@ -5,7 +5,22 @@
 --    phpMyAdmin : select the paint_store_pos database on the left FIRST,
 --                 then open the SQL tab, paste this file, press Go.
 --    Command line:
---                 mysql -u root paint_store_pos < migrations.sql
+--                 C:\xampp\mysql\bin\mysql.exe -u root paint_store_pos < migrations.sql
+--
+--  !! USE THE XAMPP CLIENT ONLY !!
+--
+--  This database runs on XAMPP MariaDB 10.4 (port 3306). If MySQL Server 8.0 is
+--  also installed, its client sits at
+--      C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe
+--  and it must NOT be used against this database. MySQL 8.0 ALTER TABLE
+--  statements make MariaDB write an "instant ALTER" metadata header it cannot
+--  read back, and the table then fails with
+--      #1932 - Table '...' doesn't exist in engine
+--  even though the .ibd data file is perfectly intact. Recovering from that
+--  needs a DISCARD / IMPORT TABLESPACE rebuild.
+--
+--  Always use:  C:\xampp\mysql\bin\mysql.exe
+--  Check with:  SELECT @@version;   -- must say MariaDB
 --
 --  Safe to run more than once: "IF NOT EXISTS" skips a column that is already
 --  there instead of failing.
