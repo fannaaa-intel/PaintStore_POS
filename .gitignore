@@ -1,1 +1,5 @@
-.vs/ 
+.vs/
+obj/
+bin/
+objcheckbuild*/
+Tests/bin/
