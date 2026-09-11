@@ -506,6 +506,20 @@ Public Class LogIn
             Return
         End If
 
+        ' Refuse while this username is in its cooling-off period. Checked before
+        ' the connection is opened so a locked-out attacker cannot even make the
+        ' app do work, and before any per-account message so it leaks nothing
+        ' about whether the username is real.
+        If LoginThrottle.IsLockedOut(username) Then
+            Dim wait = LoginThrottle.LockoutRemaining(username)
+            Dim mins As Integer = CInt(Math.Ceiling(wait.TotalMinutes))
+            AppModal.Show("Too many failed sign-in attempts." & vbCrLf &
+                        "Please wait " & mins.ToString() & " minute" & If(mins = 1, "", "s") & " and try again.",
+                        "Temporarily Locked", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            txtPass.Text = ""
+            Return
+        End If
+
         SetBusy(True)
         Try
             Using cn = Db.GetConnection()
@@ -524,8 +538,10 @@ Public Class LogIn
                     cmd.Parameters.AddWithValue("@u", username)
                     Using rdr = cmd.ExecuteReader()
                         If Not rdr.Read() Then
-                            AppModal.Show("Invalid credentials. Please try again.", "Login Failed",
-                                        MessageBoxButtons.OK, MessageBoxIcon.Error)
+                            ' Counted like any other failure: if only real usernames
+                            ' were throttled, the lockout itself would reveal which
+                            ' names exist.
+                            ShowLoginFailed(username)
                             Return
                         End If
 
@@ -546,8 +562,7 @@ Public Class LogIn
                                 ' Deliberately the same wording as a bad password:
                                 ' a rejected applicant should not be able to tell
                                 ' that the username exists at all.
-                                AppModal.Show("Invalid credentials. Please try again.", "Login Failed",
-                                            MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                ShowLoginFailed(username)
                                 Return
                             End If
                         End If
@@ -559,10 +574,13 @@ Public Class LogIn
                         End If
 
                         If Not PasswordHelper.VerifyPassword(password, storedHash) Then
-                            AppModal.Show("Invalid credentials. Please try again.", "Login Failed",
-                                        MessageBoxButtons.OK, MessageBoxIcon.Error)
+                            ShowLoginFailed(username)
                             Return
                         End If
+
+                        ' Cleared so an earlier run of typos does not count against
+                        ' the next genuine mistake.
+                        LoginThrottle.RecordSuccess(username)
 
                         ' success — remember who is logged in
                         Session.CurrentUserId = Convert.ToInt32(rdr("user_id"))
@@ -604,6 +622,29 @@ Public Class LogIn
 
         ActivityLog.Record("LOGIN")
         RouteByRole(Session.CurrentRole)
+    End Sub
+
+    ' One place that reports a failed sign-in, so every rejection path counts
+    ' toward the lockout and they all read identically to the person trying.
+    Private Sub ShowLoginFailed(username As String)
+        Dim nowLocked As Boolean = LoginThrottle.RecordFailure(username)
+        If nowLocked Then
+            AppModal.Show("Too many failed sign-in attempts." & vbCrLf &
+                        "This account is locked for a few minutes.",
+                        "Temporarily Locked", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Else
+            Dim left As Integer = LoginThrottle.AttemptsLeft(username)
+            Dim warn As String = ""
+            ' Only warn near the end: a count shown from the first typo is noise,
+            ' and it tells an attacker exactly how much room they have left.
+            If left <= 2 Then
+                warn = vbCrLf & vbCrLf & left.ToString() & " attempt" & If(left = 1, "", "s") &
+                       " remaining before this account is locked."
+            End If
+            AppModal.Show("Invalid credentials. Please try again." & warn, "Login Failed",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End If
+        txtPass.Text = ""
     End Sub
 
     ' Visual busy state for the sign-in round trip.

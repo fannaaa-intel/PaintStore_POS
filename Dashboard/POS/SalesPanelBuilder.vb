@@ -101,6 +101,9 @@ Public Class SalesPanelBuilder
         Dim dbTxns As Integer = 0
         Dim dbItems As Integer = 0
         Dim dbAvg As Decimal = 0
+        ' Set when the summary query fails, so the tiles can show "--" instead of
+        ' a zero that reads as a genuine total.
+        Dim summaryFailed As Boolean = False
 
         Try
             Using conn = Db.GetConnection()
@@ -125,7 +128,13 @@ Public Class SalesPanelBuilder
                     dbItems = CInt(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch ex As Exception
+            ' Previously swallowed, which left every figure at its 0 initial value:
+            ' a failed read rendered as a real, confident "P 0.00 sold today"
+            ' rather than as an error. Flag it so the cashier knows the summary
+            ' is unavailable instead of believing they have sold nothing.
+            System.Diagnostics.Debug.WriteLine("Sales summary load error: " & ex.Message)
+            summaryFailed = True
         End Try
 
         ' ===========================
@@ -306,10 +315,10 @@ Public Class SalesPanelBuilder
         AddHandler wrap.Resize, Sub() statRow.Width = wrap.Width
 
         Dim statData() As (title As String, value As String, subtitle As String, isUp As Boolean) = {
-            ("Total Revenue", "₱ " & dbRevenue.ToString("N2"), "Today completed sales", True),
-            ("Transactions", dbTxns.ToString(), "Today", True),
-            ("Avg. Order Value", "₱ " & dbAvg.ToString("N2"), "Today average", True),
-            ("Items Sold", dbItems.ToString(), "Units today", True)
+            ("Total Revenue", If(summaryFailed, "--", "₱ " & dbRevenue.ToString("N2")), If(summaryFailed, "Unavailable", "Today completed sales"), True),
+            ("Transactions", If(summaryFailed, "--", dbTxns.ToString()), If(summaryFailed, "Unavailable", "Today"), True),
+            ("Avg. Order Value", If(summaryFailed, "--", "₱ " & dbAvg.ToString("N2")), If(summaryFailed, "Unavailable", "Today average"), True),
+            ("Items Sold", If(summaryFailed, "--", dbItems.ToString()), If(summaryFailed, "Unavailable", "Units today"), True)
         }
 
         For i As Integer = 0 To 3

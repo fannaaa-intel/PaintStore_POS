@@ -125,6 +125,7 @@ Public Class InventoryItemListPanelBuilder
         Public ColorHex As String
         Public ImagePath As String
         Public UnitPrice As Decimal
+        Public CostPrice As Decimal
         Public StockQty As Integer
         Public ReorderLevel As Integer
         Public ReadOnly Property IsPaint As Boolean
@@ -260,7 +261,7 @@ Public Class InventoryItemListPanelBuilder
 
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.sku, p.name, p.category_id, c.name AS cname, " &
-                    " p.paint_type, p.size_label, p.color_hex, p.image_path, p.unit_price, p.stock_qty, p.reorder_level " &
+                    " p.paint_type, p.size_label, p.color_hex, p.image_path, p.unit_price, p.cost_price, p.stock_qty, p.reorder_level " &
                     "FROM products p JOIN categories c ON p.category_id = c.category_id " &
                     "WHERE p.is_active = 1 ORDER BY p.name ASC", conn)
                     Using rdr = cmd.ExecuteReader()
@@ -276,6 +277,7 @@ Public Class InventoryItemListPanelBuilder
                                 .ColorHex = If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString()),
                                 .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
+                                .CostPrice = If(IsDBNull(rdr("cost_price")), 0D, Convert.ToDecimal(rdr("cost_price"))),
                                 .StockQty = SafeInt(rdr("stock_qty")),
                                 .ReorderLevel = SafeInt(rdr("reorder_level"))
                             })
@@ -1281,9 +1283,14 @@ Public Class InventoryItemListPanelBuilder
         y += 168 + 18
 
         ' ---- Numeric row ----
-        Dim txtPrice = AddField(body, "Unit Price", L, y, 148)
-        Dim numStock = AddNumeric(body, "Stock Qty", L + 168, y, 148, 0, 1000000)
-        Dim numReorder = AddNumeric(body, "Reorder Level", L + 336, y, 148, 0, 1000000)
+        ' Cost sits next to price so the margin is visible while typing. It
+        ' feeds Gross Profit on the Accountant dashboard -- without it every
+        ' sale of this item reports as 100% profit.
+        Dim txtCost = AddField(body, "Unit Cost", L, y, 148)
+        Dim txtPrice = AddField(body, "Unit Price", L + 168, y, 148)
+        Dim numStock = AddNumeric(body, "Stock Qty", L + 336, y, 148, 0, 1000000)
+        y += 80
+        Dim numReorder = AddNumeric(body, "Reorder Level", L, y, 148, 0, 1000000)
         y += 80
 
         If editing AndAlso Not viewOnly Then
@@ -1291,7 +1298,7 @@ Public Class InventoryItemListPanelBuilder
             Dim lblStockLock As New Label With {
                 .Text = "Locked " & ChrW(8226) & " change in Stock Adjustment",
                 .Font = New Font("Segoe UI", 7.5F), .ForeColor = FaintText,
-                .AutoSize = True, .Location = New Point(L + 168, y + 52), .BackColor = Color.Transparent
+                .AutoSize = True, .Location = New Point(L + 336, y - 28), .BackColor = Color.Transparent
             }
             body.Controls.Add(lblStockLock)
         End If
@@ -1331,7 +1338,7 @@ Public Class InventoryItemListPanelBuilder
                     Dim imgToSave As String = If(isPaint, "", pickedImagePath)
                     Dim typeToSave As String = If(isPaint, txtType.Text.Trim(), "")
                     If SaveItem(productId, txtName, txtSku, cboCat, typeToSave, txtSize,
-                                hexToSave, imgToSave, txtPrice, numStock, numReorder) Then
+                                hexToSave, imgToSave, txtPrice, txtCost, numStock, numReorder) Then
                         f.Close()
                         ReloadAndRefresh()
                     End If
@@ -1384,11 +1391,13 @@ Public Class InventoryItemListPanelBuilder
             txtSize.Text = existing.SizeLabel
             txtHex.Text = existing.ColorHex
             txtPrice.Text = existing.UnitPrice.ToString("0.00")
+            txtCost.Text = existing.CostPrice.ToString("0.00")
             numStock.Value = Math.Max(0, existing.StockQty)
             numReorder.Value = Math.Max(0, existing.ReorderLevel)
         Else
             If cboCat.Items.Count > 0 Then cboCat.SelectedIndex = 0
             txtPrice.Text = "0.00"
+            txtCost.Text = "0.00"
             applyAutoSku()
         End If
         applyMediaMode()
@@ -1421,7 +1430,7 @@ Public Class InventoryItemListPanelBuilder
     ' =========================================================================
     Private Shared Function SaveItem(productId As Integer, txtName As TextBox, txtSku As TextBox,
                                      cboCat As ComboBox, paintType As String, txtSize As TextBox,
-                                     hex As String, imagePath As String, txtPrice As TextBox,
+                                     hex As String, imagePath As String, txtPrice As TextBox, txtCost As TextBox,
                                      numStock As NumericUpDown, numReorder As NumericUpDown) As Boolean
         Dim name = txtName.Text.Trim()
         Dim sku = txtSku.Text.Trim()
@@ -1437,6 +1446,24 @@ Public Class InventoryItemListPanelBuilder
         Dim price As Decimal
         If Not Decimal.TryParse(txtPrice.Text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, price) OrElse price < 0 Then
             AppModal.Show("Unit price must be a valid non-negative number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return False
+        End If
+        Dim cost As Decimal
+        ' Blank is allowed and means "not known yet" -- an item with no cost
+        ' recorded simply contributes nothing to COGS rather than blocking a save.
+        If txtCost.Text.Trim() = "" Then
+            cost = 0D
+        ElseIf Not Decimal.TryParse(txtCost.Text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, cost) OrElse cost < 0 Then
+            AppModal.Show("Unit cost must be a valid non-negative number (or left blank).", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return False
+        End If
+        ' Selling below cost is usually a typo, so it is worth a question --
+        ' but it is a legitimate clearance decision, so it is not blocked.
+        If cost > 0D AndAlso price > 0D AndAlso price < cost Then
+            If AppModal.Show("The unit price is below the unit cost." & Environment.NewLine &
+                             "Every sale of this item will record a loss." & Environment.NewLine & Environment.NewLine &
+                             "Save it anyway?", "Price Below Cost",
+                             MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
+                Return False
+            End If
         End If
         If hex <> "" AndAlso Not (hex.StartsWith("#") AndAlso hex.Length = 7) Then
             AppModal.Show("Color hex must look like #RRGGBB (or be left blank).", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return False
@@ -1458,12 +1485,12 @@ Public Class InventoryItemListPanelBuilder
                         Dim sql As String
                         If productId > 0 Then
                             sql = "UPDATE products SET category_id=@cat, sku=@sku, name=@name, paint_type=@ptype, " &
-                                  "size_label=@size, color_hex=@hex, image_path=@img, unit_price=@price, " &
+                                  "size_label=@size, color_hex=@hex, image_path=@img, unit_price=@price, cost_price=@cost, " &
                                   "reorder_level=@re WHERE product_id=@id"
                         Else
                             sql = "INSERT INTO products (category_id, sku, name, paint_type, size_label, color_hex, " &
-                                  "image_path, unit_price, stock_qty, reorder_level, is_active) " &
-                                  "VALUES (@cat, @sku, @name, @ptype, @size, @hex, @img, @price, @qty, @re, 1)"
+                                  "image_path, unit_price, cost_price, stock_qty, reorder_level, is_active) " &
+                                  "VALUES (@cat, @sku, @name, @ptype, @size, @hex, @img, @price, @cost, @qty, @re, 1)"
                         End If
 
                         Dim newId As Integer = 0
@@ -1478,6 +1505,7 @@ Public Class InventoryItemListPanelBuilder
                             cmd.Parameters.AddWithValue("@hex", NullIfEmpty(hex))
                             cmd.Parameters.AddWithValue("@img", NullIfEmpty(imagePath))
                             cmd.Parameters.AddWithValue("@price", price)
+                            cmd.Parameters.AddWithValue("@cost", cost)
                             If productId <= 0 Then cmd.Parameters.AddWithValue("@qty", openingQty)
                             cmd.Parameters.AddWithValue("@re", CInt(numReorder.Value))
                             If productId > 0 Then cmd.Parameters.AddWithValue("@id", productId)

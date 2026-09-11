@@ -275,6 +275,66 @@ CREATE TABLE IF NOT EXISTS goods_receipts (
 
 
 -- -----------------------------------------------------------------------------
+--  11. Cost tracking — real gross margin
+--
+--  Before this, products carried only unit_price (what the customer pays). Cost
+--  existed solely on purchase orders, so the Accountant dashboard reported
+--  "Net Profit" as revenue minus every PO raised in the period. Buying stock
+--  therefore looked like a loss even when nothing had been sold at a loss, and
+--  a month with no restocking looked unusually profitable.
+--
+--  Two columns fix it:
+--    products.cost_price   - current replacement cost, kept up to date by
+--                            receiving (see section 12 below)
+--    sale_items.unit_cost  - the cost AT THE MOMENT OF SALE. Margin has to be
+--                            computed against what that unit actually cost, not
+--                            against today's cost_price: re-pricing stock would
+--                            otherwise silently rewrite last month's reported
+--                            profit.
+-- -----------------------------------------------------------------------------
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'products'
+             AND column_name = 'cost_price');
+SET @s := IF(@c = 0,
+    'ALTER TABLE products ADD COLUMN cost_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER unit_price',
+    'SELECT "products.cost_price already present"');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+SET @c := (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = 'sale_items'
+             AND column_name = 'unit_cost');
+SET @s := IF(@c = 0,
+    'ALTER TABLE sale_items ADD COLUMN unit_cost DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER unit_price',
+    'SELECT "sale_items.unit_cost already present"');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+-- Seed cost_price from the most recent purchase of each product, so margin is
+-- meaningful straight away instead of reading as 100% until the next delivery.
+UPDATE products p
+JOIN (
+    SELECT poi.product_id, poi.unit_cost
+    FROM po_items poi
+    JOIN purchase_orders po ON po.po_id = poi.po_id
+    JOIN (
+        SELECT poi2.product_id, MAX(po2.po_id) AS latest_po
+        FROM po_items poi2
+        JOIN purchase_orders po2 ON po2.po_id = poi2.po_id
+        WHERE po2.status <> 'Cancelled'
+        GROUP BY poi2.product_id
+    ) newest ON newest.product_id = poi.product_id AND newest.latest_po = po.po_id
+) lastcost ON lastcost.product_id = p.product_id
+SET p.cost_price = lastcost.unit_cost
+WHERE p.cost_price = 0;
+
+-- Backfill historical sales with the product's cost so past periods report a
+-- margin rather than a 100%-profit distortion. Only rows never set are touched.
+UPDATE sale_items si
+JOIN products p ON p.product_id = si.product_id
+SET si.unit_cost = p.cost_price
+WHERE si.unit_cost = 0;
+
+
+-- -----------------------------------------------------------------------------
 --  Check the result — every column below should be listed.
 -- -----------------------------------------------------------------------------
 SHOW COLUMNS FROM products LIKE 'image_path';
@@ -295,3 +355,5 @@ SHOW COLUMNS FROM suppliers LIKE 'head_name';
 SHOW COLUMNS FROM suppliers LIKE 'dti_no';
 SHOW COLUMNS FROM suppliers LIKE 'bir_no';
 SHOW TABLES LIKE 'goods_receipts';
+SHOW COLUMNS FROM products LIKE 'cost_price';
+SHOW COLUMNS FROM sale_items LIKE 'unit_cost';

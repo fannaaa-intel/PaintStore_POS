@@ -985,12 +985,20 @@ Public Class InventoryPutAwayPanelBuilder
                                 cmd.ExecuteNonQuery()
                             End Using
 
-                            ' Add to live stock — the ONLY place put-away touches stock_qty
+                            ' Add to live stock — the ONLY place put-away touches stock_qty.
+                            ' cost_price is refreshed from what this delivery actually cost,
+                            ' so margin reporting follows supplier price changes on its own
+                            ' instead of relying on someone retyping it. Guarded on > 0 so a
+                            ' PO line with no cost recorded cannot wipe a known cost.
                             Using cmd As New MySqlCommand(
-                                "UPDATE products SET stock_qty = stock_qty + @qc " &
-                                "WHERE product_id = @pid", conn, txn)
+                                "UPDATE products p " &
+                                "JOIN po_items poi ON poi.po_item_id = @piid " &
+                                "SET p.stock_qty = p.stock_qty + @qc, " &
+                                "    p.cost_price = IF(poi.unit_cost > 0, poi.unit_cost, p.cost_price) " &
+                                "WHERE p.product_id = @pid", conn, txn)
                                 cmd.Parameters.AddWithValue("@qc", ln.ShelveNow)
                                 cmd.Parameters.AddWithValue("@pid", ln.ProductId)
+                                cmd.Parameters.AddWithValue("@piid", ln.PoItemId)
                                 cmd.ExecuteNonQuery()
                             End Using
 

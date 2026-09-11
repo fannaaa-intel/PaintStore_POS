@@ -45,6 +45,11 @@ Public Class AccountantDashPanelBuilder
 
     Private Shared _revenue As Decimal
     Private Shared _expenses As Decimal
+    ' Cost of goods actually SOLD in the period, from the cost snapshot on
+    ' each sale line. This is what gross profit must be measured against --
+    ' _expenses (purchase orders raised) is cash spent on stock, most of
+    ' which is still sitting on the shelf.
+    Private Shared _cogs As Decimal
 
     Private Shared _recentSales As New List(Of SaleRow)
     Private Shared _recentPos As New List(Of PoRow)
@@ -74,7 +79,7 @@ Public Class AccountantDashPanelBuilder
     '  DATA
     ' =========================================================================
     Private Shared Sub LoadData()
-        _revenue = 0 : _expenses = 0
+        _revenue = 0 : _expenses = 0 : _cogs = 0
         _recentSales.Clear() : _recentPos.Clear()
         _topMethod = "N/A" : _txnCount = 0 : _vatCollected = 0 : _inventoryValue = 0
 
@@ -100,9 +105,22 @@ Public Class AccountantDashPanelBuilder
                     _expenses = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' Inventory Value
+                ' Cost of goods sold: the per-unit cost captured on each sale line at
+                ' the moment it was sold, so re-pricing stock later cannot rewrite a
+                ' period that has already been reported.
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(stock_qty * unit_price),0) FROM products " &
+                    "SELECT COALESCE(SUM(si.qty * si.unit_cost),0) " &
+                    "FROM sale_items si JOIN sales s ON s.sale_id = si.sale_id " &
+                    "WHERE s.status IN ('Completed','Partially Refunded')" &
+                    If(saleClause <> "", " AND " & saleClause, ""), conn)
+                    _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
+                End Using
+
+                ' Inventory Value
+                ' Valued at COST, not sell price: stock on the shelf is money spent,
+                ' and valuing it at retail books profit that has not been earned yet.
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(stock_qty * COALESCE(NULLIF(cost_price,0), unit_price)),0) FROM products " &
                     "WHERE is_active = 1", conn)
                     _inventoryValue = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
@@ -386,29 +404,33 @@ Public Class AccountantDashPanelBuilder
         Next
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        Dim netProfit As Decimal = _revenue - _expenses
+        ' Gross profit = revenue - cost of what was SOLD. The previous figure
+        ' subtracted every purchase order raised in the period, so restocking
+        ' showed up as a loss and a quiet month looked unusually profitable.
+        Dim grossProfit As Decimal = _revenue - _cogs
+        Dim marginPct As Decimal = If(_revenue > 0D, Math.Round(grossProfit * 100D / _revenue, 1), 0D)
         Dim netClr As Color
         Dim netSign As String
         Dim netSub As String
 
-        If netProfit > 0 Then
+        If grossProfit > 0 Then
             netClr = MintDeep
             netSign = "+"
-            netSub = "Profitable — earning more than spending"
-        ElseIf netProfit < 0 Then
+            netSub = marginPct.ToString("0.#") & "% margin on goods sold"
+        ElseIf grossProfit < 0 Then
             netClr = AccentRed
             netSign = "-"
-            netSub = "At a loss — spending more than earning"
+            netSub = "Selling below cost"
         Else
             netClr = FaintText
             netSign = ""
-            netSub = "Break-even — income equals expenses"
+            netSub = "Break-even on goods sold"
         End If
 
         Dim c1 = MakeKpiCard("Total Revenue", Peso & _revenue.ToString("N2"), MintPrimary, "From completed sales")
-        Dim c2 = MakeKpiCard("Total Expenses", Peso & _expenses.ToString("N2"), AccentOrange, "From purchase orders")
-        Dim c3 = MakeKpiCard("Net Profit", netSign & Peso & Math.Abs(netProfit).ToString("N2"), netClr, netSub)
-        Dim c4 = MakeKpiCard("Inventory Value", Peso & _inventoryValue.ToString("N2"), AccentBlue, "Current stock at sell price")
+        Dim c2 = MakeKpiCard("Cost of Goods Sold", Peso & _cogs.ToString("N2"), AccentOrange, "Cost of what was sold")
+        Dim c3 = MakeKpiCard("Gross Profit", netSign & Peso & Math.Abs(grossProfit).ToString("N2"), netClr, netSub)
+        Dim c4 = MakeKpiCard("Inventory Value", Peso & _inventoryValue.ToString("N2"), AccentBlue, "Current stock at cost")
 
         c1.Margin = New Padding(0, 0, 6, 0)
         c2.Margin = New Padding(6, 0, 6, 0)

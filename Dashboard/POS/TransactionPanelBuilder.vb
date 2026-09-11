@@ -102,6 +102,10 @@ Public Class TransactionPanelBuilder
     ' Discount
     Private Shared _discountAmount As Decimal = 0
     Private Shared _discountType As String = "None"
+    ' Senior/PWD cardholder details, captured with the discount and carried
+    ' onto the receipt. Kept alongside the discount so clearing one clears both.
+    Private Shared _discountIdNo As String = ""
+    Private Shared _discountIdName As String = ""
 
 
     ' Quota badge
@@ -124,6 +128,14 @@ Public Class TransactionPanelBuilder
     Private Shared _lastSaleSubtotal As Decimal = 0
     Private Shared _lastSaleDiscount As Decimal = 0
     Private Shared _lastSaleVat As Decimal = 0
+    ' Receipt breakdown fields. BIR requires a VATable / VAT-exempt split on
+    ' the printed receipt, and the cardholder's name and ID number on any
+    ' Senior or PWD sale -- a bare 'Discount' line is not a valid record.
+    Private Shared _lastSaleNetSales As Decimal = 0
+    Private Shared _lastSaleVatExempt As Boolean = False
+    Private Shared _lastSaleDiscType As String = "None"
+    Private Shared _lastSaleExemptId As String = ""
+    Private Shared _lastSaleExemptName As String = ""
     Private Shared _lastSaleTotal As Decimal = 0
     Private Shared _lastSaleTendered As Decimal = 0
     Private Shared _lastSaleChange As Decimal = 0
@@ -141,6 +153,8 @@ Public Class TransactionPanelBuilder
         _cart = New Dictionary(Of Integer, CartLine)
         _discountAmount = 0
         _discountType = "None"
+        _discountIdNo = ""
+        _discountIdName = ""
         _searchText = ""
         _activeCategory = "All"
 
@@ -150,6 +164,11 @@ Public Class TransactionPanelBuilder
         _lastSaleSubtotal = 0
         _lastSaleDiscount = 0
         _lastSaleVat = 0
+        _lastSaleNetSales = 0
+        _lastSaleVatExempt = False
+        _lastSaleDiscType = "None"
+        _lastSaleExemptId = ""
+        _lastSaleExemptName = ""
         _lastSaleTotal = 0
         _lastSaleTendered = 0
         _lastSaleChange = 0
@@ -1080,15 +1099,13 @@ Public Class TransactionPanelBuilder
             items += kv.Value.Qty
             subtotal += kv.Value.Qty * kv.Value.UnitPrice
         Next
-        Dim disc As Decimal = _discountAmount
-        If disc < 0 Then disc = 0
-        If disc > subtotal Then disc = subtotal
-        ' VAT-exclusive pricing adds the tax on top of the net amount; inclusive
-        ' pricing already contains it. ComputeTotalDue keeps the displayed total,
-        ' the amount charged and the receipt in agreement under both settings.
-        Dim net As Decimal = subtotal - disc
-        Dim vat As Decimal = StoreSettings.ComputeVat(net)
-        Dim grand As Decimal = StoreSettings.ComputeTotalDue(net)
+        ' One helper computes what the customer owes for every screen, so the
+        ' cart summary, the payment prompt, the committed sale and the receipt
+        ' cannot drift apart. It also applies the Senior/PWD VAT exemption.
+        Dim t = StoreSettings.ComputeSaleTotals(subtotal, _discountAmount, _discountType)
+        Dim disc As Decimal = t.discount
+        Dim vat As Decimal = t.vat
+        Dim grand As Decimal = t.total
         If _lblItems IsNot Nothing Then _lblItems.Text = items.ToString()
         If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "P " & subtotal.ToString("N2")
         If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- P " & disc.ToString("N2")
@@ -1440,11 +1457,11 @@ Public Class TransactionPanelBuilder
                 _payMethodId = mid : _payMethodName = dbName
 
                 Dim subtotal As Decimal = CartSubtotal()
-                Dim disc As Decimal = _discountAmount
-                If disc < 0 Then disc = 0
-                If disc > subtotal Then disc = subtotal
-                ' Charge the VAT-adjusted total, not the net -- see ComputeTotalDue.
-                Dim grand As Decimal = StoreSettings.ComputeTotalDue(subtotal - disc)
+                ' Same helper the cart summary used, so the amount charged is
+                ' exactly the amount the cashier just showed the customer.
+                Dim payTotals = StoreSettings.ComputeSaleTotals(subtotal, _discountAmount, _discountType)
+                Dim disc As Decimal = payTotals.discount
+                Dim grand As Decimal = payTotals.total
 
                 ' Per-method capture: cash needs the amount tendered (-> change);
                 ' everything else needs a reference number (no change given).
@@ -1685,20 +1702,22 @@ Public Class TransactionPanelBuilder
         Dim saleNo As String = DocNumber.Generate("TXN-")
         Dim subtotal As Decimal = 0
         For Each it In items : subtotal += it.lineTotal : Next
-        Dim discount As Decimal = _discountAmount
-        If discount < 0 Then discount = 0
-        If discount > subtotal Then discount = subtotal
+
+        ' Same helper the cart and the payment prompt used. On a Senior/PWD sale
+        ' it strips VAT before the statutory 20%, so what is recorded matches
+        ' what was charged and no output VAT is booked against an exempt sale.
+        Dim saleTotals = StoreSettings.ComputeSaleTotals(subtotal, _discountAmount, _discountType)
+        Dim discount As Decimal = saleTotals.discount
         ' The customer agreed to grandTotal at the confirmation dialog and, for
         ' cash, the change was computed from it. That figure is therefore the
         ' authoritative one to store -- recomputing here instead would let the
         ' recorded sale drift from what was actually collected if the cart or
         ' the VAT settings changed between confirming and committing.
-        Dim netAmount As Decimal = subtotal - discount
         Dim total As Decimal = grandTotal
 
         ' A mismatch means the cart moved under the cashier after they confirmed;
         ' abandon rather than charge one amount and record another.
-        If Math.Abs(total - StoreSettings.ComputeTotalDue(netAmount)) > 0.01D Then
+        If Math.Abs(total - saleTotals.total) > 0.01D Then
             AppModal.Show("The cart changed while the payment was being confirmed." & Environment.NewLine &
                           "The sale was not completed. Please review the cart and try again.",
                           "Sale Not Completed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
@@ -1731,10 +1750,11 @@ Public Class TransactionPanelBuilder
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
                             cmd.Parameters.AddWithValue("@disc", discount)
-                            ' VAT is always derived from the NET amount. With exclusive
-                            ' pricing `total` already carries the tax, so computing from
-                            ' it would report VAT on top of VAT.
-                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(netAmount))
+                            ' Straight from the shared helper: it already reports 0 on a
+                            ' VAT-exempt Senior/PWD sale and derives VAT from the NET
+                            ' amount otherwise (computing it from `total` under exclusive
+                            ' pricing would report VAT on top of VAT).
+                            cmd.Parameters.AddWithValue("@vat", saleTotals.vat)
                             cmd.Parameters.AddWithValue("@total", total)
                             cmd.Parameters.AddWithValue("@tendered", amountTendered)
                             cmd.Parameters.AddWithValue("@change", changeDue)
@@ -1750,8 +1770,9 @@ Public Class TransactionPanelBuilder
 
                         For Each item In items
                             Using cmd As New MySqlCommand(
-                                "INSERT INTO sale_items (sale_id, product_id, formula_id, description, qty, unit_price, line_total) " &
-                                "VALUES (@sid, @pid, NULL, @desc, @qty, @price, @ltotal)", conn, txn)
+                                "INSERT INTO sale_items (sale_id, product_id, formula_id, description, qty, unit_price, unit_cost, line_total) " &
+                                "SELECT @sid, @pid, NULL, @desc, @qty, @price, COALESCE(p.cost_price, 0), @ltotal " &
+                                "FROM products p WHERE p.product_id = @pid", conn, txn)
                                 cmd.Parameters.AddWithValue("@sid", saleId)
                                 cmd.Parameters.AddWithValue("@pid", item.pid)
                                 cmd.Parameters.AddWithValue("@desc", item.pname)
@@ -1801,7 +1822,12 @@ Public Class TransactionPanelBuilder
             _lastSalePay = _payMethodName
             _lastSaleSubtotal = subtotal
             _lastSaleDiscount = discount
-            _lastSaleVat = StoreSettings.ComputeVat(netAmount)
+            _lastSaleVat = saleTotals.vat
+            _lastSaleNetSales = saleTotals.netSales
+            _lastSaleVatExempt = saleTotals.vatExempt
+            _lastSaleDiscType = _discountType
+            _lastSaleExemptId = _discountIdNo
+            _lastSaleExemptName = _discountIdName
             _lastSaleTotal = total
             _lastSaleTendered = amountTendered
             _lastSaleChange = changeDue
@@ -1836,13 +1862,15 @@ Public Class TransactionPanelBuilder
         If Not r.ok Then Return
         _discountType = r.dtype
         _discountAmount = r.amount
+        _discountIdNo = r.idNo
+        _discountIdName = r.idName
         RenderCart()
     End Sub
 
-    Private Shared Function PromptDiscount(subtotal As Decimal, currentType As String, currentAmount As Decimal) As (ok As Boolean, dtype As String, amount As Decimal)
+    Private Shared Function PromptDiscount(subtotal As Decimal, currentType As String, currentAmount As Decimal) As (ok As Boolean, dtype As String, amount As Decimal, idNo As String, idName As String)
         Using f As New Form With {.Text = "Apply Discount", .FormBorderStyle = FormBorderStyle.FixedDialog,
                 .StartPosition = FormStartPosition.CenterParent, .MaximizeBox = False, .MinimizeBox = False,
-                .ClientSize = New Size(340, 250), .BackColor = CardBg, .Font = New Font("Segoe UI", 9.5F)}
+                .ClientSize = New Size(340, 360), .BackColor = CardBg, .Font = New Font("Segoe UI", 9.5F)}
             Dim lblSub As New Label With {.Text = "Subtotal:  P " & subtotal.ToString("N2"), .Location = New Point(18, 16), .AutoSize = True, .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintDark}
             Dim lblType As New Label With {.Text = "Type", .Location = New Point(18, 52), .AutoSize = True, .ForeColor = SubText}
             Dim cboType As New ComboBox With {.Location = New Point(18, 72), .Width = 140, .DropDownStyle = ComboBoxStyle.DropDownList}
@@ -1852,9 +1880,29 @@ Public Class TransactionPanelBuilder
             Dim rdoFlat As New RadioButton With {.Text = "Flat (P)", .Location = New Point(180, 78), .AutoSize = True}
             Dim lblVal As New Label With {.Text = "Value", .Location = New Point(18, 108), .AutoSize = True, .ForeColor = SubText}
             Dim txtVal As New TextBox With {.Location = New Point(18, 128), .Width = 140, .Text = "0"}
-            Dim lblPreview As New Label With {.Location = New Point(18, 162), .AutoSize = True, .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintPrimary, .Text = "Discount:  P 0.00"}
+
+            ' Senior/PWD capture. RA 9994 and RA 10754 require the cardholder''s
+            ' name and ID number on the sale record, so these appear only for
+            ' those types and are mandatory before Apply will close the dialog.
+            Dim lblExempt As New Label With {
+                .Location = New Point(18, 160), .AutoSize = False, .Size = New Size(300, 32),
+                .ForeColor = MintDark, .Font = New Font("Segoe UI", 8.5F),
+                .Text = "VAT-exempt sale: VAT is removed first, then 20% off the" & Environment.NewLine & "VAT-less base. Rate is fixed by law.", .Visible = False}
+            Dim lblIdName As New Label With {.Text = "Cardholder name", .Location = New Point(18, 196), .AutoSize = True, .ForeColor = SubText, .Visible = False}
+            Dim txtIdName As New TextBox With {.Location = New Point(18, 216), .Width = 300, .Visible = False}
+            Dim lblIdNo As New Label With {.Text = "Senior / PWD ID no.", .Location = New Point(18, 246), .AutoSize = True, .ForeColor = SubText, .Visible = False}
+            Dim txtIdNo As New TextBox With {.Location = New Point(18, 266), .Width = 300, .Visible = False}
+
+            Dim lblPreview As New Label With {.Location = New Point(18, 300), .AutoSize = True, .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintPrimary, .Text = "Discount:  P 0.00"}
+
+            ' Preview runs through the same helper the sale itself uses, so the
+            ' figure quoted here is exactly what will be charged and recorded.
             Dim resolve As Func(Of Decimal) =
                 Function() As Decimal
+                    Dim t = CStr(cboType.SelectedItem)
+                    If StoreSettings.IsVatExemptDiscount(t) Then
+                        Return StoreSettings.ComputeSaleTotals(subtotal, 0D, t).discount
+                    End If
                     Dim v As Decimal = 0
                     Decimal.TryParse(txtVal.Text.Replace("P", "").Replace(",", "").Trim(), v)
                     If v < 0 Then v = 0
@@ -1862,36 +1910,78 @@ Public Class TransactionPanelBuilder
                     If amt > subtotal Then amt = subtotal
                     Return Decimal.Round(amt, 2)
                 End Function
-            Dim upd As Action = Sub() lblPreview.Text = "Discount:  P " & resolve().ToString("N2")
+
+            Dim upd As Action =
+                Sub()
+                    Dim t = CStr(cboType.SelectedItem)
+                    Dim exempt As Boolean = StoreSettings.IsVatExemptDiscount(t)
+                    lblExempt.Visible = exempt
+                    lblIdName.Visible = exempt : txtIdName.Visible = exempt
+                    lblIdNo.Visible = exempt : txtIdNo.Visible = exempt
+                    ' The 20% is statutory, so the cashier cannot edit it away.
+                    rdoPct.Enabled = Not exempt : rdoFlat.Enabled = Not exempt
+                    txtVal.Enabled = Not exempt
+                    If exempt Then rdoPct.Checked = True : txtVal.Text = "20"
+                    Dim amt As Decimal = resolve()
+                    lblPreview.Text = "Discount:  P " & amt.ToString("N2") &
+                                      If(exempt, "   (VAT exempt)", "")
+                End Sub
+
             AddHandler txtVal.TextChanged, Sub() upd()
             AddHandler rdoPct.CheckedChanged, Sub() upd()
             AddHandler rdoFlat.CheckedChanged, Sub() upd()
             AddHandler cboType.SelectedIndexChanged,
                 Sub()
                     Dim t = CStr(cboType.SelectedItem)
-                    If t = "Senior" OrElse t = "PWD" Then
-                        rdoPct.Checked = True : txtVal.Text = "20"
-                    ElseIf t = "None" Then
-                        txtVal.Text = "0"
-                    End If
+                    If t = "None" Then txtVal.Text = "0"
                     upd()
                 End Sub
-            Dim btnOk As New Button With {.Text = "Apply", .DialogResult = DialogResult.OK, .Location = New Point(176, 196),
+
+            Dim btnOk As New Button With {.Text = "Apply", .Location = New Point(176, 320),
                 .Size = New Size(72, 30), .FlatStyle = FlatStyle.Flat, .BackColor = MintPrimary, .ForeColor = Color.White}
             btnOk.FlatAppearance.BorderSize = 0
-            Dim btnCancel As New Button With {.Text = "Cancel", .DialogResult = DialogResult.Cancel, .Location = New Point(254, 196),
+            Dim btnCancel As New Button With {.Text = "Cancel", .DialogResult = DialogResult.Cancel, .Location = New Point(254, 320),
                 .Size = New Size(72, 30), .FlatStyle = FlatStyle.Flat, .BackColor = Color.FromArgb(232, 238, 237), .ForeColor = SubText}
             btnCancel.FlatAppearance.BorderSize = 0
-            f.Controls.AddRange({lblSub, lblType, cboType, rdoPct, rdoFlat, lblVal, txtVal, lblPreview, btnOk, btnCancel})
+
+            ' Validated on click rather than via DialogResult: an exempt sale
+            ' without the cardholder details is not a record BIR accepts, so the
+            ' dialog must refuse to close instead of silently saving a blank ID.
+            AddHandler btnOk.Click,
+                Sub()
+                    Dim t = CStr(cboType.SelectedItem)
+                    If StoreSettings.IsVatExemptDiscount(t) Then
+                        If txtIdName.Text.Trim() = "" OrElse txtIdNo.Text.Trim() = "" Then
+                            AppModal.Show("A " & t & " discount needs the cardholder''s name and ID number." & Environment.NewLine &
+                                          "Both are required on the sale record.",
+                                          "Details Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                            Return
+                        End If
+                    End If
+                    f.DialogResult = DialogResult.OK
+                    f.Close()
+                End Sub
+
+            f.Controls.AddRange({lblSub, lblType, cboType, rdoPct, rdoFlat, lblVal, txtVal,
+                                 lblExempt, lblIdName, txtIdName, lblIdNo, txtIdNo,
+                                 lblPreview, btnOk, btnCancel})
             f.AcceptButton = btnOk : f.CancelButton = btnCancel
-            If currentAmount > 0 Then rdoFlat.Checked = True : txtVal.Text = currentAmount.ToString("0.##")
+            If currentAmount > 0 AndAlso Not StoreSettings.IsVatExemptDiscount(currentType) Then
+                rdoFlat.Checked = True : txtVal.Text = currentAmount.ToString("0.##")
+            End If
+            If StoreSettings.IsVatExemptDiscount(currentType) Then
+                txtIdName.Text = _discountIdName : txtIdNo.Text = _discountIdNo
+            End If
             upd()
-            If f.ShowDialog() <> DialogResult.OK Then Return (False, currentType, currentAmount)
-            Dim finalAmt As Decimal = resolve()
+            If f.ShowDialog() <> DialogResult.OK Then Return (False, currentType, currentAmount, _discountIdNo, _discountIdName)
             Dim finalType As String = CStr(cboType.SelectedItem)
+            Dim finalAmt As Decimal = resolve()
             If finalAmt > 0 AndAlso finalType = "None" Then finalType = "Promo"
-            If finalAmt = 0 Then finalType = "None"
-            Return (True, finalType, finalAmt)
+            If finalAmt = 0 AndAlso Not StoreSettings.IsVatExemptDiscount(finalType) Then finalType = "None"
+            If StoreSettings.IsVatExemptDiscount(finalType) Then
+                Return (True, finalType, finalAmt, txtIdNo.Text.Trim(), txtIdName.Text.Trim())
+            End If
+            Return (True, finalType, finalAmt, "", "")
         End Using
     End Function
 
@@ -2259,9 +2349,32 @@ Public Class TransactionPanelBuilder
             Next
             lines.Add(ReceiptPrinter.Divider())
             lines.Add(New ReceiptPrinter.RLine("Subtotal", "P " & _lastSaleSubtotal.ToString("N2")))
-            If _lastSaleDiscount > 0 Then lines.Add(New ReceiptPrinter.RLine("Discount", "- P " & _lastSaleDiscount.ToString("N2")))
-            lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, "P " & _lastSaleVat.ToString("N2")))
+            If _lastSaleDiscount > 0 Then
+                Dim discLabel As String = If(_lastSaleVatExempt, _lastSaleDiscType & " Disc (20%)", "Discount")
+                lines.Add(New ReceiptPrinter.RLine(discLabel, "- P " & _lastSaleDiscount.ToString("N2")))
+            End If
+
+            ' BIR requires the sale broken into VATable / VAT-exempt / zero-rated
+            ' with the VAT shown separately -- a single "VAT" line is not a valid
+            ' receipt. An exempt sale reports its base under VAT-Exempt Sales and
+            ' zero VAT; a normal sale reports the same figures under VATable Sales.
+            If _lastSaleVatExempt Then
+                lines.Add(New ReceiptPrinter.RLine("VAT-Exempt Sales", "P " & _lastSaleNetSales.ToString("N2")))
+                lines.Add(New ReceiptPrinter.RLine("VAT", "P 0.00"))
+            Else
+                lines.Add(New ReceiptPrinter.RLine("VATable Sales", "P " & _lastSaleNetSales.ToString("N2")))
+                lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, "P " & _lastSaleVat.ToString("N2")))
+            End If
             lines.Add(New ReceiptPrinter.RLine("TOTAL", "P " & _lastSaleTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
+
+            ' The cardholder name and ID must appear on the receipt for the
+            ' discount to be claimable, so they print on every exempt sale.
+            If _lastSaleVatExempt Then
+                lines.Add(ReceiptPrinter.Divider())
+                lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " Name:", _lastSaleExemptName))
+                lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " ID No:", _lastSaleExemptId))
+                lines.Add(New ReceiptPrinter.RLine("Signature:", "____________"))
+            End If
             ' Same content match the payment prompt uses, so a method named
             ' "CASH" or "Cash on Hand" still prints Tendered and Change.
             If _lastSalePay IsNot Nothing AndAlso

@@ -281,6 +281,7 @@
     <Compile Include="Modules\POS\PaymentMethodModal.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />
     <Compile Include="Modules\POS\ReceiptPrinter.vb" />
+    <Compile Include="Modules\LoginThrottle.vb" />
     <Compile Include="Modules\PasswordHelper.vb" />
     <Compile Include="Modules\POS\SaleCompleteModal.vb" />
     <Compile Include="Modules\ReportPrinter.vb" />

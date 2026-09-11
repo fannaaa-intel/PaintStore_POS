@@ -218,27 +218,31 @@ Public Class CashPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                ' Try UPDATE first; if no row affected, INSERT
+                ' Single statement instead of UPDATE-then-INSERT: the uq_count
+                ' unique key (shift_id, denomination, is_bill) already exists, so
+                ' the database resolves the conflict atomically. The old two-step
+                ' form could have two saves both see "no row" and race to insert.
                 Using cmd As New MySqlCommand(
-                    "UPDATE cash_counts SET qty=@qty WHERE shift_id=@sid AND denomination=@denom AND is_bill=@bill", conn)
-                    cmd.Parameters.AddWithValue("@qty", d.Count)
+                    "INSERT INTO cash_counts (shift_id, denomination, is_bill, qty) " &
+                    "VALUES (@sid, @denom, @bill, @qty) " &
+                    "ON DUPLICATE KEY UPDATE qty = VALUES(qty)", conn)
                     cmd.Parameters.AddWithValue("@sid", _shiftId)
                     cmd.Parameters.AddWithValue("@denom", d.Value)
                     cmd.Parameters.AddWithValue("@bill", d.IsBill)
-                    If cmd.ExecuteNonQuery() = 0 Then
-                        Using cmd2 As New MySqlCommand(
-                            "INSERT INTO cash_counts (shift_id, denomination, is_bill, qty) " &
-                            "VALUES (@sid, @denom, @bill, @qty)", conn)
-                            cmd2.Parameters.AddWithValue("@sid", _shiftId)
-                            cmd2.Parameters.AddWithValue("@denom", d.Value)
-                            cmd2.Parameters.AddWithValue("@bill", d.IsBill)
-                            cmd2.Parameters.AddWithValue("@qty", d.Count)
-                            cmd2.ExecuteNonQuery()
-                        End Using
-                    End If
+                    cmd.Parameters.AddWithValue("@qty", d.Count)
+                    cmd.ExecuteNonQuery()
                 End Using
             End Using
-        Catch
+        Catch ex As Exception
+            ' This is a WRITE on the cash-reconciliation path. Swallowing it left
+            ' the counted amount on screen while the database never received it,
+            ' so the drawer silently reconciled against stale numbers. Tell the
+            ' cashier instead -- a failed count they know about can be retyped.
+            System.Diagnostics.Debug.WriteLine("SaveDenomCount error: " & ex.Message)
+            AppModal.Show("That denomination count could not be saved:" & Environment.NewLine & Environment.NewLine &
+                          ex.Message & Environment.NewLine & Environment.NewLine &
+                          "Re-enter the count before closing the drawer.",
+                          "Count Not Saved", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
     End Sub
 
