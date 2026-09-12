@@ -65,8 +65,21 @@ PaintStore_POS
 </member>
 <member name="T:PaintStore_POS.ReceiveConfirmModal.Attestation">
  <summary>
- What the receiver attested to. Returned by Prompt so the caller can
+ What the officer attested to. Returned by Prompt so the caller can
  store it alongside the stock movements it writes.
+ </summary>
+</member>
+<member name="T:PaintStore_POS.ReceiveConfirmModal.PhaseWords">
+ <summary>
+ The four strings that differ between the two phases. Kept in one place
+ so the dialog body stays phase-agnostic and the wording for a phase can
+ be read at a glance instead of being hunted through the layout code.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.ReceiveConfirmModal.HasPhaseColumn(MySql.Data.MySqlClient.MySqlConnection,MySql.Data.MySqlClient.MySqlTransaction)">
+ <summary>
+ True when goods_receipts carries the phase column (migration 12).
+ Runs on the caller's open transaction so it costs no extra connection.
  </summary>
 </member>
 <member name="M:PaintStore_POS.ReceiveConfirmModal.HasTable">
