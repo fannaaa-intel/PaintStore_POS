@@ -18,6 +18,21 @@ Imports MySql.Data.MySqlClient
 '  at the delivery, it does not say the goods were sound, and a terminal left
 '  signed in at the dock could accept a delivery under someone else's name.
 '
+'  TWO PHASES, ONE DIALOG
+'  ----------------------
+'  Goods arrive in two steps, and each needs its own named officer:
+'
+'    PHASE_RECEIVE   Procurement → Receive PO. Goods accepted from the supplier
+'                    at the dock. Ownership transfers, the payable becomes real.
+'    PHASE_PUTAWAY   Inventory → Put Away. Goods moved dock → shelf. This is the
+'                    only place products.stock_qty actually increases.
+'
+'  They are the same question asked twice — who handled these goods, were they
+'  sound, do they certify it — so they share one dialog rather than two that
+'  would drift apart. The phase changes only the wording: the title, the
+'  certification sentence, the name hint and the confirm button. Everything
+'  structural (validation, password check, chrome, persistence) is common.
+'
 '  WHAT IT ASKS FOR
 '  ----------------
 '    * Receiver name   — who physically checked the goods. Defaults to the
@@ -65,24 +80,71 @@ Public Module ReceiveConfirmModal
     Private Const PAD As Integer = 24
     Private Const FIELD_H As Integer = 40
 
+    ' The two moments goods can be attested for. These strings are the values
+    ' stored in goods_receipts.phase, so they must match the ENUM exactly.
+    Public Const PHASE_RECEIVE As String = "receive"
+    Public Const PHASE_PUTAWAY As String = "putaway"
+
     ''' <summary>
-    ''' What the receiver attested to. Returned by Prompt so the caller can
+    ''' What the officer attested to. Returned by Prompt so the caller can
     ''' store it alongside the stock movements it writes.
     ''' </summary>
     Public Class Attestation
         Public ReceiverName As String
         Public ConditionNote As String   ' "Good" | "Discrepancy"
         Public Remarks As String
+        Public Phase As String           ' PHASE_RECEIVE | PHASE_PUTAWAY
     End Class
+
+    ''' <summary>
+    ''' The four strings that differ between the two phases. Kept in one place
+    ''' so the dialog body stays phase-agnostic and the wording for a phase can
+    ''' be read at a glance instead of being hunted through the layout code.
+    ''' </summary>
+    Private Class PhaseWords
+        Public Title As String
+        Public NameLabel As String
+        Public NameHint As String
+        Public Certification As String
+        Public ConfirmButton As String
+    End Class
+
+    Private Function WordsFor(phase As String) As PhaseWords
+        If String.Equals(phase, PHASE_PUTAWAY, StringComparison.OrdinalIgnoreCase) Then
+            Return New PhaseWords With {
+                .Title = "Confirm stock-in",
+                .NameLabel = "Stocked in by",
+                .NameHint = "The person who physically moved these goods to the shelf.",
+                .Certification = "I certify that I moved these goods to the shelf and that" &
+                                 Environment.NewLine &
+                                 "the quantities above are what was actually stocked in.",
+                .ConfirmButton = "Confirm stock-in"
+            }
+        End If
+
+        Return New PhaseWords With {
+            .Title = "Confirm goods receipt",
+            .NameLabel = "Received by",
+            .NameHint = "The person who physically checked this delivery.",
+            .Certification = "I certify that I inspected these goods and that the quantities" &
+                             Environment.NewLine & "above are what was actually delivered.",
+            .ConfirmButton = "Confirm receipt"
+        }
+    End Function
 
     ' =========================================================================
     '  Ask the receiver to confirm. Returns Nothing when they backed out, in
     '  which case the caller must not write anything.
     ' =========================================================================
     Public Function Prompt(poNo As String, supplierName As String,
-                           lineCount As Integer, totalUnits As Integer) As Attestation
+                           lineCount As Integer, totalUnits As Integer,
+                           Optional phase As String = PHASE_RECEIVE,
+                           Optional summaryLine As String = Nothing) As Attestation
 
         Dim result As Attestation = Nothing
+        Dim w As PhaseWords = WordsFor(phase)
+        Dim isPutAway As Boolean =
+            String.Equals(phase, PHASE_PUTAWAY, StringComparison.OrdinalIgnoreCase)
 
         Dim f As New Form With {
             .FormBorderStyle = FormBorderStyle.None,
@@ -94,7 +156,7 @@ Public Module ReceiveConfirmModal
         }
 
         Dim lblTitle As New Label With {
-            .Text = "Confirm goods receipt",
+            .Text = w.Title,
             .Font = New Font("Segoe UI Semibold", 12.0F),
             .ForeColor = TitleClr,
             .AutoSize = False,
@@ -129,9 +191,11 @@ Public Module ReceiveConfirmModal
             .Location = New Point(14, 9), .BackColor = Color.Transparent
         }
         Dim lblPoSub As New Label With {
-            .Text = supplierName & "   " & ChrW(8226) & "   " &
-                    lineCount & If(lineCount = 1, " item", " items") & "   " & ChrW(8226) & "   " &
-                    totalUnits & If(totalUnits = 1, " unit", " units"),
+            .Text = If(String.IsNullOrWhiteSpace(summaryLine),
+                       supplierName & "   " & ChrW(8226) & "   " &
+                       lineCount & If(lineCount = 1, " item", " items") & "   " & ChrW(8226) & "   " &
+                       totalUnits & If(totalUnits = 1, " unit", " units"),
+                       summaryLine),
             .Font = New Font("Segoe UI", 9.0F),
             .ForeColor = SubText, .AutoSize = True,
             .Location = New Point(14, 32), .BackColor = Color.Transparent
@@ -140,7 +204,7 @@ Public Module ReceiveConfirmModal
 
         ' ── Receiver name ─────────────────────────────────────────────────────
         Dim lblWho As New Label With {
-            .Text = "Received by",
+            .Text = w.NameLabel,
             .Font = New Font("Segoe UI Semibold", 9.0F),
             .ForeColor = SubText, .AutoSize = True,
             .Location = New Point(PAD, summary.Bottom + 14),
@@ -151,7 +215,7 @@ Public Module ReceiveConfirmModal
                          "", Session.CurrentFullName.Trim())
 
         Dim lblWhoHint As New Label With {
-            .Text = "The person who physically checked this delivery.",
+            .Text = w.NameHint,
             .Font = New Font("Segoe UI", 8.5F),
             .ForeColor = Color.FromArgb(150, 165, 160), .AutoSize = True,
             .Location = New Point(PAD, txtWho.Parent.Bottom + 3),
@@ -220,8 +284,7 @@ Public Module ReceiveConfirmModal
 
         ' ── Certification ─────────────────────────────────────────────────────
         Dim chkCert As New CheckBox With {
-            .Text = "I certify that I inspected these goods and that the quantities" &
-                    Environment.NewLine & "above are what was actually delivered.",
+            .Text = w.Certification,
             .Font = New Font("Segoe UI", 9.0F),
             .ForeColor = TitleClr,
             .AutoSize = False,
@@ -241,7 +304,8 @@ Public Module ReceiveConfirmModal
         }
         Dim txtPw As TextBox = MakeField(PAD, lblPw.Bottom + 4, CARD_W - PAD * 2, f, True)
         Dim lblPwHint As New Label With {
-            .Text = "Confirms this receipt is being accepted by you, " &
+            .Text = "Confirms this " & If(isPutAway, "stock-in", "receipt") &
+                    " is being accepted by you, " &
                     If(String.IsNullOrWhiteSpace(Session.CurrentUsername),
                        "the signed-in user", Session.CurrentUsername) & ".",
             .Font = New Font("Segoe UI", 8.5F),
@@ -264,7 +328,7 @@ Public Module ReceiveConfirmModal
         Dim btnY As Integer = dividerY + 14
         Dim cardH As Integer = btnY + 38 + PAD
 
-        Dim btnOk As Button = MakeButton("Confirm receipt", True,
+        Dim btnOk As Button = MakeButton(w.ConfirmButton, True,
             New Point(CARD_W - PAD - 150, btnY), New Size(150, 38))
         Dim btnCancel As Button = MakeButton("Cancel", False,
             New Point(CARD_W - PAD - 150 - 8 - 96, btnY), New Size(96, 38))
@@ -281,7 +345,8 @@ Public Module ReceiveConfirmModal
                 Dim rem_ As String = txtRem.Text.Trim()
 
                 If who = "" Then
-                    lblErr.Text = "Enter the name of the person who received the goods."
+                    lblErr.Text = "Enter the name of the person who " &
+                                  If(isPutAway, "stocked in the goods.", "received the goods.")
                     txtWho.Focus()
                     Return
                 End If
@@ -301,7 +366,8 @@ Public Module ReceiveConfirmModal
                     Return
                 End If
                 If Not chkCert.Checked Then
-                    lblErr.Text = "Tick the certification to confirm you inspected the goods."
+                    lblErr.Text = "Tick the certification to confirm you " &
+                                  If(isPutAway, "shelved these goods.", "inspected the goods.")
                     Return
                 End If
                 If txtPw.Text = "" Then
@@ -321,7 +387,8 @@ Public Module ReceiveConfirmModal
                 result = New Attestation With {
                     .ReceiverName = who,
                     .ConditionNote = If(rbBad.Checked, "Discrepancy", "Good"),
-                    .Remarks = rem_
+                    .Remarks = rem_,
+                    .Phase = If(isPutAway, PHASE_PUTAWAY, PHASE_RECEIVE)
                 }
                 f.Close()
             End Sub
@@ -393,11 +460,24 @@ Public Module ReceiveConfirmModal
                     poId As Integer, att As Attestation, totalUnits As Integer)
         If att Is Nothing Then Return
 
+        ' The phase column arrived in migration 12, one release after the table
+        ' itself. Writing it unconditionally would break receiving outright on a
+        ' database that has section 10 applied but not section 12, so the column
+        ' is included only where it exists. Omitting it is safe: the column
+        ' defaults to 'receive', which is what every row meant before phases.
+        Dim withPhase As Boolean = HasPhaseColumn(conn, txn)
+
         Using cmd As New MySqlCommand(
             "INSERT INTO goods_receipts " &
-            "(po_id, received_by, receiver_name, condition_note, remarks, attested, total_units, received_at) " &
-            "VALUES (@po, @by, @who, @cond, @rem, 1, @units, NOW())", conn, txn)
+            "(po_id, " & If(withPhase, "phase, ", "") &
+            "received_by, receiver_name, condition_note, remarks, attested, total_units, received_at) " &
+            "VALUES (@po, " & If(withPhase, "@phase, ", "") &
+            "@by, @who, @cond, @rem, 1, @units, NOW())", conn, txn)
             cmd.Parameters.AddWithValue("@po", poId)
+            If withPhase Then
+                cmd.Parameters.AddWithValue("@phase",
+                    If(String.IsNullOrWhiteSpace(att.Phase), PHASE_RECEIVE, att.Phase))
+            End If
             cmd.Parameters.AddWithValue("@by",
                 If(Session.CurrentUserId = 0, CObj(DBNull.Value), CObj(Session.CurrentUserId)))
             cmd.Parameters.AddWithValue("@who", att.ReceiverName)
@@ -408,6 +488,26 @@ Public Module ReceiveConfirmModal
             cmd.ExecuteNonQuery()
         End Using
     End Sub
+
+    ''' <summary>
+    ''' True when goods_receipts carries the phase column (migration 12).
+    ''' Runs on the caller's open transaction so it costs no extra connection.
+    ''' </summary>
+    Private Function HasPhaseColumn(conn As MySqlConnection,
+                                    txn As MySqlTransaction) As Boolean
+        Try
+            Using cmd As New MySqlCommand(
+                "SELECT COUNT(*) FROM information_schema.columns " &
+                "WHERE table_schema = DATABASE() AND table_name = 'goods_receipts' " &
+                "  AND column_name = 'phase'", conn, txn)
+                Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
+            End Using
+        Catch
+            ' Unreadable schema means write the pre-phase shape: a saved receipt
+            ' without a phase beats a receipt that would not save at all.
+            Return False
+        End Try
+    End Function
 
     ''' <summary>
     ''' True when the goods_receipts table exists. Probed per commit rather

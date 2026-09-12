@@ -77,6 +77,19 @@ Public Class InventoryPutAwayPanelBuilder
         Public LineCount As Integer
     End Class
 
+    ' One completed put-away, as shown in the history strip. This is the record
+    ' the shelving officer created about themselves, which is why it belongs on
+    ' their own screen rather than only in Procurement's delivery view.
+    Private Class PutAwayHistoryRow
+        Public PoNo As String
+        Public SupplierName As String
+        Public OfficerName As String
+        Public ConditionNote As String   ' "Good" | "Discrepancy"
+        Public Remarks As String
+        Public TotalUnits As Integer
+        Public HappenedAt As DateTime
+    End Class
+
     Private Class PutAwayLine
         Public PoItemId As Integer
         Public ProductId As Integer
@@ -101,6 +114,9 @@ Public Class InventoryPutAwayPanelBuilder
     Private Shared putAwayLines As New List(Of PutAwayLine)
     Private Shared currentPoId As Integer
     Private Shared currentPoNo As String
+    ' Loaded with the PO number and kept for the attestation dialog, which
+    ' names the supplier so the officer can check it against the paperwork.
+    Private Shared currentSupplierName As String
     Private Shared ReadOnly thumbCache As New Dictionary(Of String, Image)
 
     ' =========================================================================
@@ -142,6 +158,8 @@ Public Class InventoryPutAwayPanelBuilder
         container.Controls.Add(topRegion)
         container.ResumeLayout()
 
+        Dim nextY As Integer = 8
+
         If rows.Count = 0 Then
             Dim empty As Panel = BuildEmptyCard(
                 "No Incoming Stock",
@@ -151,24 +169,38 @@ Public Class InventoryPutAwayPanelBuilder
             empty.Width = rowsHost.ClientSize.Width - 4
             empty.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             rowsHost.Controls.Add(empty)
+            nextY = empty.Bottom + 12
         Else
-            Dim y As Integer = 8
             For Each po In rows
                 Dim card As Panel = BuildPendingCard(po)
-                card.Location = New Point(0, y)
+                card.Location = New Point(0, nextY)
                 card.Width = rowsHost.ClientSize.Width - 4
                 card.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 rowsHost.Controls.Add(card)
-                y += card.Height + 12
+                nextY += card.Height + 12
             Next
-            AddHandler rowsHost.Resize,
-                Sub()
-                    Dim w As Integer = rowsHost.ClientSize.Width - 4
-                    For Each c As Control In rowsHost.Controls
-                        c.Width = w
-                    Next
-                End Sub
         End If
+
+        ' The history strip renders in BOTH states, and it matters most in the
+        ' empty one: that is exactly when the pending list has just dropped the
+        ' PO someone finished shelving, and "No Incoming Stock" on its own would
+        ' leave them with no evidence the work was recorded at all.
+        Dim history As List(Of PutAwayHistoryRow) = LoadPutAwayHistory()
+        If history.Count > 0 Then
+            Dim section As Panel = BuildHistorySection(history)
+            section.Location = New Point(0, nextY)
+            section.Width = rowsHost.ClientSize.Width - 4
+            section.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            rowsHost.Controls.Add(section)
+        End If
+
+        AddHandler rowsHost.Resize,
+            Sub()
+                Dim w As Integer = rowsHost.ClientSize.Width - 4
+                For Each c As Control In rowsHost.Controls
+                    c.Width = w
+                Next
+            End Sub
     End Sub
 
     Private Shared Function BuildListTop(count As Integer) As Panel
@@ -237,6 +269,153 @@ Public Class InventoryPutAwayPanelBuilder
         PositionRefresh()
 
         Return region
+    End Function
+
+    ' =========================================================================
+    '  HISTORY STRIP — recently stocked in
+    '
+    '  Sits below the pending cards. Deliberately quieter than them: this is a
+    '  record to consult, not work to do, so it uses a section heading and flat
+    '  rows rather than the raised, clickable cards above it. Nothing here
+    '  navigates — a finished put-away has no screen to open.
+    ' =========================================================================
+    Private Shared Function BuildHistorySection(rows As List(Of PutAwayHistoryRow)) As Panel
+        Dim rowH As Integer = 52
+        Dim headerH As Integer = 40
+        Dim host As New Panel With {
+            .Height = headerH + rows.Count * rowH + 8,
+            .BackColor = Color.Transparent
+        }
+
+        Dim lblHead As New Label With {
+            .Text = "RECENTLY STOCKED IN",
+            .Font = New Font("Segoe UI Semibold", 9F),
+            .ForeColor = FaintText,
+            .AutoSize = True,
+            .Location = New Point(24, 16),
+            .BackColor = Color.Transparent
+        }
+        host.Controls.Add(lblHead)
+
+        Dim card As New BufferedPanel With {
+            .Location = New Point(0, headerH),
+            .Height = rows.Count * rowH,
+            .BackColor = CardBg,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+        host.Controls.Add(card)
+
+        Dim y As Integer = 0
+        For i = 0 To rows.Count - 1
+            Dim r As Panel = BuildHistoryRow(rows(i), rowH, i < rows.Count - 1)
+            r.Location = New Point(0, y)
+            r.Width = card.ClientSize.Width
+            r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+            card.Controls.Add(r)
+            y += rowH
+        Next
+
+        AddHandler card.Resize,
+            Sub()
+                For Each c As Control In card.Controls
+                    c.Width = card.ClientSize.Width
+                Next
+            End Sub
+
+        Return host
+    End Function
+
+    Private Shared Function BuildHistoryRow(h As PutAwayHistoryRow, rowH As Integer,
+                                            drawDivider As Boolean) As Panel
+        Dim hasIssue As Boolean =
+            String.Equals(h.ConditionNote, "Discrepancy", StringComparison.OrdinalIgnoreCase)
+
+        Dim row As New BufferedPanel With {.Height = rowH, .BackColor = Color.Transparent}
+
+        AddHandler row.Paint,
+            Sub(s, e)
+                If Not drawDivider Then Return
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 22, rowH - 1, row.Width - 22, rowH - 1)
+                End Using
+            End Sub
+
+        ' The officer's name leads: this strip exists to answer "who", so that
+        ' is the column the eye should land on first, not the PO number.
+        Dim lblWho As New Label With {
+            .Text = h.OfficerName,
+            .Font = New Font("Segoe UI Semibold", 10.5F),
+            .ForeColor = MintDark,
+            .AutoSize = True,
+            .Location = New Point(22, 9),
+            .BackColor = Color.Transparent
+        }
+
+        Dim meta As String = h.PoNo & "   " & ChrW(8226) & "   " & h.SupplierName
+        If h.TotalUnits > 0 Then
+            meta &= "   " & ChrW(8226) & "   " & h.TotalUnits &
+                    If(h.TotalUnits = 1, " unit", " units")
+        End If
+        Dim lblMeta As New Label With {
+            .Text = meta,
+            .Font = New Font("Segoe UI", 9F),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .Location = New Point(24, 29),
+            .BackColor = Color.Transparent
+        }
+
+        Dim lblWhen As New Label With {
+            .Text = h.HappenedAt.ToString("MMM d, h:mm tt"),
+            .Font = New Font("Segoe UI", 9F),
+            .ForeColor = FaintText,
+            .AutoSize = True,
+            .BackColor = Color.Transparent,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+
+        row.Controls.AddRange({lblWho, lblMeta, lblWhen})
+
+        ' A discrepancy is the only thing on this row anyone urgently needs to
+        ' spot, so it gets a tinted chip beside the name with the remarks as a
+        ' tooltip — full text on demand, no truncated second line.
+        Dim chip As Label = Nothing
+        If hasIssue Then
+            chip = New Label With {
+                .Text = "Discrepancy",
+                .Font = New Font("Segoe UI Semibold", 8.5F),
+                .ForeColor = WarningClr,
+                .BackColor = Color.FromArgb(252, 240, 228),
+                .AutoSize = True,
+                .Padding = New Padding(10, 4, 10, 4),
+                .BackgroundImageLayout = ImageLayout.Stretch
+            }
+            RoundLabel(chip, 10)
+            If Not String.IsNullOrWhiteSpace(h.Remarks) Then
+                Dim tip As New ToolTip()
+                tip.SetToolTip(chip, h.Remarks)
+            End If
+            row.Controls.Add(chip)
+        End If
+
+        AddHandler row.Resize,
+            Sub()
+                lblWhen.Left = row.Width - lblWhen.Width - 22
+                lblWhen.Top = (rowH - lblWhen.Height) \ 2
+
+                If chip IsNot Nothing Then
+                    chip.Left = lblWho.Right + 10
+                    chip.Top = lblWho.Top + (lblWho.Height - chip.Height) \ 2
+                End If
+
+                Dim rightStop As Integer = lblWhen.Left - 14
+                lblWho.MaximumSize = New Size(
+                    Math.Max(80, rightStop - lblWho.Left - If(chip Is Nothing, 0, chip.Width + 10)), 22)
+                lblMeta.MaximumSize = New Size(Math.Max(80, rightStop - lblMeta.Left), 20)
+            End Sub
+
+        Return row
     End Function
 
     Private Shared Function BuildPendingCard(po As PutAwayPoRow) As Panel
@@ -457,6 +636,7 @@ Public Class InventoryPutAwayPanelBuilder
 
         currentPoId = poId
         currentPoNo = poNo
+        currentSupplierName = supplierName
         putAwayLines = LoadPutAwayLines(poId)
 
         If putAwayLines.Count = 0 Then
@@ -913,18 +1093,32 @@ Public Class InventoryPutAwayPanelBuilder
             Return
         End If
 
-        Dim linesSummary As String = String.Join(
-            Environment.NewLine,
-            toShelve.Select(Function(l) "  " & l.ProductName & ": +" & l.ShelveNow))
-        Dim confirmText As String =
-            "Confirm stock-in for " & currentPoNo & "?" &
-            Environment.NewLine & Environment.NewLine &
-            linesSummary & Environment.NewLine & Environment.NewLine &
-            "These units will be added to stock."
-        If AppModal.Show(confirmText, "Confirm Stock In",
-                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
-            Return
-        End If
+        ' ── ATTESTATION GATE ─────────────────────────────────────────────
+        ' Put-away is where stock actually reaches the shelf — the only place
+        ' products.stock_qty rises — so it needs a named officer for the same
+        ' reason the dock receipt does. Before this, the only trace was
+        ' stock_movements.user_id: whoever happened to be signed in, which an
+        ' unattended terminal turns into someone else's name on the record.
+        '
+        ' This REPLACES the old Yes/No confirm rather than following it. The
+        ' attestation dialog already shows the PO, the line count and the unit
+        ' total, so a second prompt in front of it would ask the same question
+        ' twice and train people to click through both.
+        Dim unitsNow As Integer = toShelve.Sum(Function(l) l.ShelveNow)
+        Dim att As ReceiveConfirmModal.Attestation =
+            ReceiveConfirmModal.Prompt(currentPoNo, currentSupplierName,
+                                       toShelve.Count, unitsNow,
+                                       ReceiveConfirmModal.PHASE_PUTAWAY,
+                                       toShelve.Count &
+                                       If(toShelve.Count = 1, " item", " items") &
+                                       "   " & ChrW(8226) & "   " & unitsNow &
+                                       If(unitsNow = 1, " unit", " units") & " to shelf")
+        If att Is Nothing Then Return   ' backed out — nothing written
+
+        ' The attestation row only lands where the table exists; on an
+        ' un-migrated database the stock-in still saves, it just carries no
+        ' stored attestation, which is the pre-existing behaviour.
+        Dim canStoreAttestation As Boolean = ReceiveConfirmModal.HasTable()
 
         Dim note As String = "Stocked in from PO " & currentPoNo
         Try
@@ -1012,13 +1206,26 @@ Public Class InventoryPutAwayPanelBuilder
                             End Using
                         Next
 
+                        ' The attestation commits with the movements it
+                        ' describes: an attestation for stock never shelved, or
+                        ' shelved stock with no attestation, are both worse than
+                        ' the old behaviour, so they share one transaction.
+                        If canStoreAttestation Then
+                            ReceiveConfirmModal.Save(conn, txn, currentPoId, att, unitsNow)
+                        End If
+
                         txn.Commit()
 
                         ' Put-away is the point stock actually enters the shelves,
-                        ' so record who did it against which PO.
+                        ' so record who did it against which PO. The officer's
+                        ' name is recorded here too, so the log answers "who
+                        ' shelved this" without a second lookup.
                         ActivityLog.Record("STOCK_PUTAWAY", "purchase_order", currentPoId,
                             toShelve.Count & If(toShelve.Count = 1, " line", " lines") &
-                            ", " & toShelve.Sum(Function(l) l.ShelveNow) & " unit(s) shelved")
+                            ", " & unitsNow & " unit(s) shelved" &
+                            ", stocked in by " & att.ReceiverName &
+                            If(att.ConditionNote = "Discrepancy",
+                               " (DISCREPANCY: " & att.Remarks & ")", " (good condition)"))
                     Catch exInner As Exception
                         txn.Rollback()
                         AppModal.Show("Stock-in was not saved:" & Environment.NewLine & exInner.Message,
@@ -1033,9 +1240,12 @@ Public Class InventoryPutAwayPanelBuilder
             Return
         End Try
 
-        Dim total As Integer = toShelve.Sum(Function(l) l.ShelveNow)
-        AppModal.Show(total & If(total = 1, " unit", " units") &
-                      " added to stock from " & currentPoNo & ".",
+        AppModal.Show(unitsNow & If(unitsNow = 1, " unit", " units") &
+                      " added to stock from " & currentPoNo & "." &
+                      Environment.NewLine & Environment.NewLine &
+                      "Stocked in by " & att.ReceiverName & "." &
+                      If(att.ConditionNote = "Discrepancy",
+                         Environment.NewLine & "Recorded with a discrepancy: " & att.Remarks, ""),
                       "Stock Added", MessageBoxButtons.OK, MessageBoxIcon.Information)
         RenderList()
     End Sub
@@ -1101,6 +1311,68 @@ Public Class InventoryPutAwayPanelBuilder
         Catch ex As Exception
             AppModal.Show("Could not load pending put-aways:" & Environment.NewLine & ex.Message,
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+        Return result
+    End Function
+
+    ' Recently completed put-aways, newest first.
+    '
+    ' WHY THIS SCREEN NEEDS IT
+    ' The pending list above is self-emptying: once a PO is fully shelved it
+    ' drops out, taking with it any trace of who shelved it. The officer who
+    ' created that record would have nowhere to see it, even though they are
+    ' the person it holds accountable. This strip keeps the last few visible.
+    '
+    ' Fails soft in every direction. goods_receipts and its phase column are
+    ' both optional migrations, and this is a nicety rather than the point of
+    ' the screen, so any problem returns an empty list and the strip does not
+    ' render — it must never block someone from stocking goods in.
+    Private Shared Function LoadPutAwayHistory(Optional limit As Integer = 10) As List(Of PutAwayHistoryRow)
+        Dim result As New List(Of PutAwayHistoryRow)
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+
+                ' Without the phase column every row is a dock receipt, so there
+                ' is no put-away history to show and the strip stays hidden.
+                ' Probed rather than assumed: selecting a missing column throws.
+                Dim hasPhase As Boolean = False
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM information_schema.columns " &
+                    "WHERE table_schema = DATABASE() AND table_name = 'goods_receipts' " &
+                    "  AND column_name = 'phase'", conn)
+                    hasPhase = (Convert.ToInt32(cmd.ExecuteScalar()) > 0)
+                End Using
+                If Not hasPhase Then Return result
+
+                Using cmd As New MySqlCommand(
+                    "SELECT po.po_no, s.name AS sname, gr.receiver_name, " &
+                    "       gr.condition_note, gr.remarks, gr.total_units, gr.received_at " &
+                    "FROM goods_receipts gr " &
+                    "JOIN purchase_orders po ON po.po_id = gr.po_id " &
+                    "JOIN suppliers s ON s.supplier_id = po.supplier_id " &
+                    "WHERE gr.phase = 'putaway' " &
+                    "ORDER BY gr.received_at DESC, gr.receipt_id DESC " &
+                    "LIMIT @lim", conn)
+                    cmd.Parameters.AddWithValue("@lim", limit)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            result.Add(New PutAwayHistoryRow With {
+                                .PoNo = rdr("po_no").ToString(),
+                                .SupplierName = rdr("sname").ToString(),
+                                .OfficerName = rdr("receiver_name").ToString(),
+                                .ConditionNote = rdr("condition_note").ToString(),
+                                .Remarks = If(IsDBNull(rdr("remarks")), "", rdr("remarks").ToString()),
+                                .TotalUnits = SafeInt(rdr("total_units")),
+                                .HappenedAt = Convert.ToDateTime(rdr("received_at"))
+                            })
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            Debug.WriteLine("InventoryPutAway LoadPutAwayHistory error: " & ex.Message)
+            result.Clear()
         End Try
         Return result
     End Function

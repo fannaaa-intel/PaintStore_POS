@@ -53,12 +53,26 @@ Public Class ProcurementDeliveryPanelBuilder
         Public Received As Integer
     End Class
 
+    ' One attested handling event for a PO: who took responsibility, when, for
+    ' how many units, and in which phase. Read from goods_receipts — the whole
+    ' point of the table is that this screen can answer "who accepted this"
+    ' without anyone opening the database.
+    Private Class ReceiptEvent
+        Public Phase As String          ' "receive" | "putaway"
+        Public OfficerName As String
+        Public ConditionNote As String  ' "Good" | "Discrepancy"
+        Public Remarks As String
+        Public TotalUnits As Integer
+        Public HappenedAt As DateTime
+    End Class
+
     ' ── STATE ────────────────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
     Private Shared rowsHostRef As Panel
     Private Shared allPos As New List(Of DeliveryPO)
     Private Shared expandedIds As New HashSet(Of Integer)
     Private Shared itemsCache As New Dictionary(Of Integer, List(Of DeliveryItem))
+    Private Shared receiptsCache As New Dictionary(Of Integer, List(Of ReceiptEvent))
 
     Private Shared ReadOnly GroupOrder() As String = {"Overdue", "Due Today", "Due This Week", "Upcoming"}
 
@@ -69,6 +83,7 @@ Public Class ProcurementDeliveryPanelBuilder
         containerRef = container
         expandedIds = New HashSet(Of Integer)()
         itemsCache = New Dictionary(Of Integer, List(Of DeliveryItem))()
+        receiptsCache = New Dictionary(Of Integer, List(Of ReceiptEvent))()
         allPos = LoadAll()
 
         container.SuspendLayout()
@@ -347,8 +362,17 @@ Public Class ProcurementDeliveryPanelBuilder
 
     Private Shared Function BuildItemsPanel(po As DeliveryPO) As Panel
         Dim items As List(Of DeliveryItem) = GetItems(po.PoId)
+        Dim receipts As List(Of ReceiptEvent) = GetReceipts(po.PoId)
+
+        ' The accountability strip sits ABOVE the line items: "who handled this"
+        ' is the question the expansion is being opened to answer once goods
+        ' have moved, and burying it under the product rows would hide it on
+        ' any PO with more than a few lines.
+        Dim custodyH As Integer = 0
+        If receipts.Count > 0 Then custodyH = 34 + receipts.Count * 44 + 10
+
         Dim rowH As Integer = 76
-        Dim h As Integer = 14 + Math.Max(1, items.Count) * rowH + 8
+        Dim h As Integer = custodyH + 14 + Math.Max(1, items.Count) * rowH + 8
         Dim panel As New BufferedPanel With {
         .Height = h,
         .BackColor = Color.White
@@ -358,19 +382,24 @@ Public Class ProcurementDeliveryPanelBuilder
         AddHandler panel.Paint,
         Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, False)
 
+        Dim custodyRows As List(Of Panel) = BuildCustodyRows(receipts)
+        For Each cr In custodyRows
+            panel.Controls.Add(cr)
+        Next
+
         If items.Count = 0 Then
             panel.Controls.Add(New Label With {
             .Text = "No line items on this purchase order.",
             .Font = New Font("Segoe UI", 9.5F),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(24, 16),
+            .Location = New Point(24, custodyH + 16),
             .BackColor = Color.Transparent
         })
             Return panel
         End If
 
-        Dim y As Integer = 8
+        Dim y As Integer = custodyH + 8
         For Each it In items
             Dim r As Panel = BuildItemRow(it, rowH)
             r.Location = New Point(0, y)
@@ -397,6 +426,131 @@ Public Class ProcurementDeliveryPanelBuilder
                 End If
             End Sub
         Return panel
+    End Function
+
+    ' =========================================================================
+    '  CUSTODY STRIP — who handled these goods
+    '
+    '  Renders the goods_receipts trail: a section heading, then one row per
+    '  attested event. Returns positioned controls rather than a container so
+    '  they share the items panel's resize handling and full-bleed dividers
+    '  instead of introducing a second nested scroll region.
+    ' =========================================================================
+    Private Shared Function BuildCustodyRows(receipts As List(Of ReceiptEvent)) As List(Of Panel)
+        Dim rows As New List(Of Panel)
+        If receipts Is Nothing OrElse receipts.Count = 0 Then Return rows
+
+        Dim header As New BufferedPanel With {
+            .Height = 34,
+            .Location = New Point(0, 0),
+            .BackColor = Color.Transparent,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+        header.Controls.Add(New Label With {
+            .Text = "HANDLED BY",
+            .Font = New Font("Segoe UI Semibold", 8.5F),
+            .ForeColor = FaintText,
+            .AutoSize = True,
+            .Location = New Point(24, 14),
+            .BackColor = Color.Transparent
+        })
+        rows.Add(header)
+
+        Dim y As Integer = 34
+        For Each ev In receipts
+            rows.Add(BuildCustodyRow(ev, y, 44))
+            y += 44
+        Next
+
+        Return rows
+    End Function
+
+    Private Shared Function BuildCustodyRow(ev As ReceiptEvent, top As Integer,
+                                            height As Integer) As Panel
+        Dim isPutAway As Boolean =
+            String.Equals(ev.Phase, "putaway", StringComparison.OrdinalIgnoreCase)
+        Dim hasIssue As Boolean =
+            String.Equals(ev.ConditionNote, "Discrepancy", StringComparison.OrdinalIgnoreCase)
+
+        Dim row As New BufferedPanel With {
+            .Height = height,
+            .Location = New Point(0, top),
+            .BackColor = Color.Transparent,
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        }
+
+        ' A hairline under every custody row, including the last: it separates
+        ' the strip from the line items that follow it.
+        AddHandler row.Paint,
+            Sub(s2, e2)
+                Using pen As New Pen(Color.FromArgb(228, 232, 230), 1)
+                    e2.Graphics.DrawLine(pen, 24, height - 1, row.Width - 24, height - 1)
+                End Using
+            End Sub
+
+        ' Phase badge, reusing the outline treatment the line-status badges use
+        ' so the strip reads as part of the same list rather than a new widget.
+        Dim phaseBadge As Label = OutlineBadge(
+            If(isPutAway, "Put Away", "Received"),
+            If(isPutAway, MintPrimary, PositiveClr))
+        phaseBadge.Anchor = AnchorStyles.Top Or AnchorStyles.Left
+        phaseBadge.Location = New Point(24, (height - phaseBadge.PreferredHeight) \ 2)
+        row.Controls.Add(phaseBadge)
+
+        Dim lblWho As New Label With {
+            .Text = ev.OfficerName,
+            .Font = New Font("Segoe UI Semibold", 10.5F),
+            .ForeColor = Color.FromArgb(10, 79, 66),
+            .AutoSize = True,
+            .BackColor = Color.Transparent
+        }
+        row.Controls.Add(lblWho)
+
+        Dim meta As String = ev.HappenedAt.ToString("dd MMM yyyy, h:mm tt")
+        If ev.TotalUnits > 0 Then
+            meta &= "   " & ChrW(183) & "   " & ev.TotalUnits &
+                    If(ev.TotalUnits = 1, " unit", " units")
+        End If
+        Dim lblMeta As New Label With {
+            .Text = meta,
+            .Font = New Font("Segoe UI", 9.0F),
+            .ForeColor = SubText,
+            .AutoSize = True,
+            .BackColor = Color.Transparent
+        }
+        row.Controls.Add(lblMeta)
+
+        ' A discrepancy is the reason anyone comes looking at this strip, so it
+        ' gets the right-hand slot the line rows use for status, with the
+        ' remarks as the tooltip rather than a truncated second line.
+        Dim issueBadge As Label = Nothing
+        If hasIssue Then
+            issueBadge = OutlineBadge("Discrepancy", WarningClr)
+            If Not String.IsNullOrWhiteSpace(ev.Remarks) Then
+                Dim tip As New ToolTip()
+                tip.SetToolTip(issueBadge, ev.Remarks)
+            End If
+            row.Controls.Add(issueBadge)
+        End If
+
+        AddHandler row.Resize,
+            Sub()
+                lblWho.Left = phaseBadge.Right + 12
+                lblWho.Top = (height - lblWho.Height) \ 2
+
+                Dim rightStop As Integer = row.Width - 24
+                If issueBadge IsNot Nothing Then
+                    issueBadge.Left = row.Width - issueBadge.Width - 24
+                    issueBadge.Top = (height - issueBadge.Height) \ 2
+                    rightStop = issueBadge.Left - 12
+                End If
+
+                lblMeta.Left = Math.Max(lblWho.Right + 14, rightStop - lblMeta.Width)
+                lblMeta.Top = (height - lblMeta.Height) \ 2
+                lblWho.MaximumSize = New Size(Math.Max(80, lblMeta.Left - lblWho.Left - 14), 24)
+            End Sub
+
+        Return row
     End Function
 
     Private Shared Function BuildItemRow(it As DeliveryItem, height As Integer) As Panel
@@ -582,6 +736,60 @@ Public Class ProcurementDeliveryPanelBuilder
             Debug.WriteLine("ProcurementDelivery GetItems error (PO " & poId & "): " & ex.Message)
         End Try
         itemsCache(poId) = result
+        Return result
+    End Function
+
+    ' Attested handling events for a PO, oldest first so the strip reads as a
+    ' chronology: accepted at the dock, then shelved (possibly in several trips).
+    '
+    ' goods_receipts and its phase column arrived in separate migrations, and
+    ' both are optional — this screen predates them. Any failure here (missing
+    ' table, missing column, no rights) yields an empty list and the strip
+    ' simply does not render, leaving the item list exactly as it was before.
+    Private Shared Function GetReceipts(poId As Integer) As List(Of ReceiptEvent)
+        If receiptsCache.ContainsKey(poId) Then Return receiptsCache(poId)
+        Dim result As New List(Of ReceiptEvent)
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+
+                ' Probed rather than assumed: selecting phase outright would
+                ' throw on a database with the table but not the column, and
+                ' turn a missing badge into a blank expansion.
+                Dim hasPhase As Boolean = False
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM information_schema.columns " &
+                    "WHERE table_schema = DATABASE() AND table_name = 'goods_receipts' " &
+                    "  AND column_name = 'phase'", conn)
+                    hasPhase = (Convert.ToInt32(cmd.ExecuteScalar()) > 0)
+                End Using
+
+                Using cmd As New MySqlCommand(
+                    "SELECT " & If(hasPhase, "gr.phase", "'receive' AS phase") & ", " &
+                    "gr.receiver_name, gr.condition_note, gr.remarks, " &
+                    "gr.total_units, gr.received_at " &
+                    "FROM goods_receipts gr WHERE gr.po_id = @poid " &
+                    "ORDER BY gr.received_at ASC, gr.receipt_id ASC", conn)
+                    cmd.Parameters.AddWithValue("@poid", poId)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            result.Add(New ReceiptEvent With {
+                                .Phase = rdr("phase").ToString(),
+                                .OfficerName = rdr("receiver_name").ToString(),
+                                .ConditionNote = rdr("condition_note").ToString(),
+                                .Remarks = If(IsDBNull(rdr("remarks")), "", rdr("remarks").ToString()),
+                                .TotalUnits = SafeInt(rdr("total_units")),
+                                .HappenedAt = Convert.ToDateTime(rdr("received_at"))
+                            })
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            Debug.WriteLine("ProcurementDelivery GetReceipts error (PO " & poId & "): " & ex.Message)
+            result.Clear()
+        End Try
+        receiptsCache(poId) = result
         Return result
     End Function
 

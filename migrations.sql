@@ -372,3 +372,39 @@ SHOW COLUMNS FROM suppliers LIKE 'bir_no';
 SHOW TABLES LIKE 'goods_receipts';
 SHOW COLUMNS FROM products LIKE 'cost_price';
 SHOW COLUMNS FROM sale_items LIKE 'unit_cost';
+
+
+-- -----------------------------------------------------------------------------
+--  12. goods_receipts.phase - separate the dock receipt from the shelf put-away
+--
+--     Receiving is two phases in this system, and each is a distinct moment of
+--     accountability:
+--
+--       'receive'  Procurement confirms goods arrived from the supplier. Writes
+--                  stock_movements (reference_type 'receive'). Ownership and
+--                  the payable become real here.
+--       'putaway'  Inventory physically moves the goods dock -> shelf. Writes
+--                  stock_movements (reference_type 'putaway') and is the ONLY
+--                  place products.stock_qty increases.
+--
+--     Section 10 recorded an attested receiver for the first phase only. The
+--     second had no attestation at all: it stamped stock_movements.user_id,
+--     whoever happened to be signed in - exactly the weakness section 10 was
+--     written to close, still open on the phase that moves live stock.
+--
+--     One row per receipt EVENT already, so a PO that is received once and
+--     shelved in two trips gets three rows. phase says which kind each is.
+--
+--     DEFAULT 'receive' backfills every existing row correctly: before this
+--     column only dock receipts were ever written.
+-- -----------------------------------------------------------------------------
+ALTER TABLE goods_receipts
+    ADD COLUMN IF NOT EXISTS phase ENUM('receive','putaway')
+        NOT NULL DEFAULT 'receive' AFTER po_id;
+
+-- Reading a PO's receipt history is always "this PO, this phase, in order",
+-- so the two columns are indexed together rather than separately.
+ALTER TABLE goods_receipts
+    ADD INDEX IF NOT EXISTS idx_gr_po_phase (po_id, phase);
+
+SHOW COLUMNS FROM goods_receipts LIKE 'phase';
