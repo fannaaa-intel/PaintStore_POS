@@ -32,6 +32,9 @@ Public Class CashPanelBuilder
     Private Shared _cashDropped As Decimal = 0D
     Private Shared _shiftStarted As DateTime = DateTime.MinValue
     Private Shared _mainContainer As Panel
+    ' Reset on every panel load so the "no shift" warning appears once per visit
+    ' rather than on every single +/- tap.
+    Private Shared _warnedNoShift As Boolean = False
 
     Private Shared ReadOnly IconBasePath As String = Application.StartupPath & "\"
     Private Shared ReadOnly IconCache As New Dictionary(Of String, Image)
@@ -63,12 +66,14 @@ Public Class CashPanelBuilder
     Private Shared _lblExpected As Label
     Private Shared _lblCounted As Label
     Private Shared _lblVariance As Label
+    Private Shared _lblVarianceHint As Label
 
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadCash(mainContainer As Panel)
         _mainContainer = mainContainer
+        _warnedNoShift = False
         mainContainer.Controls.Clear()
         mainContainer.BackColor = MintBg
 
@@ -111,6 +116,33 @@ Public Class CashPanelBuilder
         outer.Controls.Add(content, 0, 1)
         outer.Controls.Add(opsBar, 0, 2)
         outer.Controls.Add(actionBar, 0, 3)
+
+        ' With no open shift there is nothing to save counts against: every
+        ' SaveDenomCount returns at its first line. The screen still let the
+        ' cashier tap counts up and showed a running total, so the drawer looked
+        ' counted right up until a refresh wiped it -- the work was never
+        ' anywhere but on screen. Say so, loudly, instead of failing silently.
+        If _shiftId <= 0 Then
+            Dim warn As New Panel With {
+                .Dock = DockStyle.Top, .Height = 46, .BackColor = Color.FromArgb(255, 244, 222)
+            }
+            Dim lblWarn As New Label With {
+                .Text = "  ⚠   No open shift — counts on this screen are NOT being saved." &
+                        "  Go to POS and press Continue on the Start Shift screen first.",
+                .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleLeft,
+                .Font = New Font("Segoe UI Semibold", 10),
+                .ForeColor = Color.FromArgb(150, 90, 10), .BackColor = Color.Transparent
+            }
+            AddHandler warn.Paint,
+                Sub(s, e)
+                    Using p As New Pen(Color.FromArgb(226, 190, 120), 1)
+                        e.Graphics.DrawRectangle(p, 0, 0, warn.Width - 1, warn.Height - 1)
+                    End Using
+                End Sub
+            warn.Controls.Add(lblWarn)
+            host.Controls.Add(warn)
+            warn.BringToFront()
+        End If
 
         Recalc()
     End Sub
@@ -214,7 +246,20 @@ Public Class CashPanelBuilder
 
     ' ── Save a single denomination count to DB ────────────────────────────────
     Private Shared Sub SaveDenomCount(d As Denom)
-        If _shiftId <= 0 Then Return
+        ' No shift means nothing to attach the count to. This used to return in
+        ' silence, so the cashier counted a whole drawer that was only ever on
+        ' screen and lost it at the next refresh. Warn once per panel load --
+        ' every tap would be unusable, but saying nothing is worse.
+        If _shiftId <= 0 Then
+            If Not _warnedNoShift Then
+                _warnedNoShift = True
+                AppModal.Show("There is no open shift, so this count cannot be saved." & Environment.NewLine & Environment.NewLine &
+                              "Open the POS screen and press Continue on the Start Shift screen, " &
+                              "then come back and count the drawer.",
+                              "No Open Shift", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            End If
+            Return
+        End If
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -488,22 +533,34 @@ Public Class CashPanelBuilder
 
         Dim lblCaption As New Label With {
             .Text = "CASH COUNTED", .Font = New Font("Segoe UI Semibold", 10),
-            .ForeColor = SubText, .AutoSize = True
+            .ForeColor = SubText, .AutoSize = False,
+            .Dock = DockStyle.Left, .Width = 140,
+            .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
+        ' Docked right and right-aligned rather than positioned by hand.
+        '
+        ' This label was AutoSize with its Location computed in footer.Resize as
+        ' (footer.Width - label.Width - 18). Recalc() then sets the text, and an
+        ' AutoSize label grows RIGHTWARD from its fixed Location -- so once the
+        ' total reached a wider string like "P 1,341.25" it ran past the footer's
+        ' rounded clipping region and the last digits were cut off. Nothing
+        ' repositioned it, because a text change is not a resize of the footer.
+        '
+        ' Docking makes the width track the footer instead of the text, and
+        ' MiddleRight keeps the value hard against the 18px padding at any
+        ' length, so no amount can overflow.
         _lblCountFooter = New Label With {
             .Text = "₱ 0.00", .Font = New Font("Segoe UI", 16, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Anchor = AnchorStyles.Right Or AnchorStyles.Top
+            .ForeColor = MintDark, .AutoSize = False,
+            .Dock = DockStyle.Fill,
+            .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent,
+            .AutoEllipsis = True
         }
-        ' Both labels inset from the card border and vertically centred, so the
-        ' rounded footer corners never clip them.
-        AddHandler footer.Resize,
-            Sub()
-                lblCaption.Location = New Point(18, (footer.Height - lblCaption.Height) \ 2)
-                _lblCountFooter.Location = New Point(footer.Width - _lblCountFooter.Width - 18,
-                                                     (footer.Height - _lblCountFooter.Height) \ 2)
-            End Sub
-        footer.Controls.Add(lblCaption)
+        ' Fill must be added before Left so the docked Left strip is not
+        ' overlapped by it -- with Dock, later-added controls sit closest to
+        ' the centre of the remaining space.
         footer.Controls.Add(_lblCountFooter)
+        footer.Controls.Add(lblCaption)
         card.Controls.Add(footer)
 
         Return card
@@ -563,10 +620,19 @@ Public Class CashPanelBuilder
         grid.Controls.Add(chipWrap, 0, 0)
 
         ' Stepper
+        '
+        ' The count is TYPED, not tapped. Entering 47 one-peso coins through a
+        ' +/- stepper is 47 clicks; the cashier has already counted them and
+        ' just needs to write the number down. The buttons stay for small
+        ' corrections (one more bill found in the till), which is what a
+        ' stepper is actually good for.
         Dim stepWrap As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
-        Dim lblQty As New Label With {
-            .Text = d.Count.ToString(), .Size = New Size(40, 26), .TextAlign = ContentAlignment.MiddleCenter,
-            .Font = New Font("Segoe UI Semibold", 11), .ForeColor = MintDark, .BackColor = Color.Transparent
+        Dim txtQty As New TextBox With {
+            .Text = d.Count.ToString(), .Size = New Size(52, 26),
+            .TextAlign = HorizontalAlignment.Center,
+            .Font = New Font("Segoe UI Semibold", 11), .ForeColor = MintDark,
+            .BorderStyle = BorderStyle.FixedSingle, .BackColor = Color.White,
+            .MaxLength = 4
         }
         Dim btnMinus As New Button With {.Text = "−", .Size = New Size(28, 26), .FlatStyle = FlatStyle.Flat,
             .Font = New Font("Segoe UI", 11, FontStyle.Bold), .ForeColor = SubText, .BackColor = TileBg, .Cursor = Cursors.Hand}
@@ -582,12 +648,78 @@ Public Class CashPanelBuilder
             .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintDark, .BackColor = Color.Transparent
         }
 
+        ' True while code is writing to the box, so the TextChanged handler can
+        ' tell its own updates apart from the cashier's typing.
+        Dim updating As Boolean = False
+
         Dim SyncRow As Action =
             Sub()
-                lblQty.Text = d.Count.ToString()
+                updating = True
+                txtQty.Text = d.Count.ToString()
+                updating = False
                 lblLine.Text = "₱ " & (d.Value * d.Count).ToString("N2")
                 lblLine.ForeColor = If(d.Count > 0, MintDark, Color.FromArgb(170, 178, 175))
             End Sub
+
+        ' Only the subtotal is refreshed while typing -- rewriting txtQty here
+        ' would fight the cashier for the caret (typing "12" would land as "21"
+        ' or reset to "1" mid-keystroke).
+        Dim SyncLineOnly As Action =
+            Sub()
+                lblLine.Text = "₱ " & (d.Value * d.Count).ToString("N2")
+                lblLine.ForeColor = If(d.Count > 0, MintDark, Color.FromArgb(170, 178, 175))
+            End Sub
+
+        ' Digits only. Silently refusing a letter is better than a modal on a
+        ' screen where the cashier is typing eleven numbers in a row.
+        AddHandler txtQty.KeyPress,
+            Sub(s As Object, e As KeyPressEventArgs)
+                If Not Char.IsControl(e.KeyChar) AndAlso Not Char.IsDigit(e.KeyChar) Then e.Handled = True
+            End Sub
+
+        ' Live total as they type: the running CASH COUNTED updates on each
+        ' keystroke, but nothing is written to the database until they leave
+        ' the field -- a save per keystroke would be a query per keystroke.
+        AddHandler txtQty.TextChanged,
+            Sub()
+                If updating Then Return
+                Dim n As Integer
+                If Integer.TryParse(txtQty.Text.Trim(), n) AndAlso n >= 0 Then
+                    d.Count = n
+                ElseIf txtQty.Text.Trim() = "" Then
+                    d.Count = 0
+                End If
+                SyncLineOnly()
+                Recalc()
+            End Sub
+
+        ' Commit on leaving the field: normalise what is shown ("007" -> "7",
+        ' empty -> "0") and persist once.
+        AddHandler txtQty.Leave,
+            Sub()
+                Dim n As Integer
+                If Not Integer.TryParse(txtQty.Text.Trim(), n) OrElse n < 0 Then n = 0
+                d.Count = n
+                SyncRow()
+                Recalc()
+                SaveDenomCount(d)
+            End Sub
+
+        ' Enter commits and moves on, so the whole drawer is entered from the
+        ' keyboard without reaching for the mouse.
+        AddHandler txtQty.KeyDown,
+            Sub(s As Object, e As KeyEventArgs)
+                If e.KeyCode = Keys.Enter Then
+                    e.SuppressKeyPress = True
+                    Dim frm = row.FindForm()
+                    If frm IsNot Nothing Then frm.SelectNextControl(txtQty, True, True, True, True)
+                End If
+            End Sub
+
+        ' Select-all on focus: typing then replaces the count instead of
+        ' appending to it ("0" + "12" = "012").
+        AddHandler txtQty.Enter, Sub() txtQty.SelectAll()
+        AddHandler txtQty.Click, Sub() If txtQty.SelectionLength = 0 Then txtQty.SelectAll()
 
         AddHandler btnMinus.Click,
             Sub()
@@ -608,15 +740,15 @@ Public Class CashPanelBuilder
 
         Dim layoutStepper As Action =
             Sub()
-                Dim total As Integer = btnMinus.Width + lblQty.Width + btnPlus.Width
+                Dim total As Integer = btnMinus.Width + txtQty.Width + btnPlus.Width
                 Dim sx As Integer = (stepWrap.Width - total) \ 2
                 Dim cy As Integer = (stepWrap.Height - 26) \ 2
                 btnMinus.Location = New Point(sx, cy)
-                lblQty.Location = New Point(sx + btnMinus.Width, cy)
-                btnPlus.Location = New Point(sx + btnMinus.Width + lblQty.Width, cy)
+                txtQty.Location = New Point(sx + btnMinus.Width, cy)
+                btnPlus.Location = New Point(sx + btnMinus.Width + txtQty.Width, cy)
             End Sub
         AddHandler stepWrap.Resize, Sub() layoutStepper()
-        stepWrap.Controls.AddRange({btnMinus, lblQty, btnPlus})
+        stepWrap.Controls.AddRange({btnMinus, txtQty, btnPlus})
         grid.Controls.Add(stepWrap, 1, 0)
         grid.Controls.Add(lblLine, 2, 0)
 
@@ -688,18 +820,24 @@ Public Class CashPanelBuilder
             End Sub
 
         ' Stats
+        '
+        ' Nine rows, not seven: PAY-INS and SAFE DROPS were part of the EXPECTED
+        ' formula in Recalc but were never shown, so the figures on screen did
+        ' not add up to the total printed beneath them. A cashier checking the
+        ' arithmetic by hand would find money unaccounted for and no way to see
+        ' where it went. Every term in the formula now has a visible row.
         Dim stats As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 7,
-            .BackColor = Color.Transparent, .Padding = New Padding(16, 12, 16, 8)
+            .Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 9,
+            .BackColor = Color.Transparent, .Padding = New Padding(16, 10, 16, 6)
         }
         stats.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 58.0F))
         stats.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 42.0F))
-        For i = 0 To 3
-            stats.RowStyles.Add(New RowStyle(SizeType.Percent, 16.0F))
+        For i = 0 To 5
+            stats.RowStyles.Add(New RowStyle(SizeType.Percent, 12.5F))
         Next
-        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 14))
-        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 16.0F))
-        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 16.0F))
+        stats.RowStyles.Add(New RowStyle(SizeType.Absolute, 12))
+        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 12.5F))
+        stats.RowStyles.Add(New RowStyle(SizeType.Percent, 12.5F))
 
         Dim AddStat As Action(Of Integer, String, String, Boolean, Color) =
             Sub(rowIdx As Integer, labelText As String, valueText As String, bold As Boolean, valColor As Color)
@@ -717,11 +855,15 @@ Public Class CashPanelBuilder
                 stats.Controls.Add(v, 1, rowIdx)
             End Sub
 
-        ' Use real DB values
+        ' Use real DB values. Order follows the money: what we started with,
+        ' what came in, then what went out -- matching the EXPECTED formula in
+        ' Recalc term for term so the column can be checked by hand.
         AddStat(0, "OPENING FLOAT", "₱ " & _openingFloat.ToString("N2"), False, Color.FromArgb(50, 70, 65))
         AddStat(1, "+ CASH SALES", "₱ " & _cashSales.ToString("N2"), False, Color.FromArgb(0, 150, 122))
-        AddStat(2, "− CASH PAID OUT", "₱ " & _cashPaidOut.ToString("N2"), False, DangerFore)
-        AddStat(3, "− REFUNDS", "₱ " & _cashRefunds.ToString("N2"), False, DangerFore)
+        AddStat(2, "+ PAY-INS", "₱ " & _cashPaidIn.ToString("N2"), False, Color.FromArgb(0, 150, 122))
+        AddStat(3, "− CASH PAID OUT", "₱ " & _cashPaidOut.ToString("N2"), False, DangerFore)
+        AddStat(4, "− REFUNDS", "₱ " & _cashRefunds.ToString("N2"), False, DangerFore)
+        AddStat(5, "− SAFE DROPS", "₱ " & _cashDropped.ToString("N2"), False, DangerFore)
 
         Dim div As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         AddHandler div.Paint,
@@ -729,7 +871,7 @@ Public Class CashPanelBuilder
                 Using pen As New Pen(CardBorder, 1.5F) : e.Graphics.DrawLine(pen, 0, div.Height \ 2, div.Width, div.Height \ 2) : End Using
             End Sub
         stats.SetColumnSpan(div, 2)
-        stats.Controls.Add(div, 0, 4)
+        stats.Controls.Add(div, 0, 6)
 
         Dim lblExpL As New Label With {
             .Text = "EXPECTED IN DRAWER", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleLeft,
@@ -739,8 +881,8 @@ Public Class CashPanelBuilder
             .Text = "₱ 0.00", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleRight,
             .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold), .ForeColor = MintDark, .BackColor = Color.Transparent
         }
-        stats.Controls.Add(lblExpL, 0, 5)
-        stats.Controls.Add(_lblExpected, 1, 5)
+        stats.Controls.Add(lblExpL, 0, 7)
+        stats.Controls.Add(_lblExpected, 1, 7)
 
         Dim lblCntL As New Label With {
             .Text = "CASH COUNTED", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleLeft,
@@ -750,8 +892,8 @@ Public Class CashPanelBuilder
             .Text = "₱ 0.00", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleRight,
             .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold), .ForeColor = MintDark, .BackColor = Color.Transparent
         }
-        stats.Controls.Add(lblCntL, 0, 6)
-        stats.Controls.Add(_lblCounted, 1, 6)
+        stats.Controls.Add(lblCntL, 0, 8)
+        stats.Controls.Add(_lblCounted, 1, 8)
 
         ' Variance block
         Dim block As New BufferedPanel With {
@@ -767,12 +909,16 @@ Public Class CashPanelBuilder
                     g.FillRoundedRectangle(br, rect, 10)
                 End Using
             End Sub
+        ' Two rows: the figure, then a plain-language reading of it underneath.
+        ' "OVER / SHORT: -50.00" tells a trained cashier plenty and a new one
+        ' nothing, so the second row says what it means in words.
         Dim tl As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent
+            .Dock = DockStyle.Fill, .ColumnCount = 2, .RowCount = 2, .BackColor = Color.Transparent
         }
         tl.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 42.0F))
         tl.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 58.0F))
-        tl.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
+        tl.RowStyles.Add(New RowStyle(SizeType.Percent, 62.0F))
+        tl.RowStyles.Add(New RowStyle(SizeType.Percent, 38.0F))
         Dim lblVL As New Label With {
             .Text = "OVER / SHORT", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleLeft,
             .Font = New Font("Segoe UI", 12, FontStyle.Bold), .ForeColor = Color.FromArgb(200, 240, 225),
@@ -781,10 +927,19 @@ Public Class CashPanelBuilder
         _lblVariance = New Label With {
             .Text = "₱ 0.00", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleRight,
             .Font = New Font("Segoe UI", 18, FontStyle.Bold), .ForeColor = OkGreen,
-            .BackColor = Color.Transparent, .Padding = New Padding(0, 0, 14, 0)
+            .BackColor = Color.Transparent, .Padding = New Padding(0, 0, 14, 0),
+            .AutoEllipsis = True
+        }
+        _lblVarianceHint = New Label With {
+            .Text = "", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleRight,
+            .Font = New Font("Segoe UI", 8.5F), .ForeColor = Color.FromArgb(170, 205, 195),
+            .BackColor = Color.Transparent, .Padding = New Padding(14, 0, 14, 0),
+            .AutoEllipsis = True
         }
         tl.Controls.Add(lblVL, 0, 0)
         tl.Controls.Add(_lblVariance, 1, 0)
+        tl.SetColumnSpan(_lblVarianceHint, 2)
+        tl.Controls.Add(_lblVarianceHint, 0, 1)
         varCard.Controls.Add(tl)
         block.Controls.Add(varCard)
 
@@ -810,6 +965,7 @@ Public Class CashPanelBuilder
         If _lblExpected IsNot Nothing Then _lblExpected.Text = "₱ " & expected.ToString("N2")
         If _lblCounted IsNot Nothing Then _lblCounted.Text = "₱ " & counted.ToString("N2")
 
+        Dim hint As String
         If _lblVariance IsNot Nothing Then
             If variance = 0D Then
                 _lblVariance.Text = "✓  ₱ 0.00"
@@ -822,6 +978,18 @@ Public Class CashPanelBuilder
                 _lblVariance.ForeColor = ShortRed
             End If
         End If
+
+        ' Say what the number means, in the words a cashier would use.
+        If counted = 0D Then
+            hint = "Count the drawer to see if it balances"
+        ElseIf variance = 0D Then
+            hint = "Drawer balances — safe to close"
+        ElseIf variance > 0D Then
+            hint = "₱ " & variance.ToString("N2") & " MORE in the drawer than expected"
+        Else
+            hint = "₱ " & Math.Abs(variance).ToString("N2") & " MISSING from the drawer"
+        End If
+        If _lblVarianceHint IsNot Nothing Then _lblVarianceHint.Text = hint
     End Sub
 
     ' =========================================================================
@@ -890,16 +1058,67 @@ Public Class CashPanelBuilder
             Return
         End If
 
+        ' Commit whatever is in the focused count box first.
+        '
+        ' Counts persist on Leave, but clicking Close Drawer straight from a box
+        ' the cashier just typed into does not always raise Leave before the
+        ' click is handled. The typed value is in _denoms either way (TextChanged
+        ' keeps it live), so the close itself is correct -- but cash_counts would
+        ' miss that last denomination, and the saved breakdown would then not add
+        ' up to the counted_cash recorded beside it.
+        If _mainContainer IsNot Nothing Then
+            Dim frm = _mainContainer.FindForm()
+            If frm IsNot Nothing AndAlso TypeOf frm.ActiveControl Is TextBox Then
+                frm.ActiveControl = Nothing
+            End If
+        End If
+
+        ' Re-read the shift figures before computing what gets written.
+        '
+        ' The panel loads these once and only refreshes on navigation or the
+        ' Refresh button, so a drawer screen left open while sales continued
+        ' elsewhere held a stale _cashSales. Closing from that screen wrote the
+        ' stale expected -- and its variance -- into the shift row permanently,
+        ' inventing a shortage the cashier could not account for. The figures
+        ' are only trustworthy as of this moment, so read them at this moment.
+        LoadShiftData()
+        If _shiftId <= 0 Then
+            AppModal.Show("This shift is no longer open. It may have been closed elsewhere.",
+                            "Close Drawer", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)
+            Return
+        End If
+
         Dim counted As Decimal = If(_denoms Is Nothing, 0D, _denoms.Sum(Function(d) d.Value * d.Count))
         Dim expected As Decimal = _openingFloat + _cashSales + _cashPaidIn _
                                   - _cashPaidOut - _cashRefunds - _cashDropped
         Dim variance As Decimal = counted - expected
 
+        ' Closing on an uncounted drawer is almost always a forgotten count
+        ' rather than a genuinely empty till, and the resulting variance is
+        ' recorded permanently. Make them say so deliberately.
+        If counted = 0D AndAlso expected <> 0D Then
+            If AppModal.Show(
+                "No cash has been counted, but ₱ " & expected.ToString("N2") & " is expected in the drawer." & vbCrLf & vbCrLf &
+                "Closing now records a shortage of ₱ " & Math.Abs(variance).ToString("N2") & " against your name." & vbCrLf & vbCrLf &
+                "Count the drawer first?",
+                "Drawer Not Counted", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) = DialogResult.Yes Then Return
+        End If
+
+        Dim varianceLine As String
+        If variance = 0D Then
+            varianceLine = "  Variance:  ₱ 0.00  (balanced)"
+        ElseIf variance > 0D Then
+            varianceLine = "  Variance:  ₱ " & variance.ToString("N2") & "  (OVER — more cash than expected)"
+        Else
+            varianceLine = "  Variance:  ₱ " & variance.ToString("N2") & "  (SHORT — cash missing)"
+        End If
+
         Dim msg As String =
             "Close this shift?" & vbCrLf & vbCrLf &
             "  Expected:  ₱ " & expected.ToString("N2") & vbCrLf &
             "  Counted:   ₱ " & counted.ToString("N2") & vbCrLf &
-            "  Variance:  ₱ " & variance.ToString("N2") & vbCrLf & vbCrLf &
+            varianceLine & vbCrLf & vbCrLf &
             "Once closed, this shift can no longer record cash."
         If AppModal.Show(msg, "Close Drawer", MessageBoxButtons.YesNo,
                            MessageBoxIcon.Question) <> DialogResult.Yes Then Return
@@ -966,9 +1185,15 @@ Public Class CashPanelBuilder
         lines.Add(ReceiptPrinter.Divider())
 
         If _denoms IsNot Nothing Then
-            For Each d In _denoms.Where(Function(x) x.Count > 0).OrderByDescending(Function(x) x.Value)
+            ' Bills before coins, each group high to low -- and each line says
+            ' which it is. There is both a 20-peso bill and a 20-peso coin, so
+            ' without the suffix the printout showed two identical "P 20.00"
+            ' rows and the manager checking it could not tell them apart.
+            For Each d In _denoms.Where(Function(x) x.Count > 0) _
+                                 .OrderByDescending(Function(x) x.IsBill) _
+                                 .ThenByDescending(Function(x) x.Value)
                 lines.Add(New ReceiptPrinter.RLine(
-                    "₱ " & d.Value.ToString("N2") & " × " & d.Count.ToString(),
+                    "₱ " & d.Value.ToString("N2") & If(d.IsBill, " bill", " coin") & " × " & d.Count.ToString(),
                     "₱ " & (d.Value * d.Count).ToString("N2")))
             Next
         End If
@@ -1022,8 +1247,19 @@ Public Class CashPanelBuilder
 
             If f.ShowDialog() <> DialogResult.OK Then Return (False, 0D, "")
 
+            ' The TryParse result was discarded, so unparseable text silently
+            ' became 0 and was returned as a success. "abc" was caught later by
+            ' the caller's <= 0 check, but a typo like "50x" or a stray keystroke
+            ' produced a confidently wrong amount with no complaint. Reject text
+            ' that is not a number rather than guessing what it meant.
             Dim amt As Decimal = 0
-            Decimal.TryParse(txtAmt.Text.Replace("₱", "").Replace(",", "").Trim(), amt)
+            Dim raw As String = txtAmt.Text.Replace("₱", "").Replace(",", "").Trim()
+            If Not Decimal.TryParse(raw, amt) Then
+                AppModal.Show("'" & txtAmt.Text.Trim() & "' is not a valid amount." & Environment.NewLine &
+                              "Enter digits only, for example 500.00",
+                              title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                Return (False, 0D, "")
+            End If
             Return (True, Decimal.Round(amt, 2), txtNote.Text.Trim())
         End Using
     End Function
@@ -1289,20 +1525,45 @@ Public Class CashPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT denomination, is_bill, qty FROM cash_counts WHERE shift_id=@sid", conn)
                     cmd.Parameters.AddWithValue("@sid", _shiftId)
-                    Dim counts As New Dictionary(Of String, Integer)
+
+                    ' Keyed on the TYPED pair, not on formatted strings.
+                    '
+                    ' This previously built the key with .ToString() on both
+                    ' sides, which never matched: denomination is decimal(7,2),
+                    ' so MySQL returns "1000.00" while the in-memory literal
+                    ' 1000D formats as "1000". Every whole-peso denomination
+                    ' failed to load, so a saved count silently came back as
+                    ' zero on every refresh -- and CloseDrawer would then record
+                    ' counted=0 against a real expected figure, writing a fake
+                    ' shortage into the shift's permanent audit record.
+                    ' is_bill was equally fragile: "True" only if the driver
+                    ' hands back a Boolean, "1" if it hands back the raw tinyint.
+                    ' A Decimal/Boolean tuple compares by value and sidesteps
+                    ' both formatting questions entirely.
+                    Dim counts As New Dictionary(Of Tuple(Of Decimal, Boolean), Integer)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
-                            Dim key As String = rdr("denomination").ToString() & "_" & rdr("is_bill").ToString()
-                            counts(key) = CInt(rdr("qty"))
+                            Dim denom As Decimal = Convert.ToDecimal(rdr("denomination"))
+                            Dim isBill As Boolean = Convert.ToBoolean(rdr("is_bill"))
+                            counts(Tuple.Create(denom, isBill)) = Convert.ToInt32(rdr("qty"))
                         End While
                     End Using
                     For Each d In denoms
-                        Dim key As String = d.Value.ToString() & "_" & d.IsBill.ToString()
-                        If counts.ContainsKey(key) Then d.Count = counts(key)
+                        Dim qty As Integer
+                        If counts.TryGetValue(Tuple.Create(d.Value, d.IsBill), qty) Then d.Count = qty
                     Next
                 End Using
             End Using
-        Catch
+        Catch ex As Exception
+            ' A failure here means the on-screen counts silently disagree with
+            ' what the drawer actually holds, which is the one thing this screen
+            ' exists to get right. Surface it rather than showing a zeroed drawer
+            ' that looks like a legitimate count.
+            System.Diagnostics.Debug.WriteLine("GetDrawer error: " & ex.Message)
+            AppModal.Show("The saved denomination counts could not be loaded:" & Environment.NewLine & Environment.NewLine &
+                          ex.Message & Environment.NewLine & Environment.NewLine &
+                          "The drawer is showing zero for every denomination. Re-count before closing the drawer.",
+                          "Counts Not Loaded", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
 
         Return denoms

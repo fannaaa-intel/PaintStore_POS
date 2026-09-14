@@ -248,6 +248,13 @@ Public Class POS_STAFF
         SetActive(home)
         TintLogout()
 
+        ' ── OPEN THE SHIFT ──────────────────────────────────────────────────────
+        ' Automatic: the cashier signing in IS the start of their shift, so there
+        ' is nothing to confirm. Must run before the first panel loads -- the
+        ' Cash Drawer reads Session.ShiftId and silently discards counts if it
+        ' is still zero.
+        EnsureShiftOpen()
+
         ' ── LOAD HOME ───────────────────────────────────────────────────────────
         shiftStartTime = DateTime.Now
         MainContainer.SuspendLayout()
@@ -399,11 +406,22 @@ Public Class POS_STAFF
         ShiftTimer.Start()
     End Sub
 
-    Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)
-        shiftStartTime = DateTime.Now
-        If ShiftTimer IsNot Nothing Then ShiftTimer.Stop() : ShiftTimer.Dispose()
-
-        ' INSERT shift into DB and store the ID
+    ' ===========================================================================
+    ' SHIFT BOOTSTRAP
+    '
+    ' Make sure this cashier has an open shift, and load their quota.
+    '
+    ' This used to live inside CloseShiftOverlay, i.e. behind the Continue button
+    ' of the Start Shift overlay. That overlay's only caller was removed at some
+    ' point, so ShowStartShiftOverlay became dead code -- and the shift INSERT
+    ' went with it. The result: no cashier could ever open a shift, the shifts
+    ' table stayed empty, and every cash-drawer count was silently discarded
+    ' because SaveDenomCount returns immediately when there is no shift id.
+    '
+    ' Opening a shift is a data concern, not a UI one, so it runs on form load
+    ' regardless of whether any overlay is shown.
+    ' ===========================================================================
+    Private Sub EnsureShiftOpen()
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -448,8 +466,22 @@ Public Class POS_STAFF
                 End Using
             End Using
         Catch ex As Exception
-            System.Diagnostics.Debug.WriteLine("CloseShiftOverlay DB error: " & ex.Message)
+            ' Without a shift, sales and drawer counts have nothing to attach to
+            ' and are silently dropped. That is exactly the failure this whole
+            ' fix is about, so it must not be swallowed again.
+            System.Diagnostics.Debug.WriteLine("EnsureShiftOpen DB error: " & ex.Message)
+            AppModal.Show("Could not open a cash shift:" & Environment.NewLine & Environment.NewLine &
+                          ex.Message & Environment.NewLine & Environment.NewLine &
+                          "Sales and drawer counts cannot be recorded until this is fixed.",
+                          "Shift Not Opened", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
+    End Sub
+
+    Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)
+        shiftStartTime = DateTime.Now
+        If ShiftTimer IsNot Nothing Then ShiftTimer.Stop() : ShiftTimer.Dispose()
+
+        EnsureShiftOpen()
 
         ShiftOverlay.Dispose()
         SetActive(home)
