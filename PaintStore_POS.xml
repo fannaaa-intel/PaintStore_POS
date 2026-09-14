@@ -48,6 +48,21 @@ PaintStore_POS
  active-highlight / load logic stays in one place. Errors surface on the modal.
  </summary>
 </member>
+<member name="M:PaintStore_POS.CashPanelBuilder.ResetForNewSession">
+ <summary>
+ Drop this till's state when the cashier signs out.
+ </summary>
+ <remarks>
+ Every field here is Shared, so it outlives the form. Transaction and
+ Returns are cleared on logout for exactly this reason; Cash was not,
+ which left the previous cashier's shift id, counted denominations and
+ reconciliation figures in memory, plus label references pointing at
+ controls that had already been disposed with their form. LoadCash
+ re-queries the shift, so the panel itself recovered -- but anything
+ touching this state before the next build was reading one cashier's
+ drawer while another was signed in.
+ </remarks>
+</member>
 <member name="M:PaintStore_POS.CashPanelBuilder.CashMovement(System.String,System.String,System.String)">
  <summary>Record a PayIn / PayOut / Drop against the current shift.</summary>
 </member>
@@ -59,6 +74,16 @@ PaintStore_POS
 </member>
 <member name="M:PaintStore_POS.CashPanelBuilder.PromptAmount(System.String,System.String)">
  <summary>Modal amount + note prompt. Returns (ok, amount, note).</summary>
+</member>
+<member name="M:PaintStore_POS.ReturnsPanelBuilder.MethodDisplay(System.String)">
+ <summary>
+ Readable spelling of a stored refund_method enum value.
+ </summary>
+ <remarks>
+ The column stores 'CardReversal'; a person reading a receipt or an
+ activity-log entry should see "Card Reversal". Keeping the two apart is
+ what lets the stored value match the enum exactly.
+ </remarks>
 </member>
 <member name="T:PaintStore_POS.ReceiveConfirmModal.Attestation">
  <summary>

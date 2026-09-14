@@ -1730,6 +1730,24 @@ Public Class TransactionPanelBuilder
             Return
         End If
 
+        ' A sale with no shift is recorded with shift_id NULL, which means the
+        ' cash it brought in belongs to no drawer: it never appears in any
+        ' shift's CASH SALES, so that drawer reconciles against money it cannot
+        ' see and reads short by the amount of the sale. It used to happen
+        ' silently. POS_STAFF opens a shift on load, so reaching here without
+        ' one means that failed -- worth stopping for, because the alternative
+        ' is an unreconcilable sale nobody notices until the drawer is counted.
+        If Session.ShiftId <= 0 Then
+            If AppModal.Show(
+                "No cash shift is open, so this sale cannot be tied to a drawer." & Environment.NewLine & Environment.NewLine &
+                "Its cash will not appear in any shift's takings and the drawer will read short by " &
+                "₱ " & total.ToString("N2") & " when counted." & Environment.NewLine & Environment.NewLine &
+                "Complete the sale anyway?",
+                "No Open Shift", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
+                Return
+            End If
+        End If
+
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()

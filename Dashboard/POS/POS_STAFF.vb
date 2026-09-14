@@ -883,6 +883,10 @@ Public Class POS_STAFF
         ' previous one's cart and can reprint their receipt and refund slip.
         TransactionPanelBuilder.ResetForNewSession()
         ReturnsPanelBuilder.ResetForNewSession()
+        ' Cash was missing from this list: its shift id, denomination counts and
+        ' reconciliation figures are Shared too, and survived into the next
+        ' cashier's session along with label references to disposed controls.
+        CashPanelBuilder.ResetForNewSession()
 
         ' Drop the signed-in identity before returning to the login screen, so
         ' nothing done afterwards is attributed to the user who just left.

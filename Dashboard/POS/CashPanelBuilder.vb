@@ -68,6 +68,40 @@ Public Class CashPanelBuilder
     Private Shared _lblVariance As Label
     Private Shared _lblVarianceHint As Label
 
+    ''' <summary>
+    ''' Drop this till's state when the cashier signs out.
+    ''' </summary>
+    ''' <remarks>
+    ''' Every field here is Shared, so it outlives the form. Transaction and
+    ''' Returns are cleared on logout for exactly this reason; Cash was not,
+    ''' which left the previous cashier's shift id, counted denominations and
+    ''' reconciliation figures in memory, plus label references pointing at
+    ''' controls that had already been disposed with their form. LoadCash
+    ''' re-queries the shift, so the panel itself recovered -- but anything
+    ''' touching this state before the next build was reading one cashier's
+    ''' drawer while another was signed in.
+    ''' </remarks>
+    Public Shared Sub ResetForNewSession()
+        _shiftId = 0
+        _openingFloat = 0D
+        _cashSales = 0D
+        _cashPaidOut = 0D
+        _cashRefunds = 0D
+        _cashPaidIn = 0D
+        _cashDropped = 0D
+        _shiftStarted = DateTime.MinValue
+        _warnedNoShift = False
+        _denoms = Nothing
+        _mainContainer = Nothing
+        ' These point at controls owned by the outgoing cashier's form. Once it
+        ' is disposed, writing to them from Recalc touches dead controls.
+        _lblCountFooter = Nothing
+        _lblExpected = Nothing
+        _lblCounted = Nothing
+        _lblVariance = Nothing
+        _lblVarianceHint = Nothing
+    End Sub
+
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================

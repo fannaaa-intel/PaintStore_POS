@@ -931,6 +931,23 @@ Public Class ReturnsPanelBuilder
     ' =========================================================================
     '  3. REFUND METHOD BAR  (wired — click tracks _selectedRefundMethod)
     ' =========================================================================
+    ''' <summary>
+    ''' Readable spelling of a stored refund_method enum value.
+    ''' </summary>
+    ''' <remarks>
+    ''' The column stores 'CardReversal'; a person reading a receipt or an
+    ''' activity-log entry should see "Card Reversal". Keeping the two apart is
+    ''' what lets the stored value match the enum exactly.
+    ''' </remarks>
+    Private Shared Function MethodDisplay(stored As String) As String
+        Select Case stored
+            Case "CardReversal" : Return "Card Reversal"
+            Case "EWallet" : Return "E-Wallet"
+            Case "StoreCredit" : Return "Store Credit"
+            Case Else : Return stored
+        End Select
+    End Function
+
     Private Shared Function BuildMethodBar() As Control
         Dim host As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0, 10, 0, 4)}
         Dim layout As New TableLayoutPanel With {
@@ -942,10 +959,19 @@ Public Class ReturnsPanelBuilder
         Next
         layout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
 
+        ' The method name passed here is written straight into returns.
+        ' refund_method, which is enum('Cash','CardReversal','EWallet',
+        ' 'StoreCredit') -- no spaces, no hyphen. This used to pass the display
+        ' spelling ("Card Reversal", "E-Wallet", "Store Credit"); MySQL is not
+        ' running in STRICT mode here, so rather than failing it silently stored
+        ' the empty string. Every non-cash refund lost its method, and the
+        ' accountant's reports (which match on the method text) could not
+        ' classify them. Only "Cash" ever round-tripped, because it happens to
+        ' be spelled the same either way.
         Dim btnCash = MakePayBtn("💵  CASH", Color.FromArgb(0, 148, 74), Color.FromArgb(0, 100, 55), 0, "Cash")
-        Dim btnCard = MakePayBtn("💳  CARD REVERSAL", Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140), 4, "Card Reversal")
-        Dim btnWallet = MakePayBtn("📱  E-WALLET", Color.FromArgb(100, 50, 180), Color.FromArgb(70, 30, 140), 4, "E-Wallet")
-        Dim btnStore = MakePayBtn("🎟  STORE CREDIT", MintPrimary, MintDark, 4, "Store Credit")
+        Dim btnCard = MakePayBtn("💳  CARD REVERSAL", Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140), 4, "CardReversal")
+        Dim btnWallet = MakePayBtn("📱  E-WALLET", Color.FromArgb(100, 50, 180), Color.FromArgb(70, 30, 140), 4, "EWallet")
+        Dim btnStore = MakePayBtn("🎟  STORE CREDIT", MintPrimary, MintDark, 4, "StoreCredit")
 
         ' Default highlight CASH
         _activeMethodBtn = btnCash
@@ -1212,7 +1238,7 @@ Public Class ReturnsPanelBuilder
             $"  Items:      {selectedItems.Count}{vbCrLf}" &
             $"  Subtotal:  ₱{subtotal:N2}{vbCrLf}" &
             $"  Fee:        ₱{fee:N2}{vbCrLf}" &
-            $"  Method:    {_selectedRefundMethod}{vbCrLf}" &
+            $"  Method:    {MethodDisplay(_selectedRefundMethod)}{vbCrLf}" &
             $"  TOTAL:     ₱{totalRefund:N2}{vbCrLf}{vbCrLf}" &
             "Process this refund?"
 
@@ -1353,7 +1379,7 @@ Public Class ReturnsPanelBuilder
                     ActivityLog.Record("SALE_REFUND", "sale", CInt(_saleId),
                         returnNo & " against " & _saleNo & " — " &
                         ChrW(8369) & totalRefund.ToString("N2") &
-                        " via " & _selectedRefundMethod &
+                        " via " & MethodDisplay(_selectedRefundMethod) &
                         If(reason = "", "", " (" & reason & ")"))
 
                     ' Snapshot for PRINT SLIP before the screen resets.
@@ -1424,7 +1450,7 @@ Public Class ReturnsPanelBuilder
             lines.Add(New ReceiptPrinter.RLine("Date:", _lastRtnAt.ToString("MMM d, yyyy h:mm tt")))
             lines.Add(New ReceiptPrinter.RLine("Processed by:", Session.CurrentFullName))
             lines.Add(New ReceiptPrinter.RLine("Reason:", _lastRtnReason))
-            lines.Add(New ReceiptPrinter.RLine("Method:", _lastRtnMethod))
+            lines.Add(New ReceiptPrinter.RLine("Method:", MethodDisplay(_lastRtnMethod)))
             lines.Add(ReceiptPrinter.Divider())
             For Each it In _lastRtnLines
                 lines.Add(New ReceiptPrinter.RLine(it.name, "", ReceiptPrinter.LineStyle.Bold))
@@ -1443,7 +1469,7 @@ Public Class ReturnsPanelBuilder
             Dim fee As Decimal = RestockFee(subtotal)
             lines.Add(New ReceiptPrinter.RLine("** DRAFT — NOT PROCESSED **", , ReceiptPrinter.LineStyle.Muted))
             lines.Add(New ReceiptPrinter.RLine("Orig. Receipt:", _saleNo))
-            lines.Add(New ReceiptPrinter.RLine("Method:", _selectedRefundMethod))
+            lines.Add(New ReceiptPrinter.RLine("Method:", MethodDisplay(_selectedRefundMethod)))
             lines.Add(ReceiptPrinter.Divider())
             For Each it In sel
                 lines.Add(New ReceiptPrinter.RLine(it.Name, "", ReceiptPrinter.LineStyle.Bold))
