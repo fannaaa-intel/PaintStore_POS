@@ -101,6 +101,15 @@ Public Class SignUp
         BuildSignUpCard()
     End Sub
 
+    ' Build the card up front without showing the window.
+    '
+    ' Control.CreateControl is Protected, so LogIn cannot call it directly;
+    ' this exposes it. Creating the handle raises Load, which is where
+    ' BuildSignUpCard runs, so the first navigation here is instant.
+    Public Sub PreBuild()
+        Me.CreateControl()
+    End Sub
+
     ' Clear the form whenever it is shown again, so a previous attempt's text
     ' and error messages are never inherited by the next person at the counter.
     Protected Overrides Sub OnVisibleChanged(e As EventArgs)

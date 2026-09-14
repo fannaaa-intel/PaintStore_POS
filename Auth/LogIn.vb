@@ -67,10 +67,13 @@ Public Class LogIn
 
         BuildLoginCard()
 
-        ' Pre-build SignUp so first navigation is instant
+        ' Pre-build SignUp so first navigation is instant.
+        ' CreateControl forces the handle and runs OnLoad -- which is where
+        ' SignUp builds its whole card -- WITHOUT making the window visible.
+        ' Show/Hide did the same warm-up but flashed the sign-up screen on
+        ' screen for a frame every time the app started.
         _signUpForm = New SignUp(Me)
-        _signUpForm.Show()
-        _signUpForm.Hide()
+        _signUpForm.PreBuild()
     End Sub
 
     ' ===== CARD SHELL (split panel) =====
