@@ -1167,42 +1167,72 @@ Public Class CashPanelBuilder
                                   - _cashPaidOut - _cashRefunds - _cashDropped
         Dim variance As Decimal = counted - expected
 
+        ' The store name and "Cash Drawer Count" are drawn by the header block
+        ' from storeName/storeTagline below; repeating them as body lines
+        ' printed the title twice.
         Dim lines As New List(Of ReceiptPrinter.RLine)
-        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreName, , ReceiptPrinter.LineStyle.Title))
-        lines.Add(New ReceiptPrinter.RLine("Cash Drawer Count", , ReceiptPrinter.LineStyle.Muted))
-        lines.Add(ReceiptPrinter.Divider())
         lines.Add(New ReceiptPrinter.RLine("Session:", If(_shiftId > 0, "DR-" & _shiftId.ToString("D4"), "—")))
         lines.Add(New ReceiptPrinter.RLine("Cashier:", Session.CurrentFullName))
+        lines.Add(New ReceiptPrinter.RLine("Shift opened:",
+            If(_shiftStarted <> DateTime.MinValue, _shiftStarted.ToString("MMM d, h:mm tt"), "—")))
         lines.Add(New ReceiptPrinter.RLine("Printed:", DateTime.Now.ToString("MMM d, yyyy h:mm tt")))
         lines.Add(ReceiptPrinter.Divider())
+        lines.Add(New ReceiptPrinter.RLine("DENOMINATIONS", , ReceiptPrinter.LineStyle.Section))
 
-        If _denoms IsNot Nothing Then
-            ' Bills before coins, each group high to low -- and each line says
-            ' which it is. There is both a 20-peso bill and a 20-peso coin, so
-            ' without the suffix the printout showed two identical "P 20.00"
-            ' rows and the manager checking it could not tell them apart.
-            For Each d In _denoms.Where(Function(x) x.Count > 0) _
-                                 .OrderByDescending(Function(x) x.IsBill) _
-                                 .ThenByDescending(Function(x) x.Value)
+        ' Bills before coins, each group high to low -- and each line says
+        ' which it is. There is both a 20-peso bill and a 20-peso coin, so
+        ' without the suffix the printout showed two identical "P 20.00"
+        ' rows and the manager checking it could not tell them apart.
+        Dim countedDenoms = If(_denoms Is Nothing,
+            New List(Of Denom),
+            _denoms.Where(Function(x) x.Count > 0) _
+                   .OrderByDescending(Function(x) x.IsBill) _
+                   .ThenByDescending(Function(x) x.Value).ToList())
+
+        If countedDenoms.Count = 0 Then
+            ' Otherwise the section header sits above nothing and the sheet
+            ' looks truncated rather than deliberately empty.
+            lines.Add(New ReceiptPrinter.RLine("(drawer not counted)", , ReceiptPrinter.LineStyle.Muted))
+        Else
+            For Each d In countedDenoms
                 lines.Add(New ReceiptPrinter.RLine(
                     "₱ " & d.Value.ToString("N2") & If(d.IsBill, " bill", " coin") & " × " & d.Count.ToString(),
                     "₱ " & (d.Value * d.Count).ToString("N2")))
             Next
         End If
 
+        ' Every term is printed, including the zeros. On screen a hidden zero
+        ' row is tidy; on paper it reads as an omission -- the person checking
+        ' cannot tell "no pay-outs happened" from "the pay-outs line is
+        ' missing", and this sheet exists to be checked.
         lines.Add(ReceiptPrinter.Divider())
         lines.Add(New ReceiptPrinter.RLine("Opening float", "₱ " & _openingFloat.ToString("N2")))
-        lines.Add(New ReceiptPrinter.RLine("Cash sales", "₱ " & _cashSales.ToString("N2")))
-        If _cashPaidIn > 0 Then lines.Add(New ReceiptPrinter.RLine("Pay-ins", "₱ " & _cashPaidIn.ToString("N2")))
-        If _cashPaidOut > 0 Then lines.Add(New ReceiptPrinter.RLine("Pay-outs", "− ₱ " & _cashPaidOut.ToString("N2")))
-        If _cashRefunds > 0 Then lines.Add(New ReceiptPrinter.RLine("Cash refunds", "− ₱ " & _cashRefunds.ToString("N2")))
-        If _cashDropped > 0 Then lines.Add(New ReceiptPrinter.RLine("Safe drops", "− ₱ " & _cashDropped.ToString("N2")))
+        lines.Add(New ReceiptPrinter.RLine("Cash sales", "+ ₱ " & _cashSales.ToString("N2")))
+        lines.Add(New ReceiptPrinter.RLine("Pay-ins", "+ ₱ " & _cashPaidIn.ToString("N2")))
+        lines.Add(New ReceiptPrinter.RLine("Pay-outs", "− ₱ " & _cashPaidOut.ToString("N2")))
+        lines.Add(New ReceiptPrinter.RLine("Cash refunds", "− ₱ " & _cashRefunds.ToString("N2")))
+        lines.Add(New ReceiptPrinter.RLine("Safe drops", "− ₱ " & _cashDropped.ToString("N2")))
         lines.Add(ReceiptPrinter.Divider())
         lines.Add(New ReceiptPrinter.RLine("Expected", "₱ " & expected.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
         lines.Add(New ReceiptPrinter.RLine("Counted", "₱ " & counted.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
-        lines.Add(New ReceiptPrinter.RLine("Variance", "₱ " & variance.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
 
-        ReceiptPrinter.Preview("Cash Drawer Count", lines)
+        ' A bare "₱ 12,000.00" on the variance line does not say whether the
+        ' drawer was over or short -- the one thing this sheet is checked for.
+        Dim varWord As String
+        If variance = 0D Then
+            varWord = "₱ 0.00  BALANCED"
+        ElseIf variance > 0D Then
+            varWord = "+ ₱ " & variance.ToString("N2") & "  OVER"
+        Else
+            varWord = "− ₱ " & Math.Abs(variance).ToString("N2") & "  SHORT"
+        End If
+        lines.Add(New ReceiptPrinter.RLine("Variance", varWord, ReceiptPrinter.LineStyle.Bold))
+
+        ReceiptPrinter.Preview("Cash Drawer Count", lines,
+                               receiptNo:="DR-" & _shiftId.ToString("D4"),
+                               storeName:=StoreSettings.StoreName.ToUpper(),
+                               storeTagline:="Cash Drawer Count",
+                               [internal]:=True)
     End Sub
 
     ''' <summary>Modal amount + note prompt. Returns (ok, amount, note).</summary>

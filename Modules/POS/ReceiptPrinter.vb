@@ -100,13 +100,22 @@ Public Module ReceiptPrinter
     ' =========================================================================
     '  PREVIEW WINDOW
     ' =========================================================================
+    ''' <param name="internal">
+    ''' True for an in-house document (a cash count, a stock sheet) rather than
+    ''' a customer receipt: signature lines instead of a barcode and a
+    ''' thank-you, since nobody purchased anything.
+    ''' </param>
     Public Sub Preview(documentName As String,
                        lines As List(Of RLine),
                        Optional receiptNo As String = "",
                   Optional storeName As String = "PAINT STORE",
-                       Optional storeTagline As String = "Official Sales Receipt")
+                       Optional storeTagline As String = "Official Sales Receipt",
+                       Optional [internal] As Boolean = False)
 
         If lines Is Nothing OrElse lines.Count = 0 Then Return
+
+        ' Set before the height pre-measure below: MeasureFooterH reads it.
+        _internalFooter = [internal]
 
         Dim contentW As Integer = RECEIPT_W - PAD_X * 2
 
@@ -736,25 +745,52 @@ Public Module ReceiptPrinter
                 End Using
                 footerY += 10
 
-                ' Barcode
-                DrawBarcode(g, receiptNo, PAD_X, footerY, contentW)
-                footerY += 32
-
-                ' Serial number
-                Dim serial = BuildSerial(receiptNo)
-                Using fSerial As New Font("Consolas", 7.0F)
-                    g.DrawString(serial, fSerial, gry,
-                        New RectangleF(0, footerY, bmp.Width, 14), cfmt)
-                End Using
-                footerY += 14
-
-                ' Thank-you note
-                Dim thankRect As New RectangleF(0, footerY + 4, bmp.Width, 30)
-                Using fThank As New Font("Segoe UI", 8.0F)
-                    Using tBr As New SolidBrush(Color.FromArgb(148, 160, 155))
-                        g.DrawString("Thank you for your purchase!", fThank, tBr, thankRect, cfmt)
+                If _internalFooter Then
+                    ' Signature blocks. A cash count is handed from the cashier
+                    ' to whoever verifies it, so the paper needs somewhere for
+                    ' both of them to sign -- that is what makes it a record
+                    ' rather than a printout.
+                    Using fSigLbl As New Font("Segoe UI", 7.0F)
+                        Using fSigName As New Font("Segoe UI Semibold", 8.0F)
+                            Dim sigFmt As New StringFormat With {.Alignment = StringAlignment.Near}
+                            For Each sig In New String() {"Counted by", "Verified by"}
+                                Using pen As New Pen(ReceiptDiv, 0.8F)
+                                    g.DrawLine(pen, PAD_X, footerY + 22, PAD_X + contentW, footerY + 22)
+                                End Using
+                                g.DrawString(sig, fSigLbl, gry,
+                                    New RectangleF(PAD_X, footerY + 24, contentW, 12), sigFmt)
+                                footerY += 44
+                            Next
+                        End Using
                     End Using
-                End Using
+
+                    Using fNote As New Font("Segoe UI", 7.5F, FontStyle.Italic)
+                        Using nBr As New SolidBrush(Color.FromArgb(148, 160, 155))
+                            g.DrawString("Internal document - not a customer receipt", fNote, nBr,
+                                New RectangleF(0, footerY, bmp.Width, 16), cfmt)
+                        End Using
+                    End Using
+                Else
+                    ' Barcode
+                    DrawBarcode(g, receiptNo, PAD_X, footerY, contentW)
+                    footerY += 32
+
+                    ' Serial number
+                    Dim serial = BuildSerial(receiptNo)
+                    Using fSerial As New Font("Consolas", 7.0F)
+                        g.DrawString(serial, fSerial, gry,
+                            New RectangleF(0, footerY, bmp.Width, 14), cfmt)
+                    End Using
+                    footerY += 14
+
+                    ' Thank-you note
+                    Dim thankRect As New RectangleF(0, footerY + 4, bmp.Width, 30)
+                    Using fThank As New Font("Segoe UI", 8.0F)
+                        Using tBr As New SolidBrush(Color.FromArgb(148, 160, 155))
+                            g.DrawString("Thank you for your purchase!", fThank, tBr, thankRect, cfmt)
+                        End Using
+                    End Using
+                End If
             End Using
         End Using
     End Sub
@@ -914,7 +950,16 @@ Public Module ReceiptPrinter
         End Using
     End Function
 
+    ' An internal document is not a customer receipt: no barcode to scan, no
+    ' sale to thank anyone for. It is signed instead, because a cash count is
+    ' a handover between two people.
+    Private _internalFooter As Boolean = False
+
     Private Function MeasureFooterH() As Integer
+        If _internalFooter Then
+            ' divider gap + pad + two signature blocks + note
+            Return 10 + 10 + 44 + 44 + 18
+        End If
         Return 10 + 10 + 32 + 14 + 20  ' divider gap + pad + barcode + serial + thanks
     End Function
 

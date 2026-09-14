@@ -216,6 +216,13 @@ PaintStore_POS
 <member name="M:PaintStore_POS.SupplierLogo.InitialOf(System.String)">
  <summary>First letter of a supplier name, or "?" when it is blank.</summary>
 </member>
+<member name="M:PaintStore_POS.ReceiptPrinter.Preview(System.String,System.Collections.Generic.List{PaintStore_POS.ReceiptPrinter.RLine},System.String,System.String,System.String,System.Boolean)">
+ <param name="internal">
+ True for an in-house document (a cash count, a stock sheet) rather than
+ a customer receipt: signature lines instead of a barcode and a
+ thank-you, since nobody purchased anything.
+ </param>
+</member>
 <member name="M:PaintStore_POS.ReceiptPrinter.DrawBarcode(System.Drawing.Graphics,System.String,System.Int32,System.Int32,System.Int32)">
  <summary>
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.
