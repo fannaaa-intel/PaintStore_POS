@@ -51,9 +51,6 @@ PaintStore_POS
 <member name="M:PaintStore_POS.CashPanelBuilder.CashMovement(System.String,System.String,System.String)">
  <summary>Record a PayIn / PayOut / Drop against the current shift.</summary>
 </member>
-<member name="M:PaintStore_POS.CashPanelBuilder.NoSaleOpen">
- <summary>No-sale drawer open. No financial effect; just acknowledges the open.</summary>
-</member>
 <member name="M:PaintStore_POS.CashPanelBuilder.CloseDrawer">
  <summary>Close the active shift: store counted/expected/variance and stamp ended_at.</summary>
 </member>

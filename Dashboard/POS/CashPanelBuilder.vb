@@ -993,7 +993,7 @@ Public Class CashPanelBuilder
     End Sub
 
     ' =========================================================================
-    '  CASH DRAWER ACTIONS  (Cash In / Out / Drop · No Sale · Close Drawer)
+    '  CASH DRAWER ACTIONS  (Cash In / Out / Drop · Close Drawer)
     ' =========================================================================
 
     ''' <summary>Record a PayIn / PayOut / Drop against the current shift.</summary>
@@ -1040,14 +1040,6 @@ Public Class CashPanelBuilder
             AppModal.Show("Could not record the cash movement:" & Environment.NewLine &
                             ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
-    End Sub
-
-    ''' <summary>No-sale drawer open. No financial effect; just acknowledges the open.</summary>
-    Private Shared Sub NoSaleOpen()
-        ' No cash event table exists; this simply signals/acknowledges a drawer open.
-        ' If a physical drawer kick is wired later, trigger it here.
-        AppModal.Show("Drawer opened (No Sale).", "No Sale",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information)
     End Sub
 
     ''' <summary>Close the active shift: store counted/expected/variance and stamp ended_at.</summary>
@@ -1269,29 +1261,35 @@ Public Class CashPanelBuilder
     ' =========================================================================
     Private Shared Function BuildOpsBar() As Control
         Dim host As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0, 10, 0, 4)}
+        ' Three buttons, not four.
+        '
+        ' NO SALE was removed: it opened a message box and wrote nothing. There
+        ' is no cash drawer hardware wired to this system, so it was not opening
+        ' a drawer either -- it only claimed to. A control that looks like the
+        ' other three and does none of what they do is worse than no control,
+        ' because it teaches the cashier that pressing it accomplished something.
+        ' If a physical drawer kick is ever added, this is where it belongs,
+        ' together with a cash_movements-style row so the open is auditable.
         Dim layout As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill, .ColumnCount = 4, .RowCount = 1,
+            .Dock = DockStyle.Fill, .ColumnCount = 3, .RowCount = 1,
             .BackColor = Color.Transparent, .Margin = New Padding(0), .Padding = New Padding(0)
         }
-        For i = 0 To 3
-            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25.0F))
+        For i = 0 To 2
+            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 33.34F))
         Next
         layout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
 
         Dim btnIn = MakePayBtn("⬇  CASH IN", Color.FromArgb(0, 148, 74), Color.FromArgb(0, 100, 55), 0)
         Dim btnOut = MakePayBtn("⬆  CASH OUT", Color.FromArgb(196, 118, 22), Color.FromArgb(150, 88, 12), 4)
-        Dim btnNoSale = MakePayBtn("⊟  NO SALE  ·  OPEN", Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140), 4)
         Dim btnDrop = MakePayBtn("🔒  DROP TO SAFE", Color.FromArgb(70, 90, 100), Color.FromArgb(50, 65, 74), 4)
 
         AddHandler btnIn.Click, Sub() CashMovement("PayIn", "Cash In", "Reason / source of cash")
         AddHandler btnOut.Click, Sub() CashMovement("PayOut", "Cash Out", "Reason for paying out")
         AddHandler btnDrop.Click, Sub() CashMovement("Drop", "Drop to Safe", "Note (e.g. envelope #)")
-        AddHandler btnNoSale.Click, Sub() NoSaleOpen()
 
         layout.Controls.Add(btnIn, 0, 0)
         layout.Controls.Add(btnOut, 1, 0)
-        layout.Controls.Add(btnNoSale, 2, 0)
-        layout.Controls.Add(btnDrop, 3, 0)
+        layout.Controls.Add(btnDrop, 2, 0)
 
         host.Controls.Add(layout)
         Return host
