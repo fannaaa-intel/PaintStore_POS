@@ -157,9 +157,18 @@ Public Class ProcurementDashPanelBuilder
                 End Using
 
                 ' ---- Pending requests list (newest first, max 8) ----
+                ' One row per REQUEST, which is what a dashboard summary wants.
+                ' A request is a basket of products though (migrations.sql
+                ' section 14), so naming only its first product would understate
+                ' it -- the line counts come along and a multi-product request
+                ' is labelled by its size instead.
                 Using cmd As New MySqlCommand(
                     "SELECT pr.request_id, p.name AS pname, pr.qty_requested, " &
-                    "u.full_name AS reqby, pr.created_at " &
+                    "u.full_name AS reqby, pr.created_at, " &
+                    "(SELECT COUNT(*) FROM purchase_request_items pri " &
+                    " WHERE pri.request_id = pr.request_id) AS n_items, " &
+                    "(SELECT COALESCE(SUM(pri.qty_requested),0) FROM purchase_request_items pri " &
+                    " WHERE pri.request_id = pr.request_id) AS n_units " &
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
@@ -168,10 +177,15 @@ Public Class ProcurementDashPanelBuilder
                     "LIMIT 8", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
+                            Dim nItems As Integer = SafeInt(rdr("n_items"))
+                            Dim nUnits As Integer = SafeInt(rdr("n_units"))
+                            Dim legacyQty As Integer = SafeInt(rdr("qty_requested"))
                             pending.Add(New PendingReq With {
                                 .RequestId = SafeInt(rdr("request_id")),
-                                .ProductName = rdr("pname").ToString(),
-                                .QtyRequested = SafeInt(rdr("qty_requested")),
+                                .ProductName = If(nItems > 1,
+                                                  nItems & " products",
+                                                  rdr("pname").ToString()),
+                                .QtyRequested = If(nUnits > 0, nUnits, legacyQty),
                                 .RequestedBy = If(IsDBNull(rdr("reqby")), "Unknown", rdr("reqby").ToString()),
                                 .CreatedAt = If(IsDBNull(rdr("created_at")), DateTime.Now, Convert.ToDateTime(rdr("created_at")))
                             })

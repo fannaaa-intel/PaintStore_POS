@@ -1681,13 +1681,17 @@ Public Class ProcurementPOPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
+                ' One row per request LINE. See LoadPendingLite for why joining
+                ' on purchase_requests.product_id would hide a basket's other
+                ' products from the quote picker.
                 Using cmd As New MySqlCommand(
-                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, " &
-                    "pr.qty_requested, p.unit_price " &
+                    "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, " &
+                    "pri.qty_requested, p.unit_price " &
                     "FROM purchase_requests pr " &
-                    "JOIN products p ON pr.product_id = p.product_id " &
+                    "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &
+                    "JOIN products p ON pri.product_id = p.product_id " &
                     "WHERE pr.status = 'Approved' " &
-                    "ORDER BY pr.created_at DESC", conn)
+                    "ORDER BY pr.created_at DESC, pri.pr_item_id", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             result.Add(New ApprovedReqLite With {
@@ -2068,20 +2072,30 @@ Public Class ProcurementPOPanelBuilder
         RecomputeGrand()
     End Sub
 
+    ' Preloads EVERY line of a request onto the new PO.
+    '
+    ' This used to read purchase_requests.product_id with LIMIT 1, which was
+    ' correct while a request could hold only one product. A request is now a
+    ' basket (migrations.sql section 14), and keeping LIMIT 1 would quietly
+    ' drop the rest of it -- the PO would look complete while ordering a
+    ' fraction of what was approved. A single-product request still yields
+    ' exactly one line.
     Private Shared Sub AddLineFromRequestId(requestId As Integer)
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "p.color_hex, p.image_path, pr.qty_requested, u.full_name AS reqby " &
+                    "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.color_hex, p.image_path, pri.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
-                    "JOIN products p ON pr.product_id = p.product_id " &
+                    "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &
+                    "JOIN products p ON pri.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
-                    "WHERE pr.request_id = @rid LIMIT 1", conn)
+                    "WHERE pr.request_id = @rid " &
+                    "ORDER BY pri.pr_item_id", conn)
                     cmd.Parameters.AddWithValue("@rid", requestId)
                     Using rdr = cmd.ExecuteReader()
-                        If rdr.Read() Then
+                        While rdr.Read()
                             AddLineFromRequest(New PendingReqLite With {
                                 .RequestId = SafeInt(rdr("request_id")),
                                 .ProductId = SafeInt(rdr("product_id")),
@@ -2093,7 +2107,7 @@ Public Class ProcurementPOPanelBuilder
                                 .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
                                 .ColorHex = If(IsDBNull(rdr("color_hex")), "", rdr("color_hex").ToString())
                             })
-                        End If
+                        End While
                     End Using
                 End Using
             End Using
@@ -3171,19 +3185,28 @@ Public Class ProcurementPOPanelBuilder
         Return result
     End Function
 
+    ' Every pending request LINE, not every pending request.
+    '
+    ' A request is a basket of products (migrations.sql section 14). Joining on
+    ' purchase_requests.product_id would show only the basket's FIRST product,
+    ' so Procurement would build a purchase order silently missing everything
+    ' else the requester asked for. Joining through purchase_request_items
+    ' shows every line; a single-product request yields exactly one row, which
+    ' is what this picker always showed.
     Private Shared Function LoadPendingLite() As List(Of PendingReqLite)
         Dim result As New List(Of PendingReqLite)
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                         "SELECT pr.request_id, pr.product_id, p.name AS pname, p.sku, p.unit_price, " &
-                    "p.image_path, p.color_hex, pr.qty_requested, u.full_name AS reqby " &
+                    "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "p.image_path, p.color_hex, pri.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
-                    "JOIN products p ON pr.product_id = p.product_id " &
+                    "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &
+                    "JOIN products p ON pri.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
                     "WHERE pr.status = 'Pending' " &
-                    "ORDER BY pr.created_at DESC", conn)
+                    "ORDER BY pr.created_at DESC, pri.pr_item_id", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             result.Add(New PendingReqLite With {

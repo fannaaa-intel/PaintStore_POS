@@ -277,6 +277,8 @@
     <Compile Include="Modules\DocNumber.vb" />
     <Compile Include="Modules\ImageCache.vb" />
     <Compile Include="Modules\SupplierLogo.vb" />
+    <Compile Include="Modules\SupplierPaymentModal.vb" />
+    <Compile Include="Modules\PurchaseRequestModal.vb" />
     <Compile Include="Modules\POS\PaymentMethods.vb" />
     <Compile Include="Modules\POS\PaymentMethodModal.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />

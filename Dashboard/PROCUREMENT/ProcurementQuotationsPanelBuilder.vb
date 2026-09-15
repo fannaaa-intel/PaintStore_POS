@@ -79,6 +79,10 @@ Public Class ProcurementQuotationsPanelBuilder
         Public TotalAmount As Decimal
         Public ItemCount As Integer
 
+        ' Total quotes on the same request, this one included. Anything above 1
+        ' means there is a rival price worth comparing against.
+        Public BidCount As Integer
+
         ' A quote past its valid_until is stale even if nobody has run the
         ' expiry sweep yet — surfaced in the UI so it reads honestly.
         Public ReadOnly Property IsStale As Boolean
@@ -100,6 +104,34 @@ Public Class ProcurementQuotationsPanelBuilder
                 Return Math.Round(UnitPrice * Qty, 2)
             End Get
         End Property
+    End Class
+
+    ' One supplier's column in the comparison grid.
+    Private Class CompareSupplier
+        Public QuotationId As Integer
+        Public QuotationNo As String
+        Public SupplierId As Integer
+        Public SupplierName As String
+        Public Status As String
+        Public TotalAmount As Decimal
+
+        ' Unit price keyed by product. A supplier who did not quote a product
+        ' is absent from this map rather than holding a zero, so "did not quote"
+        ' never reads as "quoted free".
+        Public Prices As New Dictionary(Of Integer, Decimal)
+
+        ' What this supplier would cost for the products they DID quote, at the
+        ' quantities the request asked for.
+        Public CoveredTotal As Decimal
+        Public CoveredCount As Integer
+    End Class
+
+    ' One product row in the comparison grid.
+    Private Class CompareProduct
+        Public ProductId As Integer
+        Public ProductName As String
+        Public Sku As String
+        Public Qty As Integer
     End Class
 
     ' ── STATE ────────────────────────────────────────────────────────────────────
@@ -345,10 +377,18 @@ Public Class ProcurementQuotationsPanelBuilder
             .ForeColor = MintDark, .AutoSize = False, .Height = 20,
             .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
+        ' A request carrying rival bids says so on the row, so a contested price
+        ' is visible in the list rather than only after opening the quote.
+        Dim reqText As String = "Request #" & r.RequestId & "   " & ChrW(8226) & "   " &
+                                r.ItemCount & If(r.ItemCount = 1, " item", " items")
+        If r.BidCount > 1 Then
+            reqText &= "   " & ChrW(8226) & "   " & r.BidCount & " suppliers bidding"
+        End If
+
         Dim lblReq As New Label With {
-            .Text = "Request #" & r.RequestId & "   " & ChrW(8226) & "   " &
-                    r.ItemCount & If(r.ItemCount = 1, " item", " items"),
-            .Font = New Font("Segoe UI", 9), .ForeColor = FaintText,
+            .Text = reqText,
+            .Font = New Font("Segoe UI", 9),
+            .ForeColor = If(r.BidCount > 1, MintPrimary, FaintText),
             .AutoSize = False, .Height = 18,
             .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
@@ -702,6 +742,14 @@ Public Class ProcurementQuotationsPanelBuilder
 
         Dim buttons As New List(Of Button)
 
+        ' Comparing is a read-only view, so it stays available at every status —
+        ' including Rejected and Expired, where seeing why this bid lost is the
+        ' whole point. Offered only when a rival bid exists to compare against.
+        If CountQuotesOnRequest(q.RequestId) > 1 Then
+            buttons.Add(MakeActionButton("Compare Suppliers", MintPrimary, MintHover,
+                Sub() RenderCompare(q.RequestId, q.QuotationId)))
+        End If
+
         Select Case q.Status
             Case "Draft"
                 buttons.Add(MakeActionButton("Mark as Sent", MintDeep, DeepHover,
@@ -919,6 +967,527 @@ Public Class ProcurementQuotationsPanelBuilder
     End Sub
 
     ' =========================================================================
+    '  VIEW 3 — SUPPLIER PRICE COMPARISON
+    '
+    '  Products down the side, suppliers across the top, one unit price per
+    '  cell. The cheapest live bid on each row is highlighted, so "who is
+    '  cheaper on this item" is answered by looking, not by opening each quote
+    '  in turn and remembering the numbers.
+    '
+    '  Two different questions get two different answers, and the screen says
+    '  both rather than pretending they are the same:
+    '    • cheapest PER ITEM   — the highlighted cell on each row
+    '    • cheapest OVERALL    — the supplier with the lowest covered total
+    '  A purchase order goes to ONE supplier, so the recommendation names the
+    '  overall winner while the per-item highlights show what that choice costs
+    '  on the rows where someone else was cheaper.
+    ' =========================================================================
+    Private Shared Sub RenderCompare(requestId As Integer, Optional fromQuotationId As Integer = 0)
+        Dim container As Panel = containerRef
+        If container Is Nothing Then Return
+
+        Dim suppliers As List(Of CompareSupplier) = LoadCompareSuppliers(requestId)
+        Dim products As List(Of CompareProduct) = LoadCompareProducts(requestId)
+        ComputeCoveredTotals(suppliers, products)
+
+        container.SuspendLayout()
+        container.Controls.Clear()
+        container.BackColor = MintBg
+
+        Dim scrollHost As New Panel With {
+            .Dock = DockStyle.Fill, .BackColor = MintBg,
+            .AutoScroll = True, .Padding = New Padding(24, 4, 24, 24)
+        }
+
+        ' ── Header ──
+        Dim topRegion As New Panel With {
+            .Height = 104, .BackColor = MintBg, .Padding = New Padding(24, 18, 24, 0),
+            .Dock = DockStyle.Top
+        }
+        Dim backText As String = If(fromQuotationId > 0,
+                                    ChrW(8592) & "  Back to quotation",
+                                    ChrW(8592) & "  Back to quotations")
+        Dim lnkBack As Label = MakeLink(backText, MintDeep)
+        lnkBack.Location = New Point(26, 16)
+        AddHandler lnkBack.Click,
+            Sub()
+                If fromQuotationId > 0 Then
+                    RenderDetail(fromQuotationId)
+                Else
+                    RenderList()
+                End If
+            End Sub
+
+        Dim lblTitle As New Label With {
+            .Text = "Compare Suppliers", .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 44),
+            .BackColor = Color.Transparent
+        }
+        Dim lblReq As New Label With {
+            .Text = "Request #" & requestId, .Font = New Font("Segoe UI", 11),
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
+        }
+        topRegion.Controls.AddRange({lnkBack, lblTitle, lblReq})
+        AddHandler topRegion.Resize,
+            Sub()
+                lblReq.Location = New Point(lblTitle.Right + 14,
+                                            lblTitle.Top + (lblTitle.Height - lblReq.Height) \ 2)
+            End Sub
+
+        container.Controls.Add(scrollHost)
+        container.Controls.Add(topRegion)
+
+        ' Nothing to compare against — say so plainly instead of drawing an
+        ' empty grid that looks broken.
+        If suppliers.Count = 0 OrElse products.Count = 0 Then
+            Dim emptyCard As New BufferedPanel With {
+                .Height = 200, .Dock = DockStyle.Top, .BackColor = CardBg
+            }
+            AddHandler emptyCard.Paint, Sub(sn, e) PaintCard(CType(sn, Panel), e)
+            Dim lblEmpty As New Label With {
+                .Text = "Nothing to compare yet." & Environment.NewLine &
+                        "Record a second supplier's quotation on request #" & requestId &
+                        " to see prices side by side.",
+                .Font = New Font("Segoe UI", 11), .ForeColor = FaintText,
+                .AutoSize = False, .Dock = DockStyle.Fill,
+                .TextAlign = ContentAlignment.MiddleCenter, .BackColor = Color.Transparent
+            }
+            emptyCard.Controls.Add(lblEmpty)
+            scrollHost.Controls.Add(emptyCard)
+            container.ResumeLayout()
+            container.Refresh()
+            Return
+        End If
+
+        Dim recCard As Panel = BuildCompareRecommendation(suppliers, products)
+        recCard.Dock = DockStyle.Top
+
+        Dim spacerA As New Panel With {.Height = 14, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
+
+        Dim gridCard As Panel = BuildCompareGrid(suppliers, products)
+        gridCard.Dock = DockStyle.Top
+
+        ' Docked top-first renders bottom-up, so add in reverse visual order.
+        scrollHost.Controls.Add(gridCard)
+        scrollHost.Controls.Add(spacerA)
+        scrollHost.Controls.Add(recCard)
+
+        container.ResumeLayout()
+        container.Refresh()
+    End Sub
+
+    ' The headline answer: which single supplier to send the PO to, and what
+    ' choosing them costs on the rows where a rival was cheaper.
+    Private Shared Function BuildCompareRecommendation(suppliers As List(Of CompareSupplier),
+                                                       products As List(Of CompareProduct)) As Panel
+        Dim card As New BufferedPanel With {.Height = 150, .BackColor = CardBg}
+        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        ' Only a live bid can be recommended.
+        Dim live As New List(Of CompareSupplier)
+        For Each sup In suppliers
+            If IsLiveBid(sup.Status) Then live.Add(sup)
+        Next
+
+        Dim lblHead As New Label With {
+            .Text = "Recommendation", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(22, 16),
+            .BackColor = Color.Transparent
+        }
+        card.Controls.Add(lblHead)
+
+        If live.Count = 0 Then
+            Dim lblNone As New Label With {
+                .Text = "No live quotations left on this request — every bid was rejected or has expired.",
+                .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(22, 46), .BackColor = Color.Transparent
+            }
+            card.Controls.Add(lblNone)
+            card.Height = 96
+            Return card
+        End If
+
+        ' Cheapest overall is only a fair comparison between suppliers who quoted
+        ' the same number of products. A supplier missing half the request is
+        ' cheaper for the wrong reason, so completeness is ranked before price.
+        Dim maxCover As Integer = 0
+        For Each sup In live
+            If sup.CoveredCount > maxCover Then maxCover = sup.CoveredCount
+        Next
+
+        Dim winner As CompareSupplier = Nothing
+        For Each sup In live
+            If sup.CoveredCount <> maxCover Then Continue For
+            If winner Is Nothing OrElse sup.CoveredTotal < winner.CoveredTotal Then winner = sup
+        Next
+        If winner Is Nothing Then winner = live(0)
+
+        ' Count the rows where the winner is not the cheapest, and what the gap
+        ' costs, so the trade-off behind a single-supplier PO is visible.
+        Dim beatenRows As Integer = 0
+        Dim excess As Decimal = 0D
+        For Each prod In products
+            Dim best As Decimal = BestPriceFor(prod.ProductId, suppliers)
+            If best < 0D Then Continue For
+            Dim mine As Decimal
+            If Not winner.Prices.TryGetValue(prod.ProductId, mine) Then Continue For
+            If mine > best Then
+                beatenRows += 1
+                excess += Math.Round((mine - best) * prod.Qty, 2)
+            End If
+        Next
+
+        Dim lblWinner As New Label With {
+            .Text = winner.SupplierName & "   " & ChrW(8226) & "   " &
+                    Peso & winner.CoveredTotal.ToString("N2"),
+            .Font = New Font("Segoe UI", 16, FontStyle.Bold), .ForeColor = MintDeep,
+            .AutoSize = True, .Location = New Point(22, 44), .BackColor = Color.Transparent
+        }
+        card.Controls.Add(lblWinner)
+
+        Dim detail As String =
+            "Lowest total across " & winner.CoveredCount &
+            If(winner.CoveredCount = 1, " quoted item", " quoted items") &
+            "  (" & winner.QuotationNo & ")"
+        If winner.CoveredCount < products.Count Then
+            detail &= "   " & ChrW(8212) & "   does not cover all " & products.Count &
+                      " products on this request"
+        End If
+
+        Dim lblDetail As New Label With {
+            .Text = detail, .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(24, 76), .BackColor = Color.Transparent
+        }
+        card.Controls.Add(lblDetail)
+
+        Dim tradeoff As String
+        If beatenRows = 0 Then
+            tradeoff = "Cheapest on every item quoted " & ChrW(8212) & " no trade-off."
+        Else
+            tradeoff = "Another supplier is cheaper on " & beatenRows &
+                       If(beatenRows = 1, " item", " items") &
+                       ", worth " & Peso & excess.ToString("N2") & " " & ChrW(8212) &
+                       " a purchase order goes to one supplier, so this is the cost of consolidating."
+        End If
+
+        Dim lblTrade As New Label With {
+            .Text = tradeoff, .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = If(beatenRows = 0, MintDeep, WarningClr),
+            .AutoSize = True, .Location = New Point(24, 98), .BackColor = Color.Transparent
+        }
+        card.Controls.Add(lblTrade)
+
+        ' Act on the recommendation without hunting for it in the list.
+        Dim btnOpen As New Button With {
+            .Text = "Open " & winner.QuotationNo, .Height = 40, .Width = 190,
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnOpen.FlatAppearance.BorderSize = 0
+        RoundControl(btnOpen, 10)
+        AddHover(btnOpen, MintDeep, DeepHover)
+        Dim winnerId As Integer = winner.QuotationId
+        AddHandler btnOpen.Click, Sub() RenderDetail(winnerId)
+        card.Controls.Add(btnOpen)
+
+        AddHandler card.Resize,
+            Sub() btnOpen.Location = New Point(card.Width - btnOpen.Width - 22, 44)
+
+        Return card
+    End Function
+
+    ' The grid: one row per product, one column per supplier. Column widths are
+    ' computed once from the card width and reused by the header and every row,
+    ' so nothing drifts when the panel resizes.
+    Private Shared Function BuildCompareGrid(suppliers As List(Of CompareSupplier),
+                                             products As List(Of CompareProduct)) As Panel
+        Const ROW_H As Integer = 58
+        Const HEAD_H As Integer = 64
+        Const FOOT_H As Integer = 66
+        Const PAD As Integer = 22
+
+        Dim card As New BufferedPanel With {
+            .Height = 58 + HEAD_H + products.Count * ROW_H + FOOT_H + 16,
+            .BackColor = CardBg
+        }
+        AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
+
+        Dim lblHead As New Label With {
+            .Text = "Price per item", .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(PAD, 18),
+            .BackColor = Color.Transparent
+        }
+        Dim lblHint As New Label With {
+            .Text = "Cheapest price on each row is highlighted. Unit price " & ChrW(215) &
+                    " quantity requested.",
+            .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText,
+            .AutoSize = True, .Location = New Point(PAD + 2, 40), .BackColor = Color.Transparent
+        }
+        card.Controls.AddRange({lblHead, lblHint})
+
+        ' Column geometry, shared by header, rows and footer.
+        Dim colCount As Integer = suppliers.Count
+        Dim colXs As Func(Of Integer, Integer()) =
+            Function(w As Integer)
+                Dim xs(colCount) As Integer
+                Dim available As Integer = w - PAD * 2
+                Dim supW As Integer = 132
+                Dim nameW As Integer = available - supW * colCount
+                If nameW < 160 Then nameW = 160
+                xs(0) = PAD
+                For i As Integer = 1 To colCount
+                    xs(i) = PAD + nameW + supW * (i - 1)
+                Next
+                Return xs
+            End Function
+        Dim nameWidthOf As Func(Of Integer, Integer) =
+            Function(w As Integer)
+                Dim available As Integer = w - PAD * 2
+                Dim nameW As Integer = available - 132 * colCount
+                If nameW < 160 Then nameW = 160
+                Return nameW
+            End Function
+
+        ' —— Header row: supplier names
+        Dim headHost As New Panel With {.Height = HEAD_H, .BackColor = Color.Transparent}
+        Dim lblProdHead As New Label With {
+            .Text = "PRODUCT", .Font = New Font("Segoe UI Semibold", 8.5F),
+            .ForeColor = FaintText, .AutoSize = False, .Height = 16,
+            .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+        }
+        headHost.Controls.Add(lblProdHead)
+
+        Dim supNameLabels As New List(Of Label)
+        Dim supMetaLabels As New List(Of Label)
+        For Each sup In suppliers
+            Dim isLive As Boolean = IsLiveBid(sup.Status)
+            Dim ln As New Label With {
+                .Text = sup.SupplierName,
+                .Font = New Font("Segoe UI Semibold", 10),
+                .ForeColor = If(isLive, MintDark, FaintText),
+                .AutoSize = False, .Height = 20,
+                .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+            }
+            ' A dead bid must never read as a live price, so the status is on
+            ' the column itself rather than only in the quotation list.
+            Dim lm As New Label With {
+                .Text = If(isLive, sup.QuotationNo, sup.Status.ToLower()),
+                .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = If(isLive, FaintText, NegativeClr),
+                .AutoSize = False, .Height = 16,
+                .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+            }
+            supNameLabels.Add(ln)
+            supMetaLabels.Add(lm)
+            headHost.Controls.Add(ln)
+            headHost.Controls.Add(lm)
+        Next
+
+        Dim headDiv As New Panel With {
+            .Height = 1, .BackColor = RowDivider, .Dock = DockStyle.Bottom
+        }
+        headHost.Controls.Add(headDiv)
+
+        AddHandler headHost.Resize,
+            Sub()
+                Dim xs() As Integer = colXs(headHost.Width)
+                lblProdHead.SetBounds(xs(0), 40, nameWidthOf(headHost.Width) - 12, 16)
+                For i As Integer = 0 To colCount - 1
+                    supNameLabels(i).SetBounds(xs(i + 1) - 8, 22, 132, 20)
+                    supMetaLabels(i).SetBounds(xs(i + 1) - 8, 42, 132, 16)
+                Next
+            End Sub
+
+        ' —— Product rows
+        Dim bodyHost As New Panel With {
+            .Height = products.Count * ROW_H, .BackColor = Color.Transparent
+        }
+        Dim rowPanels As New List(Of Panel)
+
+        For pi As Integer = 0 To products.Count - 1
+            Dim prod As CompareProduct = products(pi)
+            Dim best As Decimal = BestPriceFor(prod.ProductId, suppliers)
+
+            Dim row As New Panel With {
+                .Height = ROW_H, .Top = pi * ROW_H, .BackColor = Color.Transparent
+            }
+
+            Dim lblName As New Label With {
+                .Text = prod.ProductName, .Font = New Font("Segoe UI Semibold", 10.5F),
+                .ForeColor = MintDark, .AutoSize = False, .Height = 20,
+                .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+            }
+            Dim lblSku As New Label With {
+                .Text = prod.Sku & "   " & ChrW(8226) & "   qty " & prod.Qty,
+                .Font = New Font("Segoe UI", 9), .ForeColor = FaintText,
+                .AutoSize = False, .Height = 18,
+                .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+            }
+            row.Controls.Add(lblName)
+            row.Controls.Add(lblSku)
+
+            Dim cellPanels As New List(Of Panel)
+            For Each sup In suppliers
+                Dim cell As New BufferedPanel With {
+                    .Height = 44, .Width = 124, .BackColor = Color.Transparent
+                }
+
+                Dim price As Decimal
+                Dim quoted As Boolean = sup.Prices.TryGetValue(prod.ProductId, price)
+                Dim isLive As Boolean = IsLiveBid(sup.Status)
+                Dim isBest As Boolean = quoted AndAlso isLive AndAlso best >= 0D AndAlso price = best
+
+                ' A supplier who did not bid on this product shows a dash, never
+                ' a zero — "no bid" and "free" must not look the same.
+                Dim priceText As String = If(quoted, Peso & price.ToString("N2"), ChrW(8212))
+                Dim lineText As String = If(quoted,
+                                            Peso & Math.Round(price * prod.Qty, 2).ToString("N2"),
+                                            "not quoted")
+
+                Dim lblPrice As New Label With {
+                    .Text = priceText,
+                    .Font = New Font("Segoe UI Semibold", If(isBest, 11.5F, 10.5F)),
+                    .ForeColor = If(Not quoted, FaintText,
+                                 If(isBest, Color.FromArgb(0, 120, 92),
+                                 If(isLive, MintDark, FaintText))),
+                    .AutoSize = False, .Height = 20, .Width = 124, .Top = 3, .Left = 0,
+                    .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+                }
+                Dim lblLine As New Label With {
+                    .Text = lineText, .Font = New Font("Segoe UI", 8.5F),
+                    .ForeColor = If(isBest, Color.FromArgb(0, 120, 92), FaintText),
+                    .AutoSize = False, .Height = 16, .Width = 124, .Top = 23, .Left = 0,
+                    .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+                }
+                cell.Controls.Add(lblPrice)
+                cell.Controls.Add(lblLine)
+
+                If isBest Then
+                    ' Tinted pill behind the winning cell. Colour alone would
+                    ' fail anyone who cannot distinguish it, so the cheapest
+                    ' cell is also the only one in bold at a larger size.
+                    AddHandler cell.Paint,
+                        Sub(sn, e)
+                            Dim g = e.Graphics
+                            g.SmoothingMode = SmoothingMode.AntiAlias
+                            Dim r As New Rectangle(6, 0, cell.Width - 8, cell.Height - 2)
+                            Using path = RoundRect(r, 9)
+                                Using br As New SolidBrush(Color.FromArgb(220, 248, 240))
+                                    g.FillPath(br, path)
+                                End Using
+                            End Using
+                        End Sub
+                End If
+
+                cellPanels.Add(cell)
+                row.Controls.Add(cell)
+            Next
+
+            Dim rowDiv As New Panel With {
+                .Height = 1, .BackColor = RowDivider, .Dock = DockStyle.Bottom
+            }
+            row.Controls.Add(rowDiv)
+
+            AddHandler row.Resize,
+                Sub()
+                    Dim xs() As Integer = colXs(row.Width)
+                    Dim nw As Integer = nameWidthOf(row.Width) - 12
+                    lblName.SetBounds(xs(0), 10, nw, 20)
+                    lblSku.SetBounds(xs(0), 30, nw, 18)
+                    For i As Integer = 0 To colCount - 1
+                        cellPanels(i).Location = New Point(xs(i + 1) - 8, 7)
+                    Next
+                End Sub
+
+            rowPanels.Add(row)
+            bodyHost.Controls.Add(row)
+        Next
+
+        ' —— Footer: per-supplier totals
+        Dim footHost As New Panel With {.Height = FOOT_H, .BackColor = Color.Transparent}
+        Dim lblTotHead As New Label With {
+            .Text = "TOTAL", .Font = New Font("Segoe UI Semibold", 9),
+            .ForeColor = SubText, .AutoSize = False, .Height = 20,
+            .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+        }
+        footHost.Controls.Add(lblTotHead)
+
+        ' The cheapest total among suppliers who quoted the most products, which
+        ' is the same rule the recommendation card uses.
+        Dim maxCover As Integer = 0
+        For Each sup In suppliers
+            If IsLiveBid(sup.Status) AndAlso sup.CoveredCount > maxCover Then
+                maxCover = sup.CoveredCount
+            End If
+        Next
+        Dim bestTotal As Decimal = -1D
+        For Each sup In suppliers
+            If Not IsLiveBid(sup.Status) Then Continue For
+            If sup.CoveredCount <> maxCover Then Continue For
+            If bestTotal < 0D OrElse sup.CoveredTotal < bestTotal Then bestTotal = sup.CoveredTotal
+        Next
+
+        Dim totLabels As New List(Of Label)
+        Dim subLabels As New List(Of Label)
+        For Each sup In suppliers
+            Dim isLive As Boolean = IsLiveBid(sup.Status)
+            Dim isWin As Boolean = isLive AndAlso sup.CoveredCount = maxCover AndAlso
+                                   bestTotal >= 0D AndAlso sup.CoveredTotal = bestTotal
+            Dim lt As New Label With {
+                .Text = Peso & sup.CoveredTotal.ToString("N2"),
+                .Font = New Font("Segoe UI", If(isWin, 12.0F, 11.0F), FontStyle.Bold),
+                .ForeColor = If(Not isLive, FaintText,
+                             If(isWin, Color.FromArgb(0, 120, 92), MintDark)),
+                .AutoSize = False, .Height = 22, .Width = 124,
+                .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+            }
+            ' Coverage sits under the total because a lower number over fewer
+            ' items is not actually a better offer.
+            Dim ls As New Label With {
+                .Text = If(isWin, ChrW(10003) & " cheapest",
+                        sup.CoveredCount & " of " & products.Count & " items"),
+                .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = If(isWin, Color.FromArgb(0, 120, 92), FaintText),
+                .AutoSize = False, .Height = 16, .Width = 124,
+                .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
+            }
+            totLabels.Add(lt)
+            subLabels.Add(ls)
+            footHost.Controls.Add(lt)
+            footHost.Controls.Add(ls)
+        Next
+
+        AddHandler footHost.Resize,
+            Sub()
+                Dim xs() As Integer = colXs(footHost.Width)
+                lblTotHead.SetBounds(xs(0), 16, nameWidthOf(footHost.Width) - 12, 20)
+                For i As Integer = 0 To colCount - 1
+                    totLabels(i).SetBounds(xs(i + 1) - 8, 12, 124, 22)
+                    subLabels(i).SetBounds(xs(i + 1) - 8, 34, 124, 16)
+                Next
+            End Sub
+
+        ' Lay the three bands out by hand: docking would reverse the row order.
+        AddHandler card.Resize,
+            Sub()
+                Dim w As Integer = card.Width
+                headHost.SetBounds(0, 58, w, HEAD_H)
+                bodyHost.SetBounds(0, 58 + HEAD_H, w, products.Count * ROW_H)
+                For Each rp In rowPanels
+                    rp.Width = w
+                Next
+                footHost.SetBounds(0, 58 + HEAD_H + products.Count * ROW_H, w, FOOT_H)
+            End Sub
+
+        card.Controls.Add(headHost)
+        card.Controls.Add(bodyHost)
+        card.Controls.Add(footHost)
+
+        Return card
+    End Function
+
+    ' =========================================================================
     '  DATA ACCESS
     ' =========================================================================
 
@@ -944,7 +1513,8 @@ Public Class ProcurementQuotationsPanelBuilder
         "SELECT q.quotation_id, q.quotation_no, q.request_id, q.supplier_id, " &
         "s.name AS sname, COALESCE(u.full_name, '—') AS uname, " &
         "q.created_at, q.valid_until, q.status, q.notes, q.total_amount, " &
-        "(SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.quotation_id) AS n_items " &
+        "(SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.quotation_id) AS n_items, " &
+        "(SELECT COUNT(*) FROM quotations q2 WHERE q2.request_id = q.request_id) AS n_bids " &
         "FROM quotations q " &
         "JOIN suppliers s ON s.supplier_id = q.supplier_id " &
         "LEFT JOIN users u ON u.user_id = q.created_by "
@@ -960,7 +1530,8 @@ Public Class ProcurementQuotationsPanelBuilder
             .Status = SafeStr(rdr("status")),
             .Notes = SafeStr(rdr("notes")),
             .TotalAmount = SafeDec(rdr("total_amount")),
-            .ItemCount = SafeInt(rdr("n_items"))
+            .ItemCount = SafeInt(rdr("n_items")),
+            .BidCount = SafeInt(rdr("n_bids"))
         }
         If Not IsDBNull(rdr("valid_until")) Then
             r.HasValidUntil = True
@@ -1043,6 +1614,167 @@ Public Class ProcurementQuotationsPanelBuilder
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
+    End Function
+
+    ' ══════════════════════════════════════════════════════════════════════════
+    '  COMPARISON DATA
+    ' ══════════════════════════════════════════════════════════════════════════
+
+    ' Every supplier who has quoted a given request, each carrying their unit
+    ' price per product. Rejected and expired quotes are kept so the grid shows
+    ' the full bidding history rather than silently dropping losing bids.
+    Private Shared Function LoadCompareSuppliers(requestId As Integer) As List(Of CompareSupplier)
+        Dim result As New List(Of CompareSupplier)
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+
+                Using cmd As New MySqlCommand(
+                    "SELECT q.quotation_id, q.quotation_no, q.supplier_id, " &
+                    "s.name AS sname, q.status, q.total_amount " &
+                    "FROM quotations q " &
+                    "JOIN suppliers s ON s.supplier_id = q.supplier_id " &
+                    "WHERE q.request_id = @rid " &
+                    "ORDER BY q.created_at, q.quotation_id", conn)
+                    cmd.Parameters.AddWithValue("@rid", requestId)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            result.Add(New CompareSupplier With {
+                                .QuotationId = SafeInt(rdr("quotation_id")),
+                                .QuotationNo = SafeStr(rdr("quotation_no")),
+                                .SupplierId = SafeInt(rdr("supplier_id")),
+                                .SupplierName = SafeStr(rdr("sname")),
+                                .Status = SafeStr(rdr("status")),
+                                .TotalAmount = SafeDec(rdr("total_amount"))
+                            })
+                        End While
+                    End Using
+                End Using
+
+                If result.Count = 0 Then Return result
+
+                ' One pass for every line across every quote on this request,
+                ' rather than a query per supplier.
+                Using cmd As New MySqlCommand(
+                    "SELECT q.quotation_id, qi.product_id, qi.unit_price " &
+                    "FROM quotation_items qi " &
+                    "JOIN quotations q ON q.quotation_id = qi.quotation_id " &
+                    "WHERE q.request_id = @rid", conn)
+                    cmd.Parameters.AddWithValue("@rid", requestId)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            Dim qid As Integer = SafeInt(rdr("quotation_id"))
+                            Dim pid As Integer = SafeInt(rdr("product_id"))
+                            Dim price As Decimal = SafeDec(rdr("unit_price"))
+                            For Each sup In result
+                                If sup.QuotationId = qid Then
+                                    sup.Prices(pid) = price
+                                    Exit For
+                                End If
+                            Next
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not load the supplier comparison:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+        Return result
+    End Function
+
+    ' The products under comparison: the union of everything quoted on this
+    ' request, so a product only one supplier bid on still gets a row.
+    Private Shared Function LoadCompareProducts(requestId As Integer) As List(Of CompareProduct)
+        Dim result As New List(Of CompareProduct)
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT qi.product_id, p.name AS pname, p.sku, " &
+                    "MAX(qi.qty_requested) AS qty " &
+                    "FROM quotation_items qi " &
+                    "JOIN quotations q ON q.quotation_id = qi.quotation_id " &
+                    "JOIN products p ON p.product_id = qi.product_id " &
+                    "WHERE q.request_id = @rid " &
+                    "GROUP BY qi.product_id, p.name, p.sku " &
+                    "ORDER BY p.name", conn)
+                    cmd.Parameters.AddWithValue("@rid", requestId)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            result.Add(New CompareProduct With {
+                                .ProductId = SafeInt(rdr("product_id")),
+                                .ProductName = SafeStr(rdr("pname")),
+                                .Sku = SafeStr(rdr("sku")),
+                                .Qty = Math.Max(SafeInt(rdr("qty")), 1)
+                            })
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            AppModal.Show("Could not load the compared products:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
+        Return result
+    End Function
+
+    ' Fills in each supplier's cost for the products they actually quoted.
+    ' Computed from unit price x requested qty rather than read from
+    ' quotations.total_amount, so every column is measured the same way.
+    Private Shared Sub ComputeCoveredTotals(suppliers As List(Of CompareSupplier),
+                                            products As List(Of CompareProduct))
+        For Each sup In suppliers
+            sup.CoveredTotal = 0D
+            sup.CoveredCount = 0
+            For Each prod In products
+                Dim price As Decimal
+                If sup.Prices.TryGetValue(prod.ProductId, price) Then
+                    sup.CoveredTotal += Math.Round(price * prod.Qty, 2)
+                    sup.CoveredCount += 1
+                End If
+            Next
+        Next
+    End Sub
+
+    ' The lowest unit price quoted for one product, or -1 when nobody quoted it.
+    ' Only live bids (Draft/Sent/Accepted) win the highlight — a rejected or
+    ' expired price is shown for history but must not be recommended.
+    Private Shared Function BestPriceFor(productId As Integer,
+                                         suppliers As List(Of CompareSupplier)) As Decimal
+        Dim best As Decimal = -1D
+        For Each sup In suppliers
+            If Not IsLiveBid(sup.Status) Then Continue For
+            Dim price As Decimal
+            If sup.Prices.TryGetValue(productId, price) Then
+                If best < 0D OrElse price < best Then best = price
+            End If
+        Next
+        Return best
+    End Function
+
+    ' A bid still in play. Rejected and Expired quotes stay visible in the grid
+    ' as history, but cannot be the cheapest or be acted on.
+    Private Shared Function IsLiveBid(status As String) As Boolean
+        Return status = "Draft" OrElse status = "Sent" OrElse status = "Accepted"
+    End Function
+
+    ' Every quote on a request, whatever its status. Unlike CountSiblingQuotes
+    ' this counts rejected and expired bids too, because comparing prices is a
+    ' historical question — a losing bid is still worth seeing.
+    Private Shared Function CountQuotesOnRequest(requestId As Integer) As Integer
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM quotations WHERE request_id = @rid", conn)
+                    cmd.Parameters.AddWithValue("@rid", requestId)
+                    Return SafeInt(cmd.ExecuteScalar())
+                End Using
+            End Using
+        Catch
+            Return 0
+        End Try
     End Function
 
     ' How many other still-open quotes sit on the same request.

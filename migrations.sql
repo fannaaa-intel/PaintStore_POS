@@ -408,3 +408,134 @@ ALTER TABLE goods_receipts
     ADD INDEX IF NOT EXISTS idx_gr_po_phase (po_id, phase);
 
 SHOW COLUMNS FROM goods_receipts LIKE 'phase';
+
+-- -----------------------------------------------------------------------------
+--  13. supplier_payments - record what was actually paid, not just that it was
+--
+--     Settling a purchase order used to be a single stamp:
+--
+--         UPDATE purchase_orders SET paid_at = NOW()
+--
+--     That records THAT a PO was settled and nothing else. It cannot answer how
+--     much was handed over, against which supplier document, by whom, on what
+--     date, or by what method - so the only figure available to reporting was
+--     purchase_orders.total_cost, the amount ORDERED. Ordered and paid are not
+--     the same number.
+--
+--     Payment upon delivery is the store's normal arrangement: the goods arrive,
+--     the supplier presents a receipt, and payment is made against THAT
+--     document. Its amount is the authoritative one. It can legitimately differ
+--     from the PO total - a short delivery, a price change since quoting, a
+--     discount given at the door - and when it differs, the difference is the
+--     single most useful number on the record. Overwriting it with the ordered
+--     figure destroys exactly the evidence an audit looks for.
+--
+--     So the receipt amount is stored as given, the PO total is snapshotted
+--     beside it, and the variance is derived from the two rather than being
+--     silently reconciled away.
+--
+--     One row per payment, not one per PO: a partially settled order can take
+--     a second payment later, and both belong on the record.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS supplier_payments (
+    payment_id      INT(11)        NOT NULL AUTO_INCREMENT,
+    po_id           INT(11)        NOT NULL,
+
+    -- What the supplier's own document says. THIS is the amount paid, and it
+    -- is never derived from the PO.
+    amount_paid     DECIMAL(12,2)  NOT NULL,
+
+    -- The PO total as it stood when payment was recorded. Snapshotted so the
+    -- variance stays reconstructable even if the PO is edited afterwards.
+    po_total        DECIMAL(12,2)  NOT NULL DEFAULT 0.00,
+
+    -- The supplier's reference: their receipt, invoice or delivery-receipt
+    -- number. This is what ties the row back to a piece of paper in a folder.
+    reference_no    VARCHAR(60)    DEFAULT NULL,
+
+    -- How it was paid. 'Payment on Delivery' is the store's normal case and the
+    -- default; the rest are here so the column does not need widening the first
+    -- time someone pays a deposit by transfer.
+    method          ENUM('Payment on Delivery','Cash','Bank Transfer','Cheque','E-Wallet')
+                    NOT NULL DEFAULT 'Payment on Delivery',
+
+    -- When the money actually changed hands, which is not always when the row
+    -- was typed in - a payment made at the door on Friday can be entered Monday.
+    paid_on         DATE           NOT NULL,
+
+    -- Free-text explanation, and the place a variance gets justified.
+    remarks         VARCHAR(300)   DEFAULT NULL,
+
+    recorded_by     INT(11)        DEFAULT NULL,
+    recorded_at     DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (payment_id),
+    KEY idx_sp_po (po_id),
+    KEY idx_sp_paid_on (paid_on),
+    KEY idx_sp_user (recorded_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SHOW TABLES LIKE 'supplier_payments';
+
+-- -----------------------------------------------------------------------------
+--  14. purchase_request_items - a request is a LIST of products, not one
+--
+--     purchase_requests carries product_id and qty_requested directly on the
+--     request row, so the table can only express "one product, one quantity".
+--     A staff member needing five products had to raise five separate requests,
+--     and the approver reviewed five unrelated rows with nothing tying them
+--     together. Approving a basket was not possible because a basket could not
+--     be represented.
+--
+--     Requesting is done by the INVENTORY role, from Low Stock Alerts, one
+--     product at a time -- that screen is the only place a request has ever
+--     been created.
+--
+--     This adds the line table a request needs, and backfills one line per
+--     existing request so no history is lost.
+--
+--     WHY THE OLD COLUMNS STAY
+--     purchase_requests.product_id and .qty_requested are NOT dropped. Six read
+--     sites across Procurement, Admin and Inventory still join on product_id,
+--     and dropping it would break all of them at once. Instead:
+--
+--       * every request keeps its first line mirrored into the old columns,
+--         so existing queries keep returning exactly what they returned before
+--       * new code reads purchase_request_items and sees the whole list
+--
+--     A single-line request therefore behaves identically under both readings.
+--     A multi-line request shows its first line to old queries and all of its
+--     lines to new ones, which is a narrowing, never a wrong number. The old
+--     columns can be dropped once every read site has moved over.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS purchase_request_items (
+    pr_item_id      INT(11)       NOT NULL AUTO_INCREMENT,
+    request_id      INT(11)       NOT NULL,
+    product_id      INT(11)       NOT NULL,
+    qty_requested   INT(11)       NOT NULL DEFAULT 1,
+
+    -- Why THIS line is on the request. The request-level note explains the
+    -- basket; this explains one item in it.
+    note            VARCHAR(200)  DEFAULT NULL,
+
+    PRIMARY KEY (pr_item_id),
+    KEY idx_pri_request (request_id),
+    KEY idx_pri_product (product_id),
+    CONSTRAINT fk_pri_request FOREIGN KEY (request_id)
+        REFERENCES purchase_requests (request_id) ON DELETE CASCADE,
+    CONSTRAINT fk_pri_product FOREIGN KEY (product_id)
+        REFERENCES products (product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Backfill: one line per existing request, mirroring what the request row
+-- already said. Guarded so re-running the migration cannot duplicate lines.
+INSERT INTO purchase_request_items (request_id, product_id, qty_requested, note)
+SELECT pr.request_id, pr.product_id, pr.qty_requested, NULL
+FROM purchase_requests pr
+WHERE NOT EXISTS (
+    SELECT 1 FROM purchase_request_items pri
+    WHERE pri.request_id = pr.request_id
+);
+
+SHOW TABLES LIKE 'purchase_request_items';
+SELECT COUNT(*) AS lines_backfilled FROM purchase_request_items;

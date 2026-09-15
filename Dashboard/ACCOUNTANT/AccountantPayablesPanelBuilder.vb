@@ -47,6 +47,9 @@ Public Class AccountantPayablesPanelBuilder
 
     ' ── DATA MODEL ───────────────────────────────────────────────────────────
     Private Class PayableRow
+        ' Carried so a payment can be recorded against the order itself rather
+        ' than matched back by po_no, which is a display string.
+        Public PoId As Integer
         Public PoNo As String
         Public Supplier As String
         Public OrderDate As DateTime
@@ -131,42 +134,18 @@ Public Class AccountantPayablesPanelBuilder
         If Array.IndexOf(FilterTabs, _filter) < 0 Then _filter = "All"
     End Sub
 
-    ' Settle a received purchase order: stamps paid_at, which is what removes it
-    ' from payables (see PayableWhere). Guarded on paid_at IS NULL so a second
-    ' click, or another accountant settling the same PO, cannot overwrite the
-    ' original settlement date.
+    ' Settle a received purchase order.
+    '
+    ' This used to stamp paid_at and nothing else, which recorded THAT a PO was
+    ' settled while losing how much was handed over, against which supplier
+    ' document, and by what method. Under payment-upon-delivery the supplier's
+    ' receipt is the authority, and its amount can legitimately differ from the
+    ' amount ordered -- so the figures are asked for and stored rather than
+    ' assumed from total_cost. See SupplierPaymentModal.
     Private Shared Sub MarkPaid(row As PayableRow)
-        Try
-            Dim affected As Integer
-            Using conn = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand(
-                    "UPDATE purchase_orders SET paid_at = NOW() " &
-                    "WHERE po_no = @no AND status = 'Received' AND paid_at IS NULL", conn)
-                    cmd.Parameters.AddWithValue("@no", row.PoNo)
-                    affected = cmd.ExecuteNonQuery()
-                End Using
-            End Using
-
-            If affected = 0 Then
-                AppModal.Show("This purchase order has already been settled." & Environment.NewLine &
-                              "Its original payment date was left unchanged.",
-                              "Already Paid", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            Else
-                ActivityLog.Record("PO_PAID", "purchase_order", Nothing,
-                                   row.PoNo & " to " & row.Supplier & ", " &
-                                   Peso & row.Amount.ToString("N2"))
-                AppModal.Show(row.PoNo & " marked as paid." & Environment.NewLine &
-                              Peso & row.Amount.ToString("N2") & " cleared from payables.",
-                              "Payment Recorded", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            End If
-
+        If SupplierPaymentModal.Show(row.PoId, row.PoNo, row.Supplier, row.Amount) Then
             LoadPayables(_container, _filter)
-
-        Catch ex As Exception
-            AppModal.Show("Could not record the payment:" & Environment.NewLine & ex.Message,
-                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
+        End If
     End Sub
 
     ' Statuses that represent money owed to a supplier.
@@ -200,7 +179,7 @@ Public Class AccountantPayablesPanelBuilder
                 RefreshVisibleTabs()
 
                 Using cmd As New MySqlCommand(
-                    "SELECT po.po_no, s.name AS sname, po.order_date, " &
+                    "SELECT po.po_id, po.po_no, s.name AS sname, po.order_date, " &
                     "po.expected_date, po.total_cost, po.status " &
                     "FROM purchase_orders po " &
                     "JOIN suppliers s ON po.supplier_id = s.supplier_id " &
@@ -210,6 +189,7 @@ Public Class AccountantPayablesPanelBuilder
                         While rdr.Read()
                             Dim hasExp As Boolean = Not IsDBNull(rdr("expected_date"))
                             _rows.Add(New PayableRow With {
+                                .PoId = Convert.ToInt32(rdr("po_id")),
                                 .PoNo = rdr("po_no").ToString(),
                                 .Supplier = rdr("sname").ToString(),
                                 .OrderDate = Convert.ToDateTime(rdr("order_date")),
@@ -909,7 +889,7 @@ Public Class AccountantPayablesPanelBuilder
         If canSettle Then
             sb.AppendLine()
             sb.AppendLine("This order has been received in full, so the amount is owed")
-            sb.AppendLine("to the supplier. Mark it as paid and clear it from payables?")
+            sb.AppendLine("to the supplier. Record the payment from their receipt?")
 
             If AppModal.Show(sb.ToString(),
                              caption:=$"PO Details — {row.PoNo}",

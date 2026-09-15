@@ -289,6 +289,31 @@ Public Class InventoryLowStockPanelBuilder
         }
         region.Controls.AddRange({lblTitle, lblSubtitle})
 
+        ' ---- New purchase request ----
+        ' Requesting used to be possible only one product at a time, from the
+        ' pill on each alert row. This opens the real request form, where the
+        ' whole basket goes to the approver as a single request.
+        Dim btnNewRequest As New Button With {
+            .Text = "+  New Request", .Size = New Size(150, 38),
+            .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnNewRequest.FlatAppearance.BorderSize = 0
+        RoundControl(btnNewRequest, 10)
+        AddHandler btnNewRequest.MouseEnter,
+            Sub() btnNewRequest.BackColor = Color.FromArgb(0, 112, 94)
+        AddHandler btnNewRequest.MouseLeave,
+            Sub() btnNewRequest.BackColor = MintDeep
+        AddHandler btnNewRequest.Click,
+            Sub()
+                If PurchaseRequestModal.Show() AndAlso containerRef IsNot Nothing Then
+                    LoadLowStock(containerRef)
+                End If
+            End Sub
+        region.Controls.Add(btnNewRequest)
+
         ' ---- Copy order summary button ----
         Dim btnCopy As New Button With {
             .Text = "  Copy order list", .Size = New Size(150, 38),
@@ -362,11 +387,14 @@ Public Class InventoryLowStockPanelBuilder
         region.Controls.Add(btnRefresh)
         ' ─────────────────────────────────────────────────────────────────────
 
-        ' Layout right-to-left: [Copy order list]  [↻ Refresh]
+        ' Layout right-to-left: [+ New Request]  [Copy order list]  [↻ Refresh]
         Dim positionRight As Action =
             Sub()
+                btnNewRequest.Top = 22
+                btnNewRequest.Left = region.Width - 24 - btnNewRequest.Width
+
                 btnCopy.Top = 22
-                btnCopy.Left = region.Width - 24 - btnCopy.Width
+                btnCopy.Left = btnNewRequest.Left - 10 - btnCopy.Width
 
                 btnRefresh.Top = 22
                 btnRefresh.Left = btnCopy.Left - 10 - btnRefresh.Width
@@ -810,14 +838,21 @@ Public Class InventoryLowStockPanelBuilder
         End Try
     End Function
 
-    ' Returns True if a Pending request already exists for this product.
+    ' Returns True if a Pending request already covers this product.
+    '
+    ' Checked through purchase_request_items, not purchase_requests.product_id.
+    ' A request is a basket (migrations.sql section 14), and the legacy column
+    ' mirrors only the basket's FIRST line -- so a product sitting second on a
+    ' pending request would look unrequested here, and the row would invite a
+    ' duplicate request for something already awaiting approval.
     Private Shared Function HasPendingRequest(productId As Integer) As Boolean
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT COUNT(*) FROM purchase_requests " &
-                    "WHERE product_id = @pid AND status = 'Pending'", conn)
+                    "SELECT COUNT(*) FROM purchase_request_items pri " &
+                    "JOIN purchase_requests pr ON pr.request_id = pri.request_id " &
+                    "WHERE pri.product_id = @pid AND pr.status = 'Pending'", conn)
                     cmd.Parameters.AddWithValue("@pid", productId)
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
@@ -827,79 +862,23 @@ Public Class InventoryLowStockPanelBuilder
         End Try
     End Function
 
-    ' Inserts a purchase_request row and updates the button in place.
-    ' The suggested qty is offered as the pre-filled default, but staff can type
-    ' any quantity they judge correct — whatever they confirm is what reaches
-    ' Procurement in purchase_requests.qty_requested.
+    ' Opens the purchase request form with this product already on it.
+    '
+    ' This used to be a quantity prompt that wrote one purchase_requests row
+    ' and nothing else, so a restock covering five products meant five
+    ' unrelated requests and five separate approvals. The pill now seeds the
+    ' real form: the flagged product and its suggested quantity are already
+    ' filled in, and more products can be searched for and added before the
+    ' basket is sent as a single request.
     Private Shared Sub RaiseRequest(it As AlertItem, btnRequest As Label)
-        Try
-            Dim q As String = ChrW(34)
-            Dim msg As String =
-                "Raise a restock request for " & q & it.Name & q & "?" &
-                Environment.NewLine & Environment.NewLine &
-                "Recommended: " & it.SuggestedQty & " units" &
-                "   (stock " & it.StockQty & ", reorder level " & it.ReorderLevel & ")" &
-                Environment.NewLine & Environment.NewLine &
-                "Enter the quantity to request. Procurement will review it and " &
-                "create a Purchase Order."
+        If Not PurchaseRequestModal.Show(it.Id, it.SuggestedQty) Then Return
 
-            ' Loop until we get a valid number or the user cancels, so a typo
-            ' re-opens the prompt with what they typed instead of silently
-            ' falling back to the recommendation.
-            Dim qty As Integer = 0
-            Dim seed As String = it.SuggestedQty.ToString()
-            Do
-                Dim answer As String = AppModal.Prompt(msg, "Raise Request", seed)
-                If answer Is Nothing Then Return   ' cancelled
-
-                answer = answer.Trim()
-                If Integer.TryParse(answer, qty) AndAlso qty > 0 Then Exit Do
-
-                seed = answer
-                AppModal.Show(
-                    "Enter a whole number of units greater than 0.",
-                    "Invalid Quantity", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-            Loop
-
-            Using conn = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand(
-                    "INSERT INTO purchase_requests " &
-                    "(product_id, requested_by, qty_requested, status, note, created_at) " &
-                    "VALUES (@pid, @uid, @qty, 'Pending', @note, NOW())", conn)
-                    cmd.Parameters.AddWithValue("@pid", it.Id)
-                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
-                    cmd.Parameters.AddWithValue("@qty", qty)
-                    cmd.Parameters.AddWithValue("@note",
-                        "Raised from Low Stock Alerts. Stock: " &
-                        it.StockQty & ", Reorder level: " & it.ReorderLevel &
-                        ", Recommended: " & it.SuggestedQty &
-                        If(qty = it.SuggestedQty, "", " (staff adjusted to " & qty & ")"))
-                    cmd.ExecuteNonQuery()
-                End Using
-            End Using
-
-            ' A purchase request starts the spend approval chain, so its origin
-            ' belongs in the trail alongside the approval that follows it.
-            ActivityLog.Record("REQUEST_RAISE", "purchase_request", it.Id,
-                               it.Name & " — " & qty.ToString("N0") & " units")
-
-            ' Update the pill in place — tag it so click handlers bail early.
-            btnRequest.Text = "Requested " & ChrW(10003)
-            btnRequest.ForeColor = FaintText
-            btnRequest.BackColor = Color.FromArgb(238, 240, 239)
-            btnRequest.Cursor = Cursors.Default
-            btnRequest.Tag = "done"
-
-            AppModal.Show(
-                "Request raised for " & qty & " units." & Environment.NewLine &
-                "Procurement has been notified and will review it.",
-                "Request Sent", MessageBoxButtons.OK, MessageBoxIcon.Information)
-
-        Catch ex As Exception
-            AppModal.Show("Could not raise request:" & Environment.NewLine & ex.Message,
-                          "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        End Try
+        ' Update the pill in place — tag it so click handlers bail early.
+        btnRequest.Text = "Requested " & ChrW(10003)
+        btnRequest.ForeColor = FaintText
+        btnRequest.BackColor = Color.FromArgb(238, 240, 239)
+        btnRequest.Cursor = Cursors.Default
+        btnRequest.Tag = "done"
     End Sub
 
     ' Builds a plain-text purchase list and copies it to the clipboard.

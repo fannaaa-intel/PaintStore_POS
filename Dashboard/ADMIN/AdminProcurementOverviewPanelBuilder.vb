@@ -89,12 +89,26 @@ Public Class AdminProcurementOverviewPanelBuilder
     End Class
 
     Private Class PrRow
+        Public RequestId As Integer
         Public ProductName As String
         Public QtyRequested As Integer
         Public RequestedBy As String
         Public Status As String
         Public CreatedAt As DateTime
         Public Note As String
+
+        ' A request is a basket of products, so approving it means seeing all of
+        ' them. ItemCount is how many lines it carries and ItemSummary lists
+        ' them; a single-product request reads exactly as it always did.
+        Public ItemCount As Integer
+        Public ItemSummary As String
+        Public TotalUnits As Integer
+
+        Public ReadOnly Property IsMultiLine As Boolean
+            Get
+                Return ItemCount > 1
+            End Get
+        End Property
     End Class
 
     Private Class QuoteRow
@@ -339,10 +353,18 @@ Public Class AdminProcurementOverviewPanelBuilder
 
                 ClampPage()
 
+                ' The line counts come from purchase_request_items, which every
+                ' request has had since migration 14 backfilled one line per
+                ' existing row. COALESCE keeps the old single-product figures
+                ' correct even if a request somehow has no lines.
                 Using cmd As New MySqlCommand(
-                    "SELECT p.name AS pname, pr.qty_requested, " &
+                    "SELECT pr.request_id, p.name AS pname, pr.qty_requested, " &
                     "COALESCE(u.full_name,'—') AS uname, " &
-                    "pr.status, pr.created_at, COALESCE(pr.note,'') AS note " &
+                    "pr.status, pr.created_at, COALESCE(pr.note,'') AS note, " &
+                    "(SELECT COUNT(*) FROM purchase_request_items pri " &
+                    " WHERE pri.request_id = pr.request_id) AS n_items, " &
+                    "(SELECT COALESCE(SUM(pri.qty_requested),0) FROM purchase_request_items pri " &
+                    " WHERE pri.request_id = pr.request_id) AS n_units " &
                     PrJoins() & PrWhere() &
                     "ORDER BY pr.created_at DESC, pr.request_id DESC " &
                     "LIMIT @lim OFFSET @off", conn)
@@ -350,23 +372,65 @@ Public Class AdminProcurementOverviewPanelBuilder
                     AddPageParams(cmd)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
+                            Dim nItems As Integer = SafeInt(rdr("n_items"))
+                            Dim nUnits As Integer = SafeInt(rdr("n_units"))
                             _prRows.Add(New PrRow With {
+                                .RequestId = SafeInt(rdr("request_id")),
                                 .ProductName = SafeStr(rdr("pname")),
                                 .QtyRequested = SafeInt(rdr("qty_requested")),
                                 .RequestedBy = SafeStr(rdr("uname")),
                                 .Status = SafeStr(rdr("status")),
                                 .CreatedAt = SafeDate(rdr("created_at")),
-                                .Note = SafeStr(rdr("note"))
+                                .Note = SafeStr(rdr("note")),
+                                .ItemCount = Math.Max(nItems, 1),
+                                .TotalUnits = If(nUnits > 0, nUnits, SafeInt(rdr("qty_requested")))
                             })
                         End While
                     End Using
                 End Using
+
+                ' Second pass for the product names on multi-line requests. Kept
+                ' separate so single-product requests, still the common case,
+                ' cost exactly what they always did.
+                For Each row In _prRows
+                    If row.ItemCount > 1 Then
+                        row.ItemSummary = LoadRequestItemSummary(conn, row.RequestId)
+                    End If
+                Next
             End Using
         Catch ex As Exception
             AppModal.Show("Could not load purchase requests: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
+
+    ' The products on one request, as a single readable line. The approver is
+    ' deciding on the basket, so the basket has to be visible on the row rather
+    ' than only behind a click.
+    Private Shared Function LoadRequestItemSummary(conn As MySqlConnection,
+                                                   requestId As Integer) As String
+        Dim parts As New List(Of String)
+        Try
+            Using cmd As New MySqlCommand(
+                "SELECT p.name AS pname, pri.qty_requested " &
+                "FROM purchase_request_items pri " &
+                "JOIN products p ON p.product_id = pri.product_id " &
+                "WHERE pri.request_id = @rid " &
+                "ORDER BY pri.pr_item_id", conn)
+                cmd.Parameters.AddWithValue("@rid", requestId)
+                Using rdr = cmd.ExecuteReader()
+                    While rdr.Read()
+                        parts.Add(SafeStr(rdr("pname")) & " " & ChrW(215) & " " &
+                                  SafeInt(rdr("qty_requested")))
+                    End While
+                End Using
+            End Using
+        Catch
+            ' Non-fatal: the row still renders with its count and unit total.
+            Return ""
+        End Try
+        Return String.Join("   " & ChrW(8226) & "   ", parts)
+    End Function
 
     ' =========================================================================
     '  TAB 2 — QUOTATIONS
@@ -1086,18 +1150,39 @@ Public Class AdminProcurementOverviewPanelBuilder
         Dim badgeClr = PrBadge(r.Status)
         Dim p As BufferedPanel = NewRowShell(height, badgeClr.fore)
 
-        Dim lblProduct = Strong(r.ProductName)
+        ' A basket is titled by its size, not by whichever product happens to be
+        ' first — "3 products" is what the approver is actually deciding on.
+        Dim titleText As String =
+            If(r.IsMultiLine,
+               r.ItemCount & " products",
+               r.ProductName)
+        Dim lblProduct = Strong(titleText)
+
+        ' The line that carried the note now carries the basket contents when
+        ' there is a basket: what is being approved outranks the note about it.
+        Dim subText As String
+        If r.IsMultiLine AndAlso r.ItemSummary <> "" Then
+            subText = r.ItemSummary
+        ElseIf r.Note = "" Then
+            subText = "no note"
+        Else
+            subText = r.Note
+        End If
+
         Dim lblNote As New Label With {
-            .Text = If(r.Note = "", "no note", r.Note),
+            .Text = subText,
             .Font = New Font("Segoe UI", 9),
-            .ForeColor = FaintText,
+            .ForeColor = If(r.IsMultiLine, SubText, FaintText),
             .AutoSize = False,
             .AutoEllipsis = True,
             .Height = 16,
             .BackColor = Color.Transparent
         }
+
+        ' Total units across every line, so the number beside a basket is the
+        ' whole basket rather than just its first product.
         Dim lblQty As New Label With {
-            .Text = r.QtyRequested.ToString("N0"),
+            .Text = If(r.IsMultiLine, r.TotalUnits, r.QtyRequested).ToString("N0"),
             .Font = New Font("Segoe UI", 13, FontStyle.Bold),
             .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent
         }
