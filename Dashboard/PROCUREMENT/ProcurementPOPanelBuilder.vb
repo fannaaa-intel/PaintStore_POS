@@ -866,7 +866,7 @@ Public Class ProcurementPOPanelBuilder
         If pendings.Count = 0 Then
             Dim lbl As New Label With {
                 .Text = "No pending requests right now." & Environment.NewLine &
-                        "Use the product search to add items manually.",
+                        "Use Search Product, under Line Items, to add items manually.",
                 .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = False,
                 .TextAlign = ContentAlignment.TopCenter, .Dock = DockStyle.Top, .Height = 60,
                 .BackColor = Color.Transparent
@@ -1100,11 +1100,23 @@ Public Class ProcurementPOPanelBuilder
         AddHandler grandBar.Resize, Sub() layoutGrand()
 
         ' --- header with title + inline add control (top, inside the card) ---
-        Dim headerPanel As New Panel With {.Height = 92, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
+        Dim headerPanel As New Panel With {.Height = 112, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
         Dim lblItems As New Label With {
         .Text = "Line Items", .Font = New Font("Segoe UI", 15, FontStyle.Bold),
         .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 14), .BackColor = Color.Transparent
     }
+        ' The product search. It is a type-to-filter combo, but it carried no
+        ' caption while every other field on this screen had one, so it read as
+        ' an empty dropdown — and both empty states told the user to search a
+        ' product, naming a control that appeared nowhere. The caption gives it
+        ' the name those messages refer to.
+        Dim capProduct As New Label With {
+            .Text = "SEARCH PRODUCT", .Font = New Font("Segoe UI Semibold", 8.5F),
+            .ForeColor = FaintText, .AutoSize = False,
+            .Location = New Point(22, 46), .Size = New Size(360, 16),
+            .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+        }
+
         cmbProductRef = New ComboBox With {
         .DropDownStyle = ComboBoxStyle.DropDown, .FlatStyle = FlatStyle.Flat,
         .Font = New Font("Segoe UI", 11), .BackColor = CardBg,
@@ -1113,13 +1125,77 @@ Public Class ProcurementPOPanelBuilder
     }
         For Each p In LoadProducts() : cmbProductRef.Items.Add(p) : Next
         Dim prodField As Panel = MakeField(cmbProductRef, 360)
-        prodField.Location = New Point(20, 46)
+        prodField.Location = New Point(20, 66)
+
+        ' Placeholder shown while the box is empty.
+        '
+        ' A ComboBox gives a placeholder nowhere good to live: its own Paint
+        ' event never reaches the edit region, EM_SETCUEBANNER does not take on
+        ' a themed WinForms combo, and a child label inside it is clipped by the
+        ' ~24px text area. Both were tried and neither rendered.
+        '
+        ' So the label sits on the FIELD HOST, in the gap left by shortening the
+        ' combo, exactly where the typed value appears. Nothing overlaps the
+        ' input, so clicks, typing and the dropdown arrow all behave normally.
+        ' The combo is re-sized here AFTER MakeField laid it out, and kept that
+        ' way through resizes by the handler below.
+        Const HINT_INSET As Integer = 2
+
+        Dim lblProdHint As New Label With {
+            .Text = "Type a product name or SKU",
+            .Font = cmbProductRef.Font,
+            .ForeColor = FaintText, .AutoSize = False,
+            .TextAlign = ContentAlignment.MiddleLeft,
+            .BackColor = CardBg
+        }
+        prodField.Controls.Add(lblProdHint)
+        lblProdHint.BringToFront()
+
+        ' The hint sits over the combo's text area, so a click on it must behave
+        ' exactly like a click on the combo: focus the input and open the list.
+        ' Without this the placeholder would be a dead strip over a live control
+        ' — the field would simply ignore the first click.
+        AddHandler lblProdHint.Click,
+            Sub()
+                cmbProductRef.Focus()
+                cmbProductRef.DroppedDown = True
+            End Sub
+
+        Dim placeProdHint As Action =
+            Sub()
+                lblProdHint.SetBounds(
+                    cmbProductRef.Left + HINT_INSET,
+                    cmbProductRef.Top,
+                    Math.Max(20, cmbProductRef.Width - HINT_INSET - 20),
+                    cmbProductRef.Height)
+            End Sub
+
+        ' Hidden as soon as the field is focused, not only once text exists: the
+        ' caret belongs to the user the moment they click in, and a hint left
+        ' sitting over the text area would swallow the next click.
+        Dim syncProdHint As Action =
+            Sub()
+                lblProdHint.Visible =
+                    (cmbProductRef.Text.Length = 0 AndAlso Not cmbProductRef.Focused)
+            End Sub
+
+        AddHandler prodField.Resize,
+            Sub()
+                placeProdHint()
+                lblProdHint.BringToFront()
+            End Sub
+        AddHandler cmbProductRef.TextChanged, Sub() syncProdHint()
+        AddHandler cmbProductRef.SelectedIndexChanged, Sub() syncProdHint()
+        AddHandler cmbProductRef.GotFocus, Sub() syncProdHint()
+        AddHandler cmbProductRef.LostFocus, Sub() syncProdHint()
+        placeProdHint()
+        syncProdHint()
 
         Dim btnAdd As New Button With {
         .Text = "+  Add Product", .Size = New Size(150, 46),
         .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
         .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
-        .TextAlign = ContentAlignment.MiddleCenter, .Location = New Point(388, 46),
+        .TextAlign = ContentAlignment.MiddleCenter, .Location = New Point(388, 66),
         .Anchor = AnchorStyles.Top Or AnchorStyles.Left
     }
         btnAdd.FlatAppearance.BorderSize = 0
@@ -1128,11 +1204,14 @@ Public Class ProcurementPOPanelBuilder
         AddHandler btnAdd.Click, Sub() AddLineFromCombo()
 
         Dim headDiv As New Panel With {.Height = 1, .BackColor = RowDivider, .Dock = DockStyle.Bottom}
-        headerPanel.Controls.AddRange({lblItems, prodField, btnAdd, headDiv})
+        headerPanel.Controls.AddRange({lblItems, capProduct, prodField, btnAdd, headDiv})
 
         ' --- rows region (fill, inside the card) ---
-        linesHostRef = New Panel With {
-        .Dock = DockStyle.Fill, .BackColor = Color.Transparent, .AutoScroll = True,
+        ' NoScrollBarPanel still scrolls -- by wheel, and by following focus --
+        ' it just never draws the bar. The track sat hard against the total bar
+        ' and clipped the last row; the rows themselves are what matter here.
+        linesHostRef = New NoScrollBarPanel With {
+        .Dock = DockStyle.Fill, .BackColor = Color.Transparent,
         .Padding = New Padding(0)
     }
         AddHandler linesHostRef.Resize,
@@ -1789,7 +1868,7 @@ Public Class ProcurementPOPanelBuilder
             ph.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             Dim lbl As New Label With {
                 .Text = "No line items yet" & Environment.NewLine &
-                        "Add from a pending request or search a product above.",
+                        "Add from a pending request, or type in Search Product above.",
                 .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleCenter, .Dock = DockStyle.Fill,
                 .BackColor = Color.Transparent

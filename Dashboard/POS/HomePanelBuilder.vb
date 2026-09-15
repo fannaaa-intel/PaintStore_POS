@@ -1361,3 +1361,49 @@ Public Class BufferedPanel
                     ControlStyles.UserPaint, True)
     End Sub
 End Class
+
+' A scrolling panel that never shows its scrollbar.
+'
+' AutoScroll stays fully on -- the panel still scrolls by mouse wheel, still
+' follows the focused control, still reports the right scroll position. Only the
+' bar itself is suppressed, for lists that sit tight against another element
+' (the PO line list runs right up to the total bar, where the track crowded the
+' rows and clipped the last one).
+'
+' Two simpler approaches were tried and neither held:
+'   * calling ShowScrollBar from outside -- WinForms re-creates the bar on its
+'     next layout pass, so it returns on every resize, scroll and rebuild
+'   * stripping WS_VSCROLL in CreateParams -- the style is re-applied after the
+'     window is created, so the bar appears anyway
+' Hiding the bar as the frame is recalculated is what works, because it runs on
+' every layout pass rather than only at creation.
+Public Class NoScrollBarPanel
+    Inherits Panel
+
+    <System.Runtime.InteropServices.DllImport("user32.dll")>
+    Private Shared Function ShowScrollBar(hWnd As IntPtr, wBar As Integer,
+                                          bShow As Boolean) As Boolean
+    End Function
+
+    Private Const SB_BOTH As Integer = 3
+    Private Const WM_NCCALCSIZE As Integer = &H83
+
+    Public Sub New()
+        Me.DoubleBuffered = True
+        Me.SetStyle(ControlStyles.OptimizedDoubleBuffer Or
+                    ControlStyles.AllPaintingInWmPaint Or
+                    ControlStyles.UserPaint, True)
+        Me.AutoScroll = True
+    End Sub
+
+    Protected Overrides Sub WndProc(ByRef m As Message)
+        ' WM_NCCALCSIZE is sent whenever the non-client frame is recalculated,
+        ' which is exactly when the scrollbar would be given space. Hiding it
+        ' here catches every case that put it back before.
+        If m.Msg = WM_NCCALCSIZE Then
+            ShowScrollBar(Me.Handle, SB_BOTH, False)
+        End If
+        MyBase.WndProc(m)
+    End Sub
+
+End Class
