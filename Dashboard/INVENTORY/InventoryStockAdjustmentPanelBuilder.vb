@@ -110,6 +110,13 @@ Public Class InventoryStockAdjustmentPanelBuilder
     Private Shared targetHost As Panel
     Private Shared historyHost As Panel
     Private Shared searchResultsHost As Panel
+    ' Host for the floating search dropdown. It cannot live inside targetHost: that
+    ' panel is a fixed 140px, so a multi-row list would be clipped by it. Parenting
+    ' to the left column lets the list overhang the card without resizing anything.
+    Private Shared overlayHost As Panel
+
+    ' Gutter around the dropdown for its drop shadow to paint into.
+    Private Const SHADOW_PAD As Integer = 6
     Private Shared qtyBox As TextBox
     Private Shared noteBox As TextBox
     Private Shared lblPreview As Label
@@ -173,6 +180,32 @@ Public Class InventoryStockAdjustmentPanelBuilder
         leftCol.Controls.Add(formHost)
         leftCol.Controls.Add(spacer)
         leftCol.Controls.Add(targetHost)
+
+        ' Undocked sibling of the docked stack, so it overlays instead of displacing.
+        ' It is SHADOW_PAD larger than the list on every side so the drop shadow it
+        ' paints has somewhere to fall outside the list's own rounded edge.
+        overlayHost = New Panel With {.BackColor = Color.Transparent, .Visible = False}
+        AddHandler overlayHost.Paint,
+            Sub(s, e)
+                Dim p = CType(s, Panel)
+                If p.Controls.Count = 0 OrElse p.Controls(0).Height <= 1 Then Return
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Dim inner = p.Controls(0).Bounds
+                ' Successively larger, fainter rounded rects read as a soft shadow.
+                For i As Integer = SHADOW_PAD To 1 Step -1
+                    Dim alpha As Integer = CInt(16 - (i * 2))
+                    If alpha <= 0 Then Continue For
+                    Dim r As New Rectangle(inner.X - i, inner.Y - i + 1,
+                                           inner.Width + (i * 2), inner.Height + (i * 2))
+                    Using path = RoundRect(r, 10 + i)
+                        Using br As New SolidBrush(Color.FromArgb(alpha, 20, 45, 38))
+                            e.Graphics.FillPath(br, path)
+                        End Using
+                    End Using
+                Next
+            End Sub
+        leftCol.Controls.Add(overlayHost)
+        overlayHost.BringToFront()
 
         historyHost = New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         rightCol.Controls.Add(historyHost)
@@ -541,6 +574,14 @@ Public Class InventoryStockAdjustmentPanelBuilder
     Private Shared Sub BuildTargetCard()
         targetHost.Controls.Clear()
 
+        ' Rebuilding the card invalidates any open dropdown (it is parented outside
+        ' targetHost, so clearing above does not remove it).
+        If overlayHost IsNot Nothing Then
+            overlayHost.Visible = False
+            overlayHost.Controls.Clear()
+            searchResultsHost = Nothing
+        End If
+
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
@@ -568,15 +609,51 @@ Public Class InventoryStockAdjustmentPanelBuilder
             searchWrap.Controls.Add(box)
             card.Controls.Add(searchWrap)
 
+            ' Results float ON TOP of the card as a dropdown rather than growing it.
+            ' targetHost is DockStyle.Top, so any height change here pushed the whole
+            ' New Adjustment card below it down the page -- the container "adjusting"
+            ' on every keystroke. Parenting the list to the card and bringing it to
+            ' the front keeps the layout completely still while typing.
+            ' Lives in overlayHost (a free-floating sibling of the docked stack), so a
+            ' long result list overhangs the card instead of resizing it.
             searchResultsHost = New Panel With {
-                .Location = New Point(20, 98), .Size = New Size(380, 28), .BackColor = Color.Transparent, .AutoScroll = False
+                .Location = New Point(SHADOW_PAD, SHADOW_PAD), .Size = New Size(380, 28),
+                .BackColor = Color.White, .AutoScroll = False
             }
-            card.Controls.Add(searchResultsHost)
+            ' A white list on a white card has no edge of its own, so it looked like
+            ' part of the page rather than a menu floating above it. A soft drop
+            ' shadow plus a firmer border lifts it off the background; the shadow is
+            ' painted by overlayHost because it has to fall OUTSIDE the list bounds.
+            AddHandler searchResultsHost.Paint,
+                Sub(s, e)
+                    Dim p = CType(s, Panel)
+                    If p.Controls.Count = 0 Then Return
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                    Using path = RoundRect(New Rectangle(0, 0, p.Width - 1, p.Height - 1), 10)
+                        Using br As New SolidBrush(Color.White) : e.Graphics.FillPath(br, path) : End Using
+                        Using pen As New Pen(Color.FromArgb(150, 176, 168), 1) : e.Graphics.DrawPath(pen, path) : End Using
+                    End Using
+                End Sub
+            overlayHost.Controls.Clear()
+            overlayHost.Controls.Add(searchResultsHost)
+
+            ' Park the overlay just under the search pill, matching its width.
+            Dim placeOverlay As Action =
+                Sub()
+                    ' Offset by SHADOW_PAD so the LIST still lines up with the search
+                    ' pill even though the host extends further for the shadow.
+                    overlayHost.Location = New Point(targetHost.Left + 20 - SHADOW_PAD,
+                                                     targetHost.Top + 96 - SHADOW_PAD)
+                    Dim listW As Integer = Math.Max(120, card.Width - 40)
+                    overlayHost.Width = listW + (SHADOW_PAD * 2)
+                    searchResultsHost.Width = listW
+                End Sub
+            AddHandler card.Resize, Sub() placeOverlay()
+            placeOverlay()
             AddHandler card.Resize,
                 Sub()
                     searchWrap.Width = card.Width - 40
                     box.Width = searchWrap.Width - 32
-                    searchResultsHost.Width = card.Width - 40
                 End Sub
             targetHost.Height = 140
         Else
@@ -659,19 +736,19 @@ Public Class InventoryStockAdjustmentPanelBuilder
         If results.Count = 0 Then
             Dim none As New Label With {
                 .Text = "No matching products.", .Font = New Font("Segoe UI", 10),
-                .ForeColor = FaintText, .AutoSize = True, .Location = New Point(2, 4), .BackColor = Color.Transparent
+                .ForeColor = FaintText, .AutoSize = True, .Location = New Point(14, 12), .BackColor = Color.Transparent
             }
             searchResultsHost.Controls.Add(none)
-            searchResultsHost.Height = 28
+            searchResultsHost.Height = 40
             ResizeTargetForResults()
             Return
         End If
 
-        Dim top As Integer = 0
+        Dim top As Integer = 6      ' inset so the first row clears the rounded border
         For Each r In results
             Dim rowItem As AdjItem = r
             Dim row As New Panel With {
-                .Location = New Point(0, top), .Height = 44, .Width = searchResultsHost.Width,
+                .Location = New Point(6, top), .Height = 44, .Width = searchResultsHost.Width - 12,
                 .BackColor = Color.Transparent, .Cursor = Cursors.Hand,
                 .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             }
@@ -710,13 +787,38 @@ Public Class InventoryStockAdjustmentPanelBuilder
             searchResultsHost.Controls.Add(row)
             top += 46
         Next
-        searchResultsHost.Height = top
+        searchResultsHost.Height = top + 6   ' matching inset at the bottom
         ResizeTargetForResults()
     End Sub
 
     Private Shared Sub ResizeTargetForResults()
-        Dim needed As Integer = 100 + If(searchResultsHost Is Nothing, 0, searchResultsHost.Height) + 4
-        targetHost.Height = Math.Max(110, needed)
+        ' targetHost NEVER changes height. It is DockStyle.Top, so resizing it shoved
+        ' the New Adjustment card up or down on every keystroke. The results list is
+        ' a floating dropdown painted over the card instead, so the page holds still
+        ' no matter how many matches come back.
+        '
+        ' The query returns up to 12 rows (LIMIT 12 in SearchProducts); showing all of
+        ' them would overhang the card, so the dropdown caps at 5 rows and scrolls.
+        Const MAX_VISIBLE_ROWS As Integer = 5
+        Const ROW_H As Integer = 46
+
+        If searchResultsHost Is Nothing Then Return
+
+        Dim rowCount As Integer = searchResultsHost.Controls.Count
+        If rowCount > MAX_VISIBLE_ROWS Then
+            searchResultsHost.Height = MAX_VISIBLE_ROWS * ROW_H
+            searchResultsHost.AutoScroll = True
+        Else
+            searchResultsHost.AutoScroll = False
+        End If
+
+        If overlayHost IsNot Nothing Then
+            ' Empty list => hide entirely, so nothing is drawn over the card.
+            overlayHost.Visible = (rowCount > 0)
+            overlayHost.Height = searchResultsHost.Height + (SHADOW_PAD * 2)
+            overlayHost.BringToFront()
+            overlayHost.Invalidate()    ' repaint the shadow at the new height
+        End If
     End Sub
 
     ' =========================================================================

@@ -422,10 +422,18 @@ Public Class InventoryHomePanelBuilder
         ' ===========================
         ' 3. MIDDLE ROW — Low Stock Alerts + Recent Movements
         ' ===========================
-        ' FIX 10: midRow height is not fixed — it adapts to wrap width so neither
-        ' column clips its content. Lists inside are individually scrollable.
+        ' Height is derived from the longest list either column can show, rather
+        ' than a fixed 360 that silently clipped the 5th movement row. Both queries
+        ' are capped (LIMIT 6 low-stock / LIMIT 5 movements), so the tallest case is
+        ' known up front: header + padding + N tiles at 60 high with an 8px margin.
+        Const MOVE_ROWS As Integer = 5          ' matches the movements query LIMIT
+        Const LOW_ROWS As Integer = 6           ' matches the low-stock query LIMIT
+        Const TILE_H As Integer = 60 + 8        ' tile height + bottom margin
+        Const LIST_CHROME As Integer = 60 + 10 + 24 + (CARD_INSET * 2)  ' header + pads + inset
+        Dim midRowHeight As Integer = LIST_CHROME + (Math.Max(MOVE_ROWS, LOW_ROWS) * TILE_H)
+
         Dim midRow As New TableLayoutPanel With {
-            .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = 360,
+            .Top = curTop, .Left = 0, .Width = wrap.Width, .Height = midRowHeight,
             .ColumnCount = 2, .RowCount = 1, .BackColor = Color.Transparent,
             .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
@@ -562,10 +570,15 @@ Public Class InventoryHomePanelBuilder
         Dim moveCardHeader As Panel = MakeCardHeader("Recent Stock Movements", IconActivity, "↻")
 
         ' FIX 10: AutoScroll=True so the movement list scrolls independently.
+        ' QuietScrollFlowPanel hides its scrollbars, so the only cue that the list
+        ' continues is seeing part of the next tile. A 14px bottom pad left the last
+        ' tile (60 high + 8 margin) sliced flush against the edge and looking like a
+        ' render bug rather than more content; 24 clears the tile's own margin so the
+        ' final row ends cleanly.
         Dim moveList As New QuietScrollFlowPanel With {
             .Dock = DockStyle.Fill,
             .BackColor = Color.Transparent,
-            .Padding = New Padding(20, 10, 20, 14)
+            .Padding = New Padding(20, 10, 20, 24)
         }
         If recentMoves.Count = 0 Then
             moveList.Controls.Add(MakeEmptyLabel("No stock movements yet."))

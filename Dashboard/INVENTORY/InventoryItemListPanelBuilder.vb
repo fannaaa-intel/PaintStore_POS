@@ -1042,7 +1042,8 @@ Public Class InventoryItemListPanelBuilder
 
         Dim f As New ShadowDialog With {
             .FormBorderStyle = FormBorderStyle.None, .StartPosition = FormStartPosition.CenterParent,
-            .BackColor = CardBg, .ShowInTaskbar = False, .Width = 540, .Height = 660,
+            .BackColor = CardBg, .ShowInTaskbar = False, .Width = 540, .Height = 732,
+            .MinimizeBox = False, .MaximizeBox = False,
             .KeyPreview = True, .Padding = New Padding(2)
         }
         AddHandler f.Paint,
@@ -1089,11 +1090,19 @@ Public Class InventoryItemListPanelBuilder
         f.Controls.Add(header)
 
         ' ---- Scrollable body ----
+        ' The footer is DockStyle.Bottom and is added to the form later. WinForms
+        ' gives a Fill control whatever is left after the docks added BEFORE it,
+        ' so adding body first would let the footer sit on top of the body's last
+        ' 72px -- which is exactly where the Reorder Level row lands. Docking the
+        ' footer first and adding body after keeps them from overlapping.
+        '
+        ' No Padding here either: these children are positioned absolutely, and
+        ' WinForms does not offset absolute children by a container's Padding, so
+        ' setting it only inflated the scroll range. The breathing room below the
+        ' header comes from the starting y instead.
         Dim body As New Panel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .AutoScroll = True, .Padding = New Padding(0)}
-        f.Controls.Add(body)
-        body.BringToFront()
 
-        Dim y As Integer = 22
+        Dim y As Integer = 34
         Dim L As Integer = 28
         Dim fullW As Integer = 484
         Dim halfW As Integer = 234
@@ -1286,24 +1295,30 @@ Public Class InventoryItemListPanelBuilder
         ' Cost sits next to price so the margin is visible while typing. It
         ' feeds Gross Profit on the Accountant dashboard -- without it every
         ' sale of this item reports as 100% profit.
-        Dim txtCost = AddField(body, "Unit Cost", L, y, 148)
-        Dim txtPrice = AddField(body, "Unit Price", L + 168, y, 148)
-        Dim numStock = AddNumeric(body, "Stock Qty", L + 336, y, 148, 0, 1000000)
+        ' Four numeric fields on TWO rows of two, rather than three-then-one. The
+        ' lone trailing field used to leave a full empty row's worth of dead space
+        ' above the footer.
+        Dim txtCost = AddField(body, "Unit Cost", L, y, 234)
+        Dim txtPrice = AddField(body, "Unit Price", rightX, y, 234)
         y += 80
-        Dim numReorder = AddNumeric(body, "Reorder Level", L, y, 148, 0, 1000000)
-        y += 80
+        Dim numStock = AddNumeric(body, "Stock Qty", L, y, 234, 0, 1000000)
+        Dim numReorder = AddNumeric(body, "Reorder Level", rightX, y, 234, 0, 1000000)
 
         If editing AndAlso Not viewOnly Then
             numStock.Enabled = False
             Dim lblStockLock As New Label With {
                 .Text = "Locked " & ChrW(8226) & " change in Stock Adjustment",
                 .Font = New Font("Segoe UI", 7.5F), .ForeColor = FaintText,
-                .AutoSize = True, .Location = New Point(L + 336, y - 28), .BackColor = Color.Transparent
+                .AutoSize = True, .Location = New Point(L, y + 50), .BackColor = Color.Transparent
             }
             body.Controls.Add(lblStockLock)
         End If
 
-        body.Controls.Add(New Panel With {.Location = New Point(0, y), .Size = New Size(1, 10), .BackColor = Color.Transparent})
+        ' y + 48 is where the last input actually ends (22 label offset + control
+        ' height); the lock hint below it needs a further ~16.
+        y += If(editing AndAlso Not viewOnly, 48 + 22, 48)
+        body.Controls.Add(New Panel With {.Location = New Point(0, y), .Size = New Size(1, 16), .BackColor = Color.Transparent})
+        y += 16
 
         ' ---- Footer with buttons ----
         Dim footer As New Panel With {.Dock = DockStyle.Bottom, .Height = 72, .BackColor = CardBg}
@@ -1367,7 +1382,9 @@ Public Class InventoryItemListPanelBuilder
         End If
 
         f.Controls.Add(footer)
-        footer.BringToFront()
+        ' body is added last so the Fill region is measured after the Bottom dock
+        ' has claimed its 72px; otherwise the footer overlaps the Reorder Level row.
+        f.Controls.Add(body)
 
         Dim layoutFooter As Action =
             Sub()
@@ -1406,6 +1423,15 @@ Public Class InventoryItemListPanelBuilder
             DisableInputs(body)
             txtHex.Enabled = False
         End If
+
+        ' Size the dialog to whatever the body actually laid out, instead of a
+        ' hardcoded guess. Edit mode is taller than view mode (it adds the stock
+        ' lock hint), and hand-computed heights kept leaving dead space above the
+        ' footer or forcing a needless scrollbar. y is the true content bottom.
+        Dim chromeH As Integer = header.Height + footer.Height + f.Padding.Vertical
+        Dim wantH As Integer = y + chromeH
+        Dim maxH As Integer = Screen.FromPoint(Cursor.Position).WorkingArea.Height - 40
+        f.Height = Math.Min(wantH, maxH)
 
         AddHandler f.KeyDown, Sub(s, e) If e.KeyCode = Keys.Escape Then f.Close()
         AddHandler f.Shown,
