@@ -16,6 +16,7 @@ Public Class PROCUREMENT_STAFF
     Private _btnStockLevel As Button        ' built in code, like Settings
     Private _btnReports As Button
     Private _navButtons As Button()         ' the MENU list, top to bottom
+    Private _lowStockCount As Integer = -1  ' red badge on Stock Level
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     Private Const NAV_OPEN_WIDTH As Integer = 260
@@ -189,6 +190,13 @@ Public Class PROCUREMENT_STAFF
         Next
         LayoutNavButtons()
         AddHandler Nav.Resize, Sub() LayoutNavButtons()
+
+        ' Red count of items needing restock (same count as Inventory's Low
+        ' Stock Alerts). Recounted on every nav click (SetActive).
+        AddHandler _btnStockLevel.Paint,
+            Sub(s As Object, pe As PaintEventArgs)
+                LowStockAlert.PaintBadge(_btnStockLevel, pe, _lowStockCount, Not navIsOpen)
+            End Sub
 
 
         ' ── SETTINGS ────────────────────────────────────────────────────────────
@@ -418,6 +426,11 @@ Public Class PROCUREMENT_STAFF
         btn.ForeColor = MintDarkTop
         btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
         btn.Tag = "active"
+
+        If _btnStockLevel IsNot Nothing Then
+            _lowStockCount = LowStockAlert.CountLowStock()
+            _btnStockLevel.Invalidate()
+        End If
     End Sub
 
     Private Sub RoundButton(btn As Button, radius As Integer)

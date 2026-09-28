@@ -15,13 +15,16 @@ Imports MySql.Data.MySqlClient
 '  details (that lives in Item List) and it does NOT change quantities (that
 '  lives in Stock Adjustment). Its only job is to surface inventory condition
 '  at a glance:
-'     1. Summary band  — total units, total inventory value, per-tier counts.
-'     2. Health bar    — proportional share of Healthy / Low / Critical / Out.
-'     3. Main table    — thumbnail + name/SKU, category, qty, reorder, a visual
-'                        stock-level bar, status badge, line value. Sorted most
-'                        urgent first (Out -> Critical -> Low -> Healthy, then
-'                        lowest qty).
-'     4. Filters       — category chips, health-tier KPI-card filters, search.
+'     1. Summary band  — total units and total inventory value.
+'     2. Main table    — thumbnail + name/SKU, category, qty (coloured by tier)
+'                        over its restock level, stock level as a NUMBER (units
+'                        above / below restock), status badge, line value.
+'                        Sorted most urgent first (Out -> Critical -> Low ->
+'                        Healthy, then lowest qty).
+'     3. Filters       — category chips, health-tier KPI-card filters, search.
+'
+'  The old "Health Distribution" share bar and the per-row visual bar were
+'  removed at the owner's request: the numbers say it plainly.
 '
 '  DESIGN
 '  ------
@@ -82,12 +85,11 @@ Public Class InventoryStockLevelPanelBuilder
     Private Shared ReadOnly AccentRed As Color = Theme.Danger
     Private Shared ReadOnly RowDivider As Color = Theme.RowDivider
 
-    ' Tier-specific accents used by the health bar, badges and KPI values.
+    ' Tier-specific accents used by the qty / stock-level numbers, badges and KPI values.
     Private Shared ReadOnly HealthyClr As Color = Theme.Success
     Private Shared ReadOnly LowClr As Color = Color.FromArgb(220, 170, 0)
     Private Shared ReadOnly CriticalClr As Color = Theme.Warning
     Private Shared ReadOnly OutClr As Color = Theme.Danger
-    Private Shared ReadOnly TrackBg As Color = Color.FromArgb(233, 239, 236)
 
     Private Shared ReadOnly Peso As String = ChrW(8369)
     Private Const PaintCategory As String = "Paint"
@@ -146,7 +148,6 @@ Public Class InventoryStockLevelPanelBuilder
     Private Shared lblSubtitle As Label
     Private Shared lblShowing As Label
     Private Shared searchBox As TextBox
-    Private Shared healthBar As Panel
     Private Shared kpiCards As New List(Of (panel As Panel, tier As String, valueLbl As Label))
     Private Shared chipMap As New Dictionary(Of String, Panel)
     Private Shared activeRows As New List(Of Panel)
@@ -418,7 +419,7 @@ Public Class InventoryStockLevelPanelBuilder
         AddHandler region.Resize, Sub() PositionTopRight()
         PositionTopRight()
 
-        ' ---- SUMMARY BAND (units + value + health bar) ----
+        ' ---- SUMMARY BAND (units + value) ----
         Dim summaryRow As Panel = BuildSummaryBand()
         summaryRow.Left = 24
         summaryRow.Top = 92
@@ -459,17 +460,16 @@ Public Class InventoryStockLevelPanelBuilder
     End Function
 
     ' =========================================================================
-    '  SUMMARY BAND  (total units | total value | health distribution bar)
+    '  SUMMARY BAND  (total units | total value)
     ' =========================================================================
     Private Shared Function BuildSummaryBand() As Panel
         Dim band As New TableLayoutPanel With {
-            .Height = 142, .ColumnCount = 3, .RowCount = 1,
+            .Height = 142, .ColumnCount = 2, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
-        band.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 26))
-        band.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 26))
-        band.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 48))
+        band.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
+        band.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50))
         band.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         ' --- Card 1: Total stock units ---
@@ -493,7 +493,7 @@ Public Class InventoryStockLevelPanelBuilder
 
         ' --- Card 2: Total inventory value ---
         Dim valueCard As New BufferedPanel With {
-            .Dock = DockStyle.Fill, .BackColor = CardBg, .Margin = New Padding(6, 0, 6, 0)
+            .Dock = DockStyle.Fill, .BackColor = CardBg, .Margin = New Padding(6, 0, 0, 0)
         }
         AddHandler valueCard.Paint, Sub(s, e) PaintStatCard(CType(s, Panel), e)
         Dim lblValueCap As New Label With {
@@ -510,133 +510,13 @@ Public Class InventoryStockLevelPanelBuilder
         }
         valueCard.Controls.AddRange({lblValueCap, lblTotalValue, lblValueSub})
 
-        ' --- Card 3: Health distribution share bar ---
-        Dim distCard As New BufferedPanel With {
-            .Dock = DockStyle.Fill, .BackColor = CardBg, .Margin = New Padding(6, 0, 0, 0)
-        }
-        AddHandler distCard.Paint, Sub(s, e) PaintStatCard(CType(s, Panel), e)
-        Dim lblDistCap As New Label With {
-            .Text = "Health Distribution", .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
-        }
-        distCard.Controls.Add(lblDistCap)
-
-        healthBar = New Panel With {
-            .Location = New Point(22, 46), .Height = 22, .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        }
-        AddHandler healthBar.Paint, Sub(s, e) PaintHealthBar(CType(s, Panel), e)
-        AddHandler distCard.Resize, Sub() healthBar.Width = distCard.Width - 44
-        distCard.Controls.Add(healthBar)
-        healthBar.Width = distCard.Width - 44
-
-        ' Legend under the bar (four tiers).
-        Dim legend As Panel = BuildHealthLegend()
-        legend.Location = New Point(22, 84)
-        legend.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        AddHandler distCard.Resize, Sub() legend.Width = distCard.Width - 44
-        distCard.Controls.Add(legend)
-        legend.Width = distCard.Width - 44
-
         band.Controls.Add(unitsCard, 0, 0)
         band.Controls.Add(valueCard, 1, 0)
-        band.Controls.Add(distCard, 2, 0)
         Return band
-    End Function
-
-    Private Shared Function BuildHealthLegend() As Panel
-        Dim legend As New FlowLayoutPanel With {
-            .Height = 44, .AutoSize = False, .WrapContents = True, .FlowDirection = FlowDirection.LeftToRight,
-            .BackColor = Color.Transparent, .Padding = New Padding(0)
-        }
-        Dim tierKeys() As String = {TierHealthy, TierLow, TierCritical, TierOut}
-        For Each tk In tierKeys
-            Dim swatchColor As Color = TierColor(tk)
-            Dim caption As String = TierLabel(tk)
-            Dim item As New Panel With {
-                .Size = New Size(96, 20), .Margin = New Padding(0, 0, 6, 4), .BackColor = Color.Transparent
-            }
-            Dim dot As New Panel With {
-                .Size = New Size(10, 10), .Location = New Point(0, 5), .BackColor = Color.Transparent
-            }
-            AddHandler dot.Paint,
-                Sub(s, e)
-                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                    Using br As New SolidBrush(swatchColor)
-                        e.Graphics.FillEllipse(br, 0, 0, 9, 9)
-                    End Using
-                End Sub
-            Dim lbl As New Label With {
-                .Text = caption, .Font = New Font("Segoe UI", 8.5F), .ForeColor = SubText,
-                .AutoSize = True, .Location = New Point(14, 2), .BackColor = Color.Transparent
-            }
-            item.Controls.Add(dot)
-            item.Controls.Add(lbl)
-            legend.Controls.Add(item)
-        Next
-        Return legend
     End Function
 
     Private Shared Sub PaintStatCard(panel As Panel, e As PaintEventArgs)
         PanelRenderer.Draw(panel, e, True)
-    End Sub
-
-    ' Horizontal proportional share bar across the four tiers.
-    Private Shared Sub PaintHealthBar(panel As Panel, e As PaintEventArgs)
-        Dim g = e.Graphics
-        g.SmoothingMode = SmoothingMode.AntiAlias
-        Dim w As Integer = panel.Width
-        Dim h As Integer = panel.Height
-        If w <= 2 OrElse h <= 2 Then Return
-
-        Dim radius As Integer = h \ 2
-        Dim full As New Rectangle(0, 0, w - 1, h - 1)
-
-        ' Track background.
-        Using path = RoundRect(full, radius)
-            Using br As New SolidBrush(TrackBg)
-                g.FillPath(br, path)
-            End Using
-        End Using
-
-        Dim total As Integer = items.Count
-        If total = 0 Then
-            Using pen As New Pen(CardBorder, 1)
-                Using path = RoundRect(full, radius)
-                    g.DrawPath(pen, path)
-                End Using
-            End Using
-            Return
-        End If
-
-        ' Segments ordered Healthy -> Low -> Critical -> Out for a natural read.
-        Dim order() As String = {TierHealthy, TierLow, TierCritical, TierOut}
-        Dim counts(order.Length - 1) As Integer
-        For i = 0 To order.Length - 1
-            counts(i) = CountTier(order(i))
-        Next
-
-        ' Clip to a rounded rect so each segment shares the pill silhouette.
-        Dim oldClip = g.Clip
-        Using clipPath = RoundRect(full, radius)
-            g.SetClip(clipPath, CombineMode.Replace)
-            Dim x As Single = 0
-            For i = 0 To order.Length - 1
-                If counts(i) <= 0 Then Continue For
-                Dim segW As Single = (counts(i) / CSng(total)) * w
-                Using br As New SolidBrush(TierColor(order(i)))
-                    g.FillRectangle(br, x, 0, segW + 0.5F, h)
-                End Using
-                x += segW
-            Next
-            g.Clip = oldClip
-        End Using
-
-        Using pen As New Pen(Color.FromArgb(225, 232, 229), 1)
-            Using path = RoundRect(full, radius)
-                g.DrawPath(pen, path)
-            End Using
-        End Using
     End Sub
 
     ' =========================================================================
@@ -744,7 +624,6 @@ Public Class InventoryStockLevelPanelBuilder
             kpiCards(i).panel.Invalidate()
         Next
         If lblSubtitle IsNot Nothing Then lblSubtitle.Text = SubtitleText()
-        If healthBar IsNot Nothing Then healthBar.Invalidate()
     End Sub
 
     Private Shared Sub RefreshSummary()
@@ -752,7 +631,6 @@ Public Class InventoryStockLevelPanelBuilder
         Dim totalValue As Decimal = items.Sum(Function(p) p.LineValue)
         If lblTotalUnits IsNot Nothing Then lblTotalUnits.Text = totalUnits.ToString("N0")
         If lblTotalValue IsNot Nothing Then lblTotalValue.Text = Peso & totalValue.ToString("N2")
-        If healthBar IsNot Nothing Then healthBar.Invalidate()
     End Sub
 
     ' =========================================================================
@@ -1078,11 +956,12 @@ Public Class InventoryStockLevelPanelBuilder
             .BackColor = Color.Transparent
         }
 
-        ' Col 2 — qty / reorder (center)
+        ' Col 2 — qty / reorder (center). The quantity is the headline number,
+        ' coloured by tier so a low count stands out without reading the badge.
         Dim cStock As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         Dim lblQty As New Label With {
-            .Text = it.StockQty.ToString(), .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = False, .Dock = DockStyle.Top, .Height = 28,
+            .Text = it.StockQty.ToString("N0"), .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+            .ForeColor = QtyColor(it), .AutoSize = False, .Dock = DockStyle.Top, .Height = 32,
             .TextAlign = ContentAlignment.BottomCenter, .BackColor = Color.Transparent
         }
         Dim lblRe As New Label With {
@@ -1093,16 +972,12 @@ Public Class InventoryStockLevelPanelBuilder
         cStock.Controls.Add(lblRe)
         cStock.Controls.Add(lblQty)
 
-        ' Col 3 — visual stock-level bar (qty relative to reorder*3, clamped)
-        Dim cLevel As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
-        Dim levelBar As Panel = BuildLevelBar(it)
-        cLevel.Controls.Add(levelBar)
-        AddHandler cLevel.Resize,
-            Sub()
-                levelBar.Width = Math.Max(40, cLevel.Width - 16)
-                levelBar.Left = 0
-                levelBar.Top = (cLevel.Height - levelBar.Height) \ 2
-            End Sub
+        ' Col 3 — stock level as a number: units above / below the restock level
+        Dim cLevel As New Label With {
+            .Text = LevelText(it), .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+            .ForeColor = QtyColor(it), .Dock = DockStyle.Fill,
+            .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
+        }
 
         ' Col 4 — status badge (center)
         Dim cStatus As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
@@ -1168,49 +1043,20 @@ Public Class InventoryStockLevelPanelBuilder
         Return row
     End Function
 
-    ' Per-row stock-level bar: fill = qty relative to a sensible max
-    ' (reorder_level * 3), clamped to [0, 1]. When reorder_level is 0 we fall
-    ' back to a small nominal max so the bar still reads sensibly.
-    Private Shared Function BuildLevelBar(it As StockItem) As Panel
-        Dim bar As New Panel With {
-            .Height = 10, .Width = 120, .BackColor = Color.Transparent
-        }
+    ' Units above / below the restock level, e.g. "8 below restock".
+    Private Shared Function LevelText(it As StockItem) As String
+        Dim diff As Integer = it.StockQty - it.ReorderLevel
+        If diff < 0 Then Return (-diff).ToString("N0") & " below restock"
+        If diff = 0 Then Return "At restock level"
+        Return diff.ToString("N0") & " above restock"
+    End Function
+
+    ' Healthy stays the normal dark text; only the tiers that need attention
+    ' are coloured, so the eye goes straight to them.
+    Private Shared Function QtyColor(it As StockItem) As Color
         Dim tier As String = TierOf(it)
-        Dim fillColor As Color = TierColor(tier)
-
-        Dim maxRef As Integer = it.ReorderLevel * 3
-        If maxRef <= 0 Then maxRef = Math.Max(3, it.StockQty)
-        Dim frac As Double = 0
-        If maxRef > 0 Then frac = it.StockQty / CDbl(maxRef)
-        If frac < 0 Then frac = 0
-        If frac > 1 Then frac = 1
-        Dim capFrac As Double = frac
-
-        AddHandler bar.Paint,
-            Sub(s, e)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim w As Integer = bar.Width
-                Dim h As Integer = bar.Height
-                If w <= 2 OrElse h <= 2 Then Return
-                Dim radius As Integer = h \ 2
-                Dim track As New Rectangle(0, 0, w - 1, h - 1)
-                Using path = RoundRect(track, radius)
-                    Using br As New SolidBrush(TrackBg)
-                        g.FillPath(br, path)
-                    End Using
-                End Using
-                Dim fillW As Integer = CInt((w - 1) * capFrac)
-                If fillW >= 2 Then
-                    Dim fillRect As New Rectangle(0, 0, fillW, h - 1)
-                    Using path = RoundRect(fillRect, radius)
-                        Using br As New SolidBrush(fillColor)
-                            g.FillPath(br, path)
-                        End Using
-                    End Using
-                End If
-            End Sub
-        Return bar
+        If tier = TierHealthy Then Return MintDark
+        Return StatusOf(it).fore
     End Function
 
     ' Rounded 38x38 thumbnail: photo for non-paint, colour chip for paint,

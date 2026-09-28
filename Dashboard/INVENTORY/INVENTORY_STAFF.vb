@@ -16,6 +16,7 @@ Public Class INVENTORY_STAFF
     Private _btnHistory As Button           ' Transaction History
     Private _btnReports As Button           ' Reports
     Private _navButtons As Button()         ' the MENU list, top to bottom
+    Private _lowStockCount As Integer = -1  ' red badge on Low Stock Alerts
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     Private Const NAV_OPEN_WIDTH As Integer = 260
@@ -190,6 +191,13 @@ Public Class INVENTORY_STAFF
         LayoutNavButtons()
         AddHandler Nav.Resize, Sub() LayoutNavButtons()
 
+        ' Red count badge on Low Stock Alerts. Recounted on every nav click
+        ' (SetActive), so it follows adjustments and put-aways.
+        AddHandler lowStock.Paint,
+            Sub(s As Object, pe As PaintEventArgs)
+                LowStockAlert.PaintBadge(lowStock, pe, _lowStockCount, Not navIsOpen)
+            End Sub
+
 
         ' ── SETTINGS ────────────────────────────────────────────────────────────
         ' Replaces the old My Account button. Settings holds My Account (with
@@ -237,6 +245,12 @@ Public Class INVENTORY_STAFF
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
         btnHamburger.BringToFront()
+    End Sub
+
+    ' One notice per login, after the dashboard is on screen, when anything
+    ' needs restocking. "Yes" opens Low Stock Alerts.
+    Private Sub INVENTORY_STAFF_Shown(sender As Object, e As EventArgs) Handles MyBase.Shown
+        If LowStockAlert.ShowLoginNotice(_lowStockCount) Then lowStock.PerformClick()
     End Sub
 
     ' Stacks the MENU buttons from y=128. Eight buttons at the usual 58px pitch
@@ -419,6 +433,9 @@ Public Class INVENTORY_STAFF
         btn.ForeColor = MintDarkTop
         btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
         btn.Tag = "active"
+
+        _lowStockCount = LowStockAlert.CountLowStock()
+        lowStock.Invalidate()
     End Sub
 
     Private Sub RoundButton(btn As Button, radius As Integer)

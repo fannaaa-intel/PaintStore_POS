@@ -291,6 +291,7 @@
     <Compile Include="Modules\SupplierPaymentModal.vb" />
     <Compile Include="Modules\PurchaseRequestModal.vb" />
     <Compile Include="Modules\DeliveryIssues.vb" />
+    <Compile Include="Modules\LowStockAlert.vb" />
     <Compile Include="Modules\PoDetailsModal.vb" />
     <Compile Include="Modules\MyRequestsModal.vb" />
     <Compile Include="Modules\RequestReviewModal.vb" />
