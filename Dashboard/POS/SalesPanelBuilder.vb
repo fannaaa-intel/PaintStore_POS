@@ -195,60 +195,10 @@ Public Class SalesPanelBuilder
                 clockTimer.Dispose()
             End Sub
 
-        ' ── Refresh button ────────────────────────────────────────────────
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .Size = New Size(100, 34),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.FromArgb(0, 110, 92),
-            .ForeColor = Color.FromArgb(200, 240, 225),
-            .Font = New Font("Segoe UI", 9.5F),
-            .Cursor = Cursors.Hand
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s As Object, e As PaintEventArgs)
-                Dim b = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect As Rectangle = b.ClientRectangle
-                rect.Inflate(-1, -1)
-                Using path As New GraphicsPath()
-                    Dim r = 8
-                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
-                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
-                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
-                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
-                    path.CloseFigure()
-                    Using br As New SolidBrush(b.BackColor)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                TextRenderer.DrawText(e.Graphics, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(0, 90, 75)
-                btnRefresh.ForeColor = Color.White
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(0, 110, 92)
-                btnRefresh.ForeColor = Color.FromArgb(200, 240, 225)
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click,
-            Sub()
-                If _container IsNot Nothing Then LoadSales(_container)
-            End Sub
-
-        topBar.Controls.AddRange({lblGreet, lblDate, lblClock, btnRefresh})
+        topBar.Controls.AddRange({lblGreet, lblDate, lblClock})
         AddHandler topBar.Resize,
             Sub()
                 lblClock.Location = New Point(topBar.Width - lblClock.Width - 18, (topBar.Height - lblClock.Height) \ 2)
-                btnRefresh.Left = lblClock.Left - btnRefresh.Width - 12
-                btnRefresh.Top = (topBar.Height - btnRefresh.Height) \ 2
             End Sub
         AddHandler wrap.Resize, Sub() topBar.Width = wrap.Width
 

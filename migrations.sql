@@ -672,3 +672,48 @@ CREATE TABLE IF NOT EXISTS payment_method_requests (
     KEY idx_pmr_status (status),
     KEY idx_pmr_user (requested_by)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+--  20. Report signatories
+--
+--     Every generated report (print, PDF, Excel) ends with a signature block:
+--
+--         Prepared by   the signed-in user and their role (automatic)
+--         Checked by    set here
+--         Approved by   set here
+--
+--     The accountant (or admin) fills in Checked / Approved in
+--     Settings > Report Signatories. A blank name still prints a line to sign
+--     on, so the block is usable before anyone has been named.
+-- -----------------------------------------------------------------------------
+ALTER TABLE store_settings
+    ADD COLUMN IF NOT EXISTS sig_checked_name      VARCHAR(100) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS sig_checked_position  VARCHAR(100) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS sig_approved_name     VARCHAR(100) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS sig_approved_position VARCHAR(100) DEFAULT NULL;
+
+SHOW COLUMNS FROM store_settings LIKE 'sig_%';
+
+
+-- -----------------------------------------------------------------------------
+--  21. Opening cash check at the start of a shift
+--
+--     The cashier now COUNTS the drawer (bills and coins) when a shift starts,
+--     and the count is compared with what the last closed shift on the same
+--     register counted into it (shifts.counted_cash).
+--
+--       less than that  -> the shift cannot start. Cash may not leave the
+--                          drawer between shifts; money taken out must go
+--                          through Drop to Safe before the drawer is closed.
+--       same or more    -> the shift starts; cash ADDED is allowed, stored
+--                          here and noted in the Activity Log.
+--
+--     expected_opening  what the last shift left (NULL = nothing to compare)
+--     opening_variance  counted - expected (0 or more; never negative)
+-- -----------------------------------------------------------------------------
+ALTER TABLE shifts
+    ADD COLUMN IF NOT EXISTS expected_opening DECIMAL(10,2) DEFAULT NULL AFTER opening_float,
+    ADD COLUMN IF NOT EXISTS opening_variance DECIMAL(10,2) DEFAULT NULL AFTER expected_opening;
+
+SHOW COLUMNS FROM shifts LIKE '%opening%';

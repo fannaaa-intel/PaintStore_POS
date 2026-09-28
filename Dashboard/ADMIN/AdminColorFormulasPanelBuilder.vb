@@ -436,10 +436,6 @@ Public Class AdminColorFormulasPanelBuilder
         Dim btnNew As Button = MakePillButton("+  New Formula", 150, MintPrimary, Color.White, True)
         AddHandler btnNew.Click, Sub() RenderForm(0)
 
-        Dim btnRefresh As Button = MakePillButton("⟳  Refresh", 100,
-                                                  Color.FromArgb(220, 235, 232), MintDark, False)
-        AddHandler btnRefresh.Click, Sub() LoadColorFormulas(_container)
-
         Dim searchWrap As Panel = Nothing
         Dim txtSearch As TextBox = Nothing
         BuildSearchBox(searchWrap, txtSearch)
@@ -448,14 +444,11 @@ Public Class AdminColorFormulasPanelBuilder
             Sub()
                 btnNew.Left = titleBar.Width - btnNew.Width - SIDE_PAD
                 btnNew.Top = (titleBar.Height - btnNew.Height) \ 2
-                btnRefresh.Left = btnNew.Left - btnRefresh.Width - 10
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                searchWrap.Left = btnRefresh.Left - searchWrap.Width - 10
+                searchWrap.Left = btnNew.Left - searchWrap.Width - 10
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(searchWrap)
-        titleBar.Controls.Add(btnRefresh)
         titleBar.Controls.Add(btnNew)
         region.Controls.Add(titleBar)
         Return region

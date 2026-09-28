@@ -245,17 +245,6 @@ Public Class ProcurementQuotationsPanelBuilder
         Dim subY As Integer = TITLE_Y + titleH + 8
         lblSub.Location = New Point(26, subY)
 
-        Dim btnRefresh As New Button With {
-            .Text = ChrW(8635) & "  Refresh", .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand, .Size = New Size(104, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232), .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        RoundControl(btnRefresh, 10)
-        AddHandler btnRefresh.Click, Sub() RenderList()
-
         ' Filter pills
         Dim pillHost As New Panel With {
             .Height = 44, .BackColor = Color.Transparent,
@@ -290,12 +279,10 @@ Public Class ProcurementQuotationsPanelBuilder
         ' Size the whole header to its content so the pills never crowd the card.
         region.Height = pillHost.Top + pillHost.Height + 10
 
-        region.Controls.AddRange({lblTitle, lblSub, btnRefresh, pillHost})
+        region.Controls.AddRange({lblTitle, lblSub, pillHost})
 
         AddHandler region.Resize,
             Sub()
-                btnRefresh.Left = region.Width - btnRefresh.Width - 34
-                btnRefresh.Top = 24
             End Sub
 
         Return region

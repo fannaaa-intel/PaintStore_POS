@@ -83,6 +83,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Pipelines, Version=5.0.0.2, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.IO.Pipelines.5.0.2\lib\net461\System.IO.Pipelines.dll</HintPath>
     </Reference>
@@ -277,6 +278,7 @@
     <Compile Include="Modules\Backup.vb" />
     <Compile Include="Modules\Archive.vb" />
     <Compile Include="Modules\POS\ChequePromptModal.vb" />
+    <Compile Include="Modules\POS\OpeningCashModal.vb" />
     <Compile Include="Modules\Mailer.vb" />
     <Compile Include="Modules\PasswordOtp.vb" />
     <Compile Include="Modules\DocNumber.vb" />
@@ -292,6 +294,8 @@
     <Compile Include="Modules\PasswordHelper.vb" />
     <Compile Include="Modules\POS\SaleCompleteModal.vb" />
     <Compile Include="Modules\ReportPrinter.vb" />
+    <Compile Include="Modules\ReportExport.vb" />
+    <Compile Include="Modules\ReportSignatories.vb" />
     <Compile Include="Modules\Session.vb" />
     <Compile Include="Modules\StoreSettings.vb" />
     <Compile Include="Modules\Theme.vb" />
@@ -328,6 +332,7 @@
     <Compile Include="Dashboard\CategoriesPanelBuilder.vb" />
     <Compile Include="Dashboard\DashboardCards.vb" />
     <Compile Include="Dashboard\FilterFields.vb" />
+    <Compile Include="Dashboard\ACCOUNTANT\AccountantPeriod.vb" />
     <Compile Include="Dashboard\GraphicsExtensions.vb" />
     <Compile Include="Dashboard\FastMovingPanelBuilder.vb" />
     <Compile Include="Dashboard\MixPanelBuilder.vb" />

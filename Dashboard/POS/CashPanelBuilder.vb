@@ -384,60 +384,10 @@ Public Class CashPanelBuilder
             End Sub
         timer.Start()
 
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .Size = New Size(100, 34),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.FromArgb(0, 110, 92),
-            .ForeColor = Color.FromArgb(200, 240, 225),
-            .Font = New Font("Segoe UI", 9.5F),
-            .Cursor = Cursors.Hand
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        btnRefresh.FlatAppearance.BorderColor = Color.FromArgb(0, 120, 100)
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As New GraphicsPath()
-                    Dim r = 6
-                    Dim rect = bb.ClientRectangle
-                    path.AddArc(rect.X, rect.Y, r, r, 180, 90)
-                    path.AddArc(rect.Right - r, rect.Y, r, r, 270, 90)
-                    path.AddArc(rect.Right - r, rect.Bottom - r, r, r, 0, 90)
-                    path.AddArc(rect.X, rect.Bottom - r, r, r, 90, 90)
-                    path.CloseFigure()
-                    Using br As New SolidBrush(bb.BackColor)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(0, 90, 75)
-                btnRefresh.ForeColor = Color.White
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(0, 110, 92)
-                btnRefresh.ForeColor = Color.FromArgb(200, 240, 225)
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click,
-            Sub()
-                If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)
-            End Sub
-
-        bar.Controls.AddRange({lblTitle, lblSub, lblClock, btnRefresh})
+        bar.Controls.AddRange({lblTitle, lblSub, lblClock})
         AddHandler bar.Resize,
             Sub()
                 lblClock.Location = New Point(bar.Width - lblClock.Width - 18, (bar.Height - lblClock.Height) \ 2)
-                btnRefresh.Location = New Point(
-                    bar.Width - lblClock.Width - btnRefresh.Width - 30,
-                    (bar.Height - btnRefresh.Height) \ 2)
             End Sub
         Return bar
     End Function
@@ -1101,8 +1051,8 @@ Public Class CashPanelBuilder
 
         ' Re-read the shift figures before computing what gets written.
         '
-        ' The panel loads these once and only refreshes on navigation or the
-        ' Refresh button, so a drawer screen left open while sales continued
+        ' The panel loads these once and only refreshes on navigation, so a
+        ' drawer screen left open while sales continued
         ' elsewhere held a stale _cashSales. Closing from that screen wrote the
         ' stale expected -- and its variance -- into the shift row permanently,
         ' inventing a shortage the cashier could not account for. The figures

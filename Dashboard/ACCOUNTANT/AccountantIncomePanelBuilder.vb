@@ -10,7 +10,6 @@ Imports MySql.Data.MySqlClient
 '  FIXES APPLIED:
 '    1. Row click → AppModal.Show with sale/PO details
 '    2. Visible DB error panel instead of silent Debug.WriteLine
-'    3. Refresh button added to title bar
 '    4. Tab hover state fixed — uses shared _activeTab check, not captured bool
 '    5. AddHandler _rowsHost.Resize stacking fixed — RemoveHandler before Add
 '    6. Cancelled POs excluded from Expense total and rows
@@ -58,7 +57,6 @@ Public Class AccountantIncomePanelBuilder
 
     ' ── STATE ────────────────────────────────────────────────────────────────
     Private Shared _container As Panel
-    Private Shared _filter As String = "month"
     Private Shared _activeTab As String = "income"
     Private Shared _loadError As String = ""   ' FIX 2
 
@@ -75,12 +73,6 @@ Public Class AccountantIncomePanelBuilder
     ' FIX 5: keep a reference to the reflow handler so we can remove it
     Private Shared _reflowHandler As EventHandler = Nothing
 
-    ' Filter keys
-    Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
-    Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
-    Private Shared _filterBtns() As Button
-    Private Shared _activeFilterIdx As Integer = 2
-
     Private Shared _tabIncome As Button
     Private Shared _tabExpenses As Button
 
@@ -88,14 +80,10 @@ Public Class AccountantIncomePanelBuilder
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadIncome(container As Panel,
-                                  Optional filter As String = "month",
                                   Optional tab As String = "income")
         _container = container
-        _filter = filter
         _activeTab = tab
         _currentPage = 0
-        Dim idx As Integer = Array.IndexOf(FilterKeys, filter)
-        _activeFilterIdx = If(idx >= 0, idx, 2)
         LoadData()
         Render()
     End Sub
@@ -119,13 +107,16 @@ Public Class AccountantIncomePanelBuilder
                 conn.Open()
 
                 ' ── Income rows ──
+                ' 'Refunded' sales stay in GROSS income: the refund itself is
+                ' deducted below, so dropping the sale as well took the same
+                ' money off twice (a fully refunded month showed negative income).
                 Using cmd As New MySqlCommand(
                     "SELECT s.sale_no, s.sale_datetime, u.full_name, " &
                     "COALESCE(pm.name,'—') AS method, s.total " &
                     "FROM sales s " &
                     "JOIN users u ON s.user_id = u.user_id " &
                     "LEFT JOIN payment_methods pm ON s.method_id = pm.method_id " &
-                    "WHERE s.status IN ('Completed','Partially Refunded')" & dateWhere &
+                    "WHERE s.status IN ('Completed','Partially Refunded','Refunded')" & dateWhere &
                     " ORDER BY s.sale_datetime DESC", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
@@ -164,7 +155,7 @@ Public Class AccountantIncomePanelBuilder
                 ' ── Totals ──
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
-                    "WHERE status IN ('Completed','Partially Refunded')" & dateWhere, conn)
+                    "WHERE status IN ('Completed','Partially Refunded','Refunded')" & dateWhere, conn)
                     _totalIncome = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
@@ -192,32 +183,18 @@ Public Class AccountantIncomePanelBuilder
         End Try
     End Sub
 
+    ' The From / To period shared by the Accountant screens.
     Private Shared Function BuildDateWhere() As String
-        Select Case _filter
-            Case "today" : Return " AND DATE(sale_datetime) = CURDATE()"
-            Case "week" : Return " AND sale_datetime >= CURDATE() - INTERVAL 7 DAY"
-            Case "month" : Return " AND sale_datetime >= CURDATE() - INTERVAL 30 DAY"
-            Case Else : Return ""
-        End Select
+        Return " AND " & AccountantPeriod.SqlRange("sale_datetime")
     End Function
 
-    ' Same windows as BuildDateWhere, against the returns table's own date.
+    ' Same period, against the returns table's own date.
     Private Shared Function BuildRefundDateWhere() As String
-        Select Case _filter
-            Case "today" : Return " AND DATE(return_datetime) = CURDATE()"
-            Case "week" : Return " AND return_datetime >= CURDATE() - INTERVAL 7 DAY"
-            Case "month" : Return " AND return_datetime >= CURDATE() - INTERVAL 30 DAY"
-            Case Else : Return ""
-        End Select
+        Return " AND " & AccountantPeriod.SqlRange("return_datetime")
     End Function
 
     Private Shared Function BuildPoDateWhere() As String
-        Select Case _filter
-            Case "today" : Return " AND order_date = CURDATE()"
-            Case "week" : Return " AND order_date >= CURDATE() - INTERVAL 7 DAY"
-            Case "month" : Return " AND order_date >= CURDATE() - INTERVAL 30 DAY"
-            Case Else : Return ""
-        End Select
+        Return " AND " & AccountantPeriod.SqlRange("order_date")
     End Function
 
     ' =========================================================================
@@ -293,7 +270,7 @@ Public Class AccountantIncomePanelBuilder
             .AutoSize = False
         }
 
-        ' ── Row 1: Title bar (72px) — FIX 3: includes Refresh button ────────
+        ' ── Row 1: Title bar (72px) ─────────────────────────────────────────
         Dim titleBar As New Panel With {
             .Height = 72,
             .Dock = DockStyle.Top,
@@ -307,56 +284,9 @@ Public Class AccountantIncomePanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        ' FIX 3: Refresh button
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-
-        AddHandler titleBar.Resize,
-            Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-            End Sub
-
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-
-        AddHandler btnRefresh.MouseEnter,
-    Sub()
-        btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-        btnRefresh.ForeColor = MintDark
-        btnRefresh.Invalidate()
-    End Sub
-        AddHandler btnRefresh.MouseLeave,
-    Sub()
-        btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-        btnRefresh.ForeColor = SubText
-        btnRefresh.Invalidate()
-    End Sub
-        AddHandler btnRefresh.Click, Sub() LoadIncome(_container, _filter, _activeTab)
-
         titleBar.Controls.Add(lblTitle)
-        titleBar.Controls.Add(btnRefresh)
 
-        ' ── Row 2: Filter pills + Tab buttons (52px) ─────────────────────────
+        ' ── Row 2: From / To + Income / Expenses tabs (52px) ────────────────
         Dim pillBar As New Panel With {
             .Height = 52,
             .Dock = DockStyle.Top,
@@ -368,81 +298,14 @@ Public Class AccountantIncomePanelBuilder
         _tabIncome = MakeTabButton("Income", "income")
         _tabExpenses = MakeTabButton("Expenses", "expenses")
 
-        AddHandler _tabIncome.Click, Sub() LoadIncome(_container, _filter, "income")
-        AddHandler _tabExpenses.Click, Sub() LoadIncome(_container, _filter, "expenses")
+        AddHandler _tabIncome.Click, Sub() LoadIncome(_container, "income")
+        AddHandler _tabExpenses.Click, Sub() LoadIncome(_container, "expenses")
 
-        ReDim _filterBtns(FilterLabels.Length - 1)
-        Dim filterHost As New FlowLayoutPanel With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .WrapContents = False,
-            .Location = New Point(SIDE_PAD, 10)
-        }
+        ' From / To replaces the old Today / This Week / This Month / All Time.
+        Dim period As Panel = AccountantPeriod.BuildFields(Sub() LoadIncome(_container, _activeTab))
+        period.Location = New Point(SIDE_PAD, 9)
 
-        For i As Integer = 0 To FilterLabels.Length - 1
-            Dim idx As Integer = i
-            Dim capKey As String = FilterKeys(i)
-            Dim b As New Button With {
-                .Text = FilterLabels(i),
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Size = New Size(96, 34),
-                .Font = New Font("Segoe UI", 9.5F),
-                .Margin = New Padding(0, 0, 6, 0)
-            }
-            b.FlatAppearance.BorderSize = 0
-
-            Dim styleBtn As Action(Of Boolean, Boolean) =
-                Sub(active As Boolean, hover As Boolean)
-                    If active Then
-                        b.BackColor = MintPrimary
-                        b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 9.5F)
-                    ElseIf hover Then
-                        b.BackColor = Color.FromArgb(210, 240, 235)
-                        b.ForeColor = MintDark
-                        b.Font = New Font("Segoe UI", 9.5F)
-                    Else
-                        b.BackColor = Color.FromArgb(220, 235, 232)
-                        b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 9.5F)
-                    End If
-                    b.Invalidate()
-                End Sub
-
-            AddHandler b.Paint,
-                Sub(s, e)
-                    Dim bb = CType(s, Button)
-                    Dim g = e.Graphics
-                    g.SmoothingMode = SmoothingMode.AntiAlias
-                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                    Using br As New SolidBrush(bb.BackColor)
-                        g.FillRoundedRectangle(br, rect, 8)
-                    End Using
-                    TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-                End Sub
-
-            AddHandler b.MouseEnter, Sub() If idx <> _activeFilterIdx Then styleBtn(False, True)
-            AddHandler b.MouseLeave, Sub() If idx <> _activeFilterIdx Then styleBtn(False, False)
-            AddHandler b.Click,
-                Sub()
-                    If _filterBtns(_activeFilterIdx) IsNot Nothing Then
-                        _filterBtns(_activeFilterIdx).BackColor = Color.FromArgb(220, 235, 232)
-                        _filterBtns(_activeFilterIdx).ForeColor = SubText
-                        _filterBtns(_activeFilterIdx).Font = New Font("Segoe UI", 9.5F)
-                        _filterBtns(_activeFilterIdx).Invalidate()
-                    End If
-                    LoadIncome(_container, capKey, _activeTab)
-                End Sub
-
-            styleBtn(i = _activeFilterIdx, False)
-            _filterBtns(i) = b
-            filterHost.Controls.Add(b)
-        Next
-
-        pillBar.Controls.AddRange({filterHost, _tabIncome, _tabExpenses})
+        pillBar.Controls.AddRange({period, _tabIncome, _tabExpenses})
 
         Dim PositionTabs As Action =
             Sub()
@@ -544,7 +407,7 @@ Public Class AccountantIncomePanelBuilder
         Dim labels As Label()
         If _activeTab = "income" Then
             labels = {
-                MakeColLabel("SALE NO", New Point(24, 13)),
+                MakeColLabel("RECEIPT #", New Point(24, 13)),
                 MakeColLabel("DATE", New Point(0, 13)),
                 MakeColLabel("CASHIER", New Point(0, 13)),
                 MakeColLabel("METHOD", New Point(0, 13)),
@@ -562,11 +425,11 @@ Public Class AccountantIncomePanelBuilder
                 End Sub
         Else
             labels = {
-                MakeColLabel("PO NO", New Point(24, 13)),
-                MakeColLabel("DATE", New Point(0, 13)),
+                MakeColLabel("PO NO.", New Point(24, 13)),
+                MakeColLabel("ORDERED", New Point(0, 13)),
                 MakeColLabel("SUPPLIER", New Point(0, 13)),
-                MakeColLabel("STATUS", New Point(0, 13)),
-                MakeColLabel("AMOUNT", New Point(0, 13), AnchorStyles.Top Or AnchorStyles.Right)
+                MakeColLabel("DELIVERY", New Point(0, 13)),
+                MakeColLabel("TOTAL COST", New Point(0, 13), AnchorStyles.Top Or AnchorStyles.Right)
             }
             hdr.Controls.AddRange(labels)
             AddHandler hdr.Resize,
@@ -942,7 +805,7 @@ Public Class AccountantIncomePanelBuilder
         Dim openDetail As Action =
             Sub()
                 Dim sb As New System.Text.StringBuilder()
-                sb.AppendLine($"Sale No  : {row.SaleNo}")
+                sb.AppendLine($"Receipt #: {row.SaleNo}")
                 sb.AppendLine($"Date     : {row.SaleDate:MMM dd, yyyy  hh:mm tt}")
                 sb.AppendLine($"Cashier  : {row.Cashier}")
                 sb.AppendLine($"Method   : {row.PayMethod}")
@@ -1034,11 +897,11 @@ Public Class AccountantIncomePanelBuilder
         Dim openDetail As Action =
             Sub()
                 Dim sb As New System.Text.StringBuilder()
-                sb.AppendLine($"PO No    : {row.PoNo}")
-                sb.AppendLine($"Date     : {row.OrderDate:MMM dd, yyyy}")
-                sb.AppendLine($"Supplier : {row.Supplier}")
-                sb.AppendLine($"Status   : {row.Status}")
-                sb.AppendLine($"Amount   : {Peso}{row.TotalCost:N2}")
+                sb.AppendLine($"PO No.     : {row.PoNo}")
+                sb.AppendLine($"Ordered    : {row.OrderDate:MMM dd, yyyy}")
+                sb.AppendLine($"Supplier   : {row.Supplier}")
+                sb.AppendLine($"Delivery   : {row.Status}")
+                sb.AppendLine($"Total Cost : {Peso}{row.TotalCost:N2}")
                 AppModal.Show(sb.ToString(),
                               caption:=$"PO Details — {row.PoNo}",
                               buttons:=MessageBoxButtons.OK,

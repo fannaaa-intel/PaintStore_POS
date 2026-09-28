@@ -266,58 +266,14 @@ Public Class InventoryHomePanelBuilder
             }
         End If
 
-        ' FIX 1: Refresh button — identical style to AccountantDashPanelBuilder.
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    e.Graphics.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click,
-            Sub()
-                ' Reload the entire home panel — same pattern as AccountantDash.
-                LoadHome(container, shiftStartTime)
-            End Sub
-
         clockChip.Controls.AddRange({lblClockTag, lblClock, clockIcon})
-        topBar.Controls.AddRange({lblGreet, lblDate, clockChip, btnRefresh})
+        topBar.Controls.AddRange({lblGreet, lblDate, clockChip})
 
         ' FIX 3: topBar resize logic is in one local closure, no stacking risk.
         AddHandler wrap.Resize,
             Sub()
                 topBar.Width = wrap.Width
                 clockChip.Left = topBar.Width - clockChip.Width - 4
-                btnRefresh.Top = clockChip.Top + (clockChip.Height - btnRefresh.Height) \ 2
-                btnRefresh.Left = clockChip.Left - btnRefresh.Width - 12
             End Sub
 
         ' Live clock
@@ -327,8 +283,6 @@ Public Class InventoryHomePanelBuilder
 
         wrap.Controls.Add(topBar)
         clockChip.Left = topBar.Width - clockChip.Width - 4
-        btnRefresh.Top = clockChip.Top + (clockChip.Height - btnRefresh.Height) \ 2
-        btnRefresh.Left = clockChip.Left - btnRefresh.Width - 12
         curTop = topBar.Bottom + GAP
 
         ' ===========================

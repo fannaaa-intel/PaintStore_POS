@@ -336,42 +336,6 @@ Public Class ProcurementPOPanelBuilder
         region.Controls.Add(lblTitle)
         region.Controls.Add(lblSub)
 
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    e.Graphics.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click, Sub() RenderList()
-        region.Controls.Add(btnRefresh)
 
         ' ---- New PO button (top-right) ----
         Dim btnNew As New Button With {
@@ -388,18 +352,14 @@ Public Class ProcurementPOPanelBuilder
         AddHandler btnNew.Click, Sub() LoadNewPOForm(0)
         region.Controls.Add(btnNew)
 
-        ' Position both buttons: [Refresh] [+New PO] right-aligned with 8px gap
+        ' Position the New PO button top-right
         AddHandler region.Resize,
             Sub()
                 btnNew.Top = 22
                 btnNew.Left = region.Width - 24 - btnNew.Width
-                btnRefresh.Top = 22
-                btnRefresh.Left = btnNew.Left - 8 - btnRefresh.Width
             End Sub
         btnNew.Top = 22
         btnNew.Left = 700
-        btnRefresh.Top = 22
-        btnRefresh.Left = 592
 
         ' ---- Filter tabs ----
         ' "Partial" = Partially Received. Receiving splits a PO into that status,

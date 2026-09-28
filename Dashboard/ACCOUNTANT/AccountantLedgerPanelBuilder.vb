@@ -25,8 +25,6 @@ Public Class AccountantLedgerPanelBuilder
     Private Shared ReadOnly BadgeProcurement As (fore As Color, back As Color) =
         (Color.FromArgb(30, 90, 180), Color.FromArgb(225, 235, 255))
 
-    Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
-    Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
 
     Private Const TAB_JOURNAL As String = "journal"
     Private Const TAB_LEDGER As String = "ledger"
@@ -62,8 +60,6 @@ Public Class AccountantLedgerPanelBuilder
     Private Shared _container As Panel
     Private Shared _contentArea As Panel
     Private Shared _activeMainTab As String = TAB_JOURNAL
-    Private Shared _dateFilter As String = "all"
-    Private Shared _activeFilterIdx As Integer = 3
     Private Shared _sourceFilter As String = "all"
     Private Shared _kpiPanels(3) As Panel
     Private Shared _mainTabButtons(1) As Button
@@ -83,13 +79,9 @@ Public Class AccountantLedgerPanelBuilder
     Private Shared _btnNext As Button
 
     Public Shared Sub LoadLedger(container As Panel,
-                                 Optional mainTab As String = TAB_JOURNAL,
-                                 Optional dateFilter As String = "all")
+                                 Optional mainTab As String = TAB_JOURNAL)
         _container = container
         _activeMainTab = If(mainTab = TAB_LEDGER, TAB_LEDGER, TAB_JOURNAL)
-        _dateFilter = dateFilter
-        Dim idx As Integer = Array.IndexOf(FilterKeys, dateFilter)
-        _activeFilterIdx = If(idx >= 0, idx, 3)
         _sourceFilter = "all"
         _reflowAttached = False
         _currentPage = 0
@@ -169,7 +161,7 @@ Public Class AccountantLedgerPanelBuilder
         Try
             Using cmd As New MySqlCommand(
                 "SELECT s.sale_id, s.sale_no, s.sale_datetime, s.total, s.vat_amount " &
-                "FROM sales s WHERE s.status IN ('Completed','Partially Refunded') " &
+                "FROM sales s WHERE s.status IN ('Completed','Partially Refunded','Refunded') " &
                 BuildDateWhereCol("s.sale_datetime").Replace("WHERE ", "AND "), conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
@@ -359,10 +351,12 @@ Public Class AccountantLedgerPanelBuilder
                 ' stands and the refund is posted separately under Sales Returns
                 ' below. Filtering to 'Completed' alone dropped the revenue while
                 ' still deducting the refund, so the books did not balance.
+                ' The same holds for a fully 'Refunded' sale: the sale is posted
+                ' here and its return is posted below as Sales Returns.
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) AS t, " &
                     "COALESCE(SUM(CASE WHEN vat_amount <= 0 THEN ROUND(total*12/112,2) ELSE vat_amount END),0) AS v " &
-                    "FROM sales WHERE status IN ('Completed','Partially Refunded') AND sale_datetime BETWEEN @from AND @to", conn)
+                    "FROM sales WHERE status IN ('Completed','Partially Refunded','Refunded') AND sale_datetime BETWEEN @from AND @to", conn)
                     cmd.Parameters.AddWithValue("@from", fromVal)
                     cmd.Parameters.AddWithValue("@to", toVal)
                     Using rdr = cmd.ExecuteReader()
@@ -464,13 +458,9 @@ Public Class AccountantLedgerPanelBuilder
         Return result
     End Function
 
+    ' The From / To period shared by the Accountant screens.
     Private Shared Function BuildDateWhereCol(col As String) As String
-        Select Case _dateFilter
-            Case "today" : Return $"WHERE DATE({col}) = CURDATE() "
-            Case "week" : Return $"WHERE {col} >= CURDATE() - INTERVAL 7 DAY "
-            Case "month" : Return $"WHERE {col} >= CURDATE() - INTERVAL 30 DAY "
-            Case Else : Return ""
-        End Select
+        Return "WHERE " & AccountantPeriod.SqlRange(col) & " "
     End Function
 
     Private Shared Sub ApplyFilters()
@@ -492,8 +482,7 @@ Public Class AccountantLedgerPanelBuilder
     .Padding = New Padding(24, 16, 24, 16)
 }
 
-        ' Date-filter pills removed entirely per request. TopRegion is back
-        ' to the simple 3-zone layout: TitleBar -> TabRow -> KpiBar.
+        ' TitleBar -> TabRow (Journal / General Ledger tabs + From / To) -> KpiBar.
         Dim titleBar As Panel = BuildTitleBar()
         titleBar.Dock = DockStyle.Top
         titleBar.Height = 72
@@ -562,54 +551,7 @@ Public Class AccountantLedgerPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        Dim btnRefresh As New Button With {
-            .Text = ChrW(8635) & "  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click,
-            Sub() LoadLedger(_container, _activeMainTab, FilterKeys(_activeFilterIdx))
-
-        AddHandler titleBar.Resize,
-            Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-            End Sub
-
         titleBar.Controls.Add(lblTitle)
-        titleBar.Controls.Add(btnRefresh)
 
         Return titleBar
     End Function
@@ -721,7 +663,16 @@ Public Class AccountantLedgerPanelBuilder
             host.Controls.Add(b)
         Next
 
+        ' From / To on the right; picking a date reloads the entries.
+        Dim period As Panel = AccountantPeriod.BuildFields(Sub() LoadLedger(_container, _activeMainTab))
+        AddHandler bar.Resize,
+            Sub()
+                period.Location = New Point(bar.Width - period.Width - SIDE_PAD,
+                                            (bar.Height - period.Height) \ 2)
+            End Sub
+
         bar.Controls.Add(host)
+        bar.Controls.Add(period)
         Return bar
     End Function
 
@@ -752,7 +703,7 @@ Public Class AccountantLedgerPanelBuilder
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim kpiDef() As (caption As String, value As String, clr As Color, sub1 As String, srcKey As String) = {
-            ("Total Entries", totalCount.ToString("N0"), MintPrimary, "All ledger transactions in selected period", "all"),
+            ("Total Entries", totalCount.ToString("N0"), MintPrimary, "All entries, " & AccountantPeriod.Text(), "all"),
             ("Sales & Returns", posCount.ToString("N0"), MintDeep, "Completed sales & processed returns", "POS"),
             ("Purchase Orders", procCount.ToString("N0"), Color.FromArgb(30, 90, 180), "Received purchase orders", "Procurement"),
             ("Cash Movements", cashCount.ToString("N0"), Color.FromArgb(140, 80, 0), "Pay-ins, pay-outs, drops & refunds", "Cash")
@@ -796,6 +747,7 @@ Public Class AccountantLedgerPanelBuilder
 
             Dim lblCap As New Label With {
                 .Text = kd.caption,
+                .UseMnemonic = False,
                 .Font = New Font("Segoe UI", 11),
                 .ForeColor = SubText,
                 .AutoSize = True,
@@ -812,6 +764,7 @@ Public Class AccountantLedgerPanelBuilder
             }
             Dim lblSub As New Label With {
                 .Text = kd.sub1,
+                .UseMnemonic = False,
                 .Font = New Font("Segoe UI", 10),
                 .ForeColor = SubText,
                 .AutoSize = True,
@@ -1050,6 +1003,7 @@ Public Class AccountantLedgerPanelBuilder
     Private Shared Function MakeColLabel(text As String, loc As Point) As Label
         Return New Label With {
             .Text = text,
+            .UseMnemonic = False,
             .Font = New Font("Segoe UI", 10, FontStyle.Bold),
             .ForeColor = SubText,
             .AutoSize = True,

@@ -370,85 +370,17 @@ Public Class InventoryItemListPanelBuilder
         RoundControl(btnAdd, 10)
         AddHandler btnAdd.Click, Sub() ShowItemDialog(0, False)
 
-        ' ── FIX A: REFRESH BUTTON ────────────────────────────────────────────
-        ' Matches InventoryHomePanelBuilder exactly:
-        '   • Muted-green resting background  RGB(220,235,232) / SubText label
-        '   • MouseEnter  → RGB(210,240,235) / MintDark label
-        '   • MouseLeave  → back to resting state
-        '   • Custom Paint  draws the rounded pill via RoundRect GraphicsPath
-        '     (avoids the non-standard Graphics.FillRoundedRectangle extension
-        '      that Doc 2 references but that is not defined in this project).
-        '   • Click reloads the current view preserving the active filters.
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .Size = New Size(100, 38),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Cursor = Cursors.Hand
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
+        region.Controls.AddRange({searchWrap, btnAdd})
 
-        ' Custom paint: rounded pill background + centred text.
-        ' Uses the same RoundRect helper that the rest of this builder already uses,
-        ' so no extra extension methods or imports are required.
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect As Rectangle = bb.ClientRectangle
-                rect.Inflate(-1, -1)
-                Using path = RoundRect(rect, 8)
-                    Using br As New SolidBrush(bb.BackColor)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-
-        ' Reload preserving the active category and status filters so the user
-        ' sees the same slice of data, just refreshed from the DB.
-        AddHandler btnRefresh.Click,
-            Sub()
-                If containerRef IsNot Nothing Then
-                    LoadItemList(containerRef, activeCategory, activeStatus)
-                End If
-            End Sub
-
-        ' Apply rounded region AFTER size is fixed (same pattern as btnAdd).
-        RoundControl(btnRefresh, 8)
-        ' ─────────────────────────────────────────────────────────────────────
-
-        region.Controls.AddRange({searchWrap, btnAdd, btnRefresh})
-
-        ' Layout: [searchWrap] [↻ Refresh] [+ Add Item]  — right-aligned.
-        ' btnAdd is the rightmost anchor; refresh sits to its left; search to refresh's left.
+        ' Layout: [searchWrap] [+ Add Item]  — right-aligned.
         Dim PositionTopRight As Action =
             Sub()
                 btnAdd.Top = 22
                 btnAdd.Left = region.Width - 24 - btnAdd.Width
 
-                btnRefresh.Top = 22
-                btnRefresh.Left = btnAdd.Left - 10 - btnRefresh.Width
 
                 searchWrap.Top = 22
-                searchWrap.Left = btnRefresh.Left - 12 - searchWrap.Width
+                searchWrap.Left = btnAdd.Left - 10 - searchWrap.Width
             End Sub
         AddHandler region.Resize, Sub() PositionTopRight()
         PositionTopRight()

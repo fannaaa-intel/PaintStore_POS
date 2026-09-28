@@ -10,8 +10,8 @@ Imports MySql.Data.MySqlClient
 '  LAYOUT  mirrors AccountantIncomePanelBuilder (Document 2):
 '  ──────────────────────────────────────────────────────────
 '    TopRegion (Dock = Top, 289px total):
-'      ├─ TitleBar   (72px)  : "Sales History" title + Search box + Refresh btn
-'      ├─ PillBar    (52px)  : date-filter pills (left)
+'      ├─ TitleBar   (72px)  : "Sales History" title + Search box
+'      ├─ PillBar    (52px)  : From / To period (left)
 '      └─ KpiBar    (165px)  : 3 KPI cards — Transactions / Revenue / Discounts
 '    TableWrapper (Dock = Fill, padded 24px sides + 16px top/bottom):
 '      └─ listArea (BufferedPanel, Fill):
@@ -24,7 +24,7 @@ Imports MySql.Data.MySqlClient
 '    FROM sales s
 '    JOIN users u ON s.user_id = u.user_id
 '    LEFT JOIN payment_methods pm ON s.method_id = pm.method_id
-'    WHERE [date filter] AND (s.sale_no LIKE @q OR u.full_name LIKE @q)
+'    WHERE [From / To period] AND (s.sale_no LIKE @q OR u.full_name LIKE @q)
 '    ORDER BY s.sale_datetime DESC
 ' =============================================================================
 Public Class AccountantSalesHistoryPanelBuilder
@@ -64,15 +64,12 @@ Public Class AccountantSalesHistoryPanelBuilder
 
     ' ── STATE ─────────────────────────────────────────────────────────────────
     Private Shared _container As Panel
-    Private Shared _dateFilter As String = "all"
     Private Shared _searchQuery As String = ""
 
     Private Shared _allRows As New List(Of SaleRecord)
     Private Shared _visibleRows As New List(Of SaleRecord)
 
     Private Shared _scrollHost As Panel
-    Private Shared _pillBtns As New List(Of Button)
-    Private Shared _activeFilterIdx As Integer = 3
     Private Shared _reflowAttached As Boolean = False
 
     ' ── PAGING ───────────────────────────────────────────────────────────────
@@ -82,21 +79,14 @@ Public Class AccountantSalesHistoryPanelBuilder
     Private Shared _btnPrev As Button
     Private Shared _btnNext As Button
 
-    Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
-    Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
 
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
-    Public Shared Sub LoadSalesHistory(container As Panel,
-                                       Optional dateFilter As String = "all")
+    Public Shared Sub LoadSalesHistory(container As Panel)
         _container = container
-        _dateFilter = dateFilter
         _searchQuery = ""
-        _pillBtns.Clear()
         _currentPage = 0
-        Dim idx As Integer = Array.IndexOf(FilterKeys, dateFilter)
-        _activeFilterIdx = If(idx >= 0, idx, 3)
 
         LoadData()
         Render()
@@ -147,13 +137,9 @@ Public Class AccountantSalesHistoryPanelBuilder
         ApplySearch()
     End Sub
 
+    ' The From / To period shared by the Accountant screens.
     Private Shared Function BuildDateWhere() As String
-        Select Case _dateFilter
-            Case "today" : Return "WHERE DATE(s.sale_datetime) = CURDATE() "
-            Case "week" : Return "WHERE s.sale_datetime >= CURDATE() - INTERVAL 7 DAY "
-            Case "month" : Return "WHERE s.sale_datetime >= CURDATE() - INTERVAL 30 DAY "
-            Case Else : Return ""
-        End Select
+        Return "WHERE " & AccountantPeriod.SqlRange("s.sale_datetime") & " "
     End Function
 
     Private Shared Sub ApplySearch()
@@ -263,47 +249,7 @@ Public Class AccountantSalesHistoryPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        ' Refresh button — mirrors Document 2 style exactly
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click, Sub() LoadSalesHistory(_container, _dateFilter)
-
-        ' Search box — sits left of Refresh in the title bar
+        ' Search box — right side of the title bar
         Dim searchWrap As New Panel With {
             .Size = New Size(240, 34),
             .BackColor = CardBg,
@@ -336,7 +282,7 @@ Public Class AccountantSalesHistoryPanelBuilder
             .BorderStyle = BorderStyle.None,
             .BackColor = CardBg,
             .ForeColor = SubText,
-            .Text = "Search by sale no. or cashier…",
+            .Text = "Search by receipt # or cashier…",
             .Location = New Point(34, 9),
             .Width = 196
         }
@@ -357,7 +303,7 @@ Public Class AccountantSalesHistoryPanelBuilder
             Sub()
                 txtSearch.Text = ""
                 txtSearch.ForeColor = SubText
-                txtSearch.Text = "Search by sale no. or cashier…"
+                txtSearch.Text = "Search by receipt # or cashier…"
                 btnClear.Visible = False
                 searchWrap.Invalidate()
                 _searchQuery = ""
@@ -368,7 +314,7 @@ Public Class AccountantSalesHistoryPanelBuilder
         AddHandler txtSearch.Enter,
             Sub()
                 searchFocused = True
-                If txtSearch.Text = "Search by sale no. or cashier…" Then
+                If txtSearch.Text = "Search by receipt # or cashier…" Then
                     txtSearch.Text = ""
                     txtSearch.ForeColor = Color.FromArgb(45, 45, 45)
                 End If
@@ -379,7 +325,7 @@ Public Class AccountantSalesHistoryPanelBuilder
             Sub()
                 searchFocused = False
                 If String.IsNullOrWhiteSpace(txtSearch.Text) Then
-                    txtSearch.Text = "Search by sale no. or cashier…"
+                    txtSearch.Text = "Search by receipt # or cashier…"
                     txtSearch.ForeColor = SubText
                     btnClear.Visible = False
                 End If
@@ -388,7 +334,7 @@ Public Class AccountantSalesHistoryPanelBuilder
 
         AddHandler txtSearch.TextChanged,
             Sub()
-                Dim isPlaceholder As Boolean = (txtSearch.Text = "Search by sale no. or cashier…")
+                Dim isPlaceholder As Boolean = (txtSearch.Text = "Search by receipt # or cashier…")
                 btnClear.Visible = Not isPlaceholder AndAlso txtSearch.Text.Length > 0
                 If isPlaceholder Then Return
                 _searchQuery = txtSearch.Text.Trim()
@@ -401,95 +347,27 @@ Public Class AccountantSalesHistoryPanelBuilder
         searchWrap.Controls.Add(txtSearch)
         searchWrap.Controls.Add(btnClear)
 
-        ' Position search + refresh on title bar resize
+        ' Keep the search box at the right of the title bar
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                searchWrap.Left = btnRefresh.Left - searchWrap.Width - 10
+                searchWrap.Left = titleBar.Width - searchWrap.Width - SIDE_PAD
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(lblTitle)
         titleBar.Controls.Add(searchWrap)
-        titleBar.Controls.Add(btnRefresh)
 
-        ' ── Zone 2: Pill/filter bar (52px) — date pills left ─────────────────
+        ' ── Zone 2: From / To bar (52px) ─────────────────────────────────────
         Dim pillBar As New Panel With {
             .Height = 52,
             .Dock = DockStyle.Top,
             .BackColor = Color.Transparent
         }
 
-        Dim filterHost As New FlowLayoutPanel With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .WrapContents = False,
-            .Location = New Point(SIDE_PAD, 10)
-        }
-
-        For i As Integer = 0 To FilterLabels.Length - 1
-            Dim idx As Integer = i
-            Dim capKey As String = FilterKeys(i)
-            Dim isActive As Boolean = (i = _activeFilterIdx)
-
-            Dim pill As New Button With {
-                .Text = FilterLabels(i),
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Size = New Size(96, 34),
-                .Margin = New Padding(0, 0, 6, 0)
-            }
-            pill.FlatAppearance.BorderSize = 0
-
-            Dim styleBtn As Action(Of Boolean, Boolean) =
-                Sub(active As Boolean, hover As Boolean)
-                    If active Then
-                        pill.BackColor = MintPrimary
-                        pill.ForeColor = Color.White
-                        pill.Font = New Font("Segoe UI Semibold", 9.5F)
-                    ElseIf hover Then
-                        pill.BackColor = Color.FromArgb(210, 240, 235)
-                        pill.ForeColor = MintDark
-                        pill.Font = New Font("Segoe UI", 9.5F)
-                    Else
-                        pill.BackColor = Color.FromArgb(220, 235, 232)
-                        pill.ForeColor = SubText
-                        pill.Font = New Font("Segoe UI", 9.5F)
-                    End If
-                    pill.Invalidate()
-                End Sub
-
-            AddHandler pill.Paint,
-                Sub(s, e)
-                    Dim bb = CType(s, Button)
-                    Dim g = e.Graphics
-                    g.SmoothingMode = SmoothingMode.AntiAlias
-                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                    Using br As New SolidBrush(bb.BackColor)
-                        g.FillRoundedRectangle(br, rect, 8)
-                    End Using
-                    TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-                End Sub
-
-            AddHandler pill.MouseEnter, Sub() If idx <> _activeFilterIdx Then styleBtn(False, True)
-            AddHandler pill.MouseLeave, Sub() If idx <> _activeFilterIdx Then styleBtn(False, False)
-            AddHandler pill.Click,
-                Sub()
-                    _dateFilter = capKey
-                    _activeFilterIdx = idx
-                    _searchQuery = ""
-                    LoadSalesHistory(_container, capKey)
-                End Sub
-
-            styleBtn(isActive, False)
-            _pillBtns.Add(pill)
-            filterHost.Controls.Add(pill)
-        Next
-
-        pillBar.Controls.Add(filterHost)
+        ' From / To replaces the old Today / This Week / This Month / All Time.
+        Dim period As Panel = AccountantPeriod.BuildFields(Sub() LoadSalesHistory(_container))
+        period.Location = New Point(SIDE_PAD, 9)
+        pillBar.Controls.Add(period)
 
         ' ── Zone 3: KPI cards bar (165px) ─────────────────────────────────────
         Dim kpiBar As Panel = BuildKpiBar()
@@ -598,10 +476,10 @@ Public Class AccountantSalesHistoryPanelBuilder
         Dim hdr As New Panel With {.Height = 44, .BackColor = Color.Transparent}
 
         Dim labels As Label() = {
-            MakeColLabel("SALE NO", New Point(24, 13)),
+            MakeColLabel("RECEIPT #", New Point(24, 13)),
             MakeColLabel("DATE & TIME", New Point(0, 13)),
             MakeColLabel("CASHIER", New Point(0, 13)),
-            MakeColLabel("PAYMENT", New Point(0, 13)),
+            MakeColLabel("METHOD", New Point(0, 13)),
             MakeColLabel("SUBTOTAL", New Point(0, 13)),
             MakeColLabel("DISCOUNT", New Point(0, 13)),
             MakeColLabel("TOTAL", New Point(0, 13)),
@@ -636,6 +514,7 @@ Public Class AccountantSalesHistoryPanelBuilder
                                           Optional anchor As AnchorStyles = AnchorStyles.Top Or AnchorStyles.Left) As Label
         Return New Label With {
             .Text = text,
+            .UseMnemonic = False,
             .Font = New Font("Segoe UI", 10, FontStyle.Bold),
             .ForeColor = SubText,
             .AutoSize = True,
@@ -764,7 +643,7 @@ Public Class AccountantSalesHistoryPanelBuilder
         ' Status badge
         Dim badgeColors = GetStatusBadge(r.Status)
         Dim badge As New Label With {
-            .Text = r.Status,
+            .Text = StatusText(r.Status),
             .Font = New Font("Segoe UI", 9, FontStyle.Bold),
             .ForeColor = badgeColors.fore,
             .BackColor = badgeColors.back,
@@ -795,14 +674,14 @@ Public Class AccountantSalesHistoryPanelBuilder
         Dim openDetail As Action =
             Sub()
                 Dim sb As New System.Text.StringBuilder()
-                sb.AppendLine($"Sale No   : {r.SaleNo}")
+                sb.AppendLine($"Receipt # : {r.SaleNo}")
                 sb.AppendLine($"Date      : {r.SaleDate:MMM dd, yyyy  hh:mm tt}")
                 sb.AppendLine($"Cashier   : {r.Cashier}")
-                sb.AppendLine($"Payment   : {r.PayMethod}")
+                sb.AppendLine($"Method    : {r.PayMethod}")
                 sb.AppendLine($"Subtotal  : {Peso}{r.Subtotal:N2}")
                 sb.AppendLine($"Discount  : {If(r.Discount > 0, Peso & r.Discount.ToString("N2"), "—")}")
                 sb.AppendLine($"Total     : {Peso}{r.Total:N2}")
-                sb.AppendLine($"Status    : {r.Status}")
+                sb.AppendLine($"Status    : {StatusText(r.Status)}")
                 AppModal.Show(sb.ToString(),
                               caption:=$"Sale Details — {r.SaleNo}",
                               buttons:=MessageBoxButtons.OK,
@@ -950,6 +829,11 @@ Public Class AccountantSalesHistoryPanelBuilder
     ' =========================================================================
     '  STATUS BADGE
     ' =========================================================================
+    ' The database stores "OnHold"; every other screen shows "On Hold".
+    Private Shared Function StatusText(status As String) As String
+        Return If(status = "OnHold", "On Hold", status)
+    End Function
+
     Private Shared Function GetStatusBadge(status As String) As (fore As Color, back As Color)
         Select Case status.ToLower()
             Case "completed" : Return BadgeCompleted

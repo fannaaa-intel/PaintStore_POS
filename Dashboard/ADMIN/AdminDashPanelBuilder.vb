@@ -378,40 +378,15 @@ Public Class AdminDashPanelBuilder
         }
         RoundLabel(pill, 12)
 
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint, AddressOf PaintPillButton
-        AddHandler btnRefresh.MouseEnter, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.MouseLeave, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.Click, Sub() LoadDashboard(_container)
-
         AddHandler row.Resize,
             Sub()
-                btnRefresh.Left = row.Width - btnRefresh.Width
-                btnRefresh.Top = 16
-                pill.Left = btnRefresh.Left - pill.Width - 10
-                pill.Top = 16 + (btnRefresh.Height - pill.Height) \ 2
+                pill.Left = row.Width - pill.Width
+                pill.Top = 16 + (34 - pill.Height) \ 2
             End Sub
 
         row.Controls.Add(lblGreet)
         row.Controls.Add(lblDate)
         row.Controls.Add(pill)
-        row.Controls.Add(btnRefresh)
         Return row
     End Function
 

@@ -15,6 +15,7 @@ Public Class ReportPrinter
         HighlightRow
         StatusRow
         Spacer
+        Signatures
     End Enum
 
     Public Class Row
@@ -31,7 +32,29 @@ Public Class ReportPrinter
         Public PeriodLabel As String = ""
         Public PeriodValue As String = ""
         Public Rows As New List(Of Row)
+        ' Printed as a Prepared / Checked / Approved block after the last row.
+        ' Left Nothing, the configured signatories are filled in on output.
+        Public Signers As List(Of ReportSignatories.Signer)
     End Class
+
+    ' Appends the signature block once, as the final row, so it paginates like
+    ' any other row and never lands in the page footer.
+    Public Shared Sub EnsureSignatures(doc As ReportDoc)
+        If doc.Signers Is Nothing Then doc.Signers = ReportSignatories.ForReport()
+        If doc.Signers.Count = 0 Then Return
+        If doc.Rows.Any(Function(r) r.Kind = RowKind.Signatures) Then Return
+        doc.Rows.Add(New Row With {.Kind = RowKind.Signatures})
+    End Sub
+
+    ' The store name from Store Settings, for the report letterhead.
+    Public Shared Function CompanyName() As String
+        Try
+            Dim n As String = StoreSettings.StoreName
+            If Not String.IsNullOrWhiteSpace(n) Then Return n
+        Catch
+        End Try
+        Return "PAINT STORE"
+    End Function
 
     ' ── ROW BUILDERS ─────────────────────────────────────────────────────
     Public Shared Function Data(label As String, value As String, Optional negative As Boolean = False) As Row
@@ -102,10 +125,49 @@ Public Class ReportPrinter
     Public Shared Sub Preview(doc As ReportDoc,
                                Optional companyName As String = "PAINT STORE",
                                Optional preparedBy As String = "")
+        EnsureSignatures(doc)
         Dim job As New PrintJob(doc, companyName, preparedBy)
-        Dim frm As New PreviewForm(job.PrintDoc, doc.Title)
+        Dim frm As New PreviewForm(job.PrintDoc, doc, companyName, preparedBy)
         frm.ShowDialog()
     End Sub
+
+    ' Draws every page of the report onto bitmaps at the given resolution,
+    ' with the very same routine that prints it -- so a PDF made from these
+    ' pages matches the printout exactly. Each page is Letter size.
+    Public Shared Function RenderPages(doc As ReportDoc, companyName As String,
+                                       preparedBy As String, dpi As Integer) As List(Of Bitmap)
+        EnsureSignatures(doc)
+        Dim job As New PrintJob(doc, companyName, preparedBy)
+        job.Reset()
+        Dim pageBounds As New Rectangle(0, 0, PAGE_W, PAGE_H)
+        Dim marginBounds As New Rectangle(MARGIN_X, MARGIN_Y, PAGE_W - MARGIN_X * 2, PAGE_H - MARGIN_Y * 2)
+        Dim pages As New List(Of Bitmap)
+        Dim more As Boolean = True
+        While more
+            Dim bmp As New Bitmap(PAGE_W * dpi \ 100, PAGE_H * dpi \ 100)
+            bmp.SetResolution(dpi, dpi)
+            Using g As Graphics = Graphics.FromImage(bmp)
+                g.Clear(Color.White)
+                ' World units of 1/100 inch, the same units a printer page uses,
+                ' so every coordinate in OnPrintPage lands where it prints.
+                g.PageUnit = GraphicsUnit.Inch
+                g.PageScale = 0.01F
+                g.TextRenderingHint = Drawing.Text.TextRenderingHint.AntiAliasGridFit
+                Dim e As New PrintPageEventArgs(g, marginBounds, pageBounds, Nothing)
+                job.DrawPage(e)
+                more = e.HasMorePages
+            End Using
+            pages.Add(bmp)
+            If pages.Count > 200 Then Exit While   ' runaway guard
+        End While
+        Return pages
+    End Function
+
+    ' Letter paper and margins, in 1/100 inch.
+    Private Const PAGE_W As Integer = 850
+    Private Const PAGE_H As Integer = 1100
+    Private Const MARGIN_X As Integer = 70
+    Private Const MARGIN_Y As Integer = 60
 
     ' =========================================================================
     '  PRINT JOB — owns pagination state and draws every page
@@ -124,17 +186,27 @@ Public Class ReportPrinter
             _company = company
             _preparedBy = preparedBy
             PrintDoc.DocumentName = doc.Title
-            PrintDoc.DefaultPageSettings.PaperSize = New PaperSize("Letter", 850, 1100)
-            PrintDoc.DefaultPageSettings.Margins = New Margins(70, 70, 60, 60)
+            ' Page settings come from the default printer; on a PC with none
+            ' installed they throw. Exporting to PDF/Excel must still work there.
+            Try
+                PrintDoc.DefaultPageSettings.PaperSize = New PaperSize("Letter", PAGE_W, PAGE_H)
+                PrintDoc.DefaultPageSettings.Margins = New Margins(MARGIN_X, MARGIN_X, MARGIN_Y, MARGIN_Y)
+            Catch
+            End Try
             AddHandler PrintDoc.PrintPage, AddressOf OnPrintPage
-            AddHandler PrintDoc.BeginPrint,
-                Sub()
-                    _rowIdx = 0
-                    _pageNo = 0
-                End Sub
+            AddHandler PrintDoc.BeginPrint, Sub() Reset()
+        End Sub
+
+        Public Sub Reset()
+            _rowIdx = 0
+            _pageNo = 0
         End Sub
 
         Private Sub OnPrintPage(sender As Object, e As PrintPageEventArgs)
+            DrawPage(e)
+        End Sub
+
+        Public Sub DrawPage(e As PrintPageEventArgs)
             _pageNo += 1
             Dim g = e.Graphics
             g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
@@ -182,6 +254,8 @@ Public Class ReportPrinter
                 Dim sz = g.MeasureString(genText, f)
                 g.DrawString(genText, f, New SolidBrush(InkFaint), bounds.Right - sz.Width, y)
             End Using
+            ' Its own line: sharing one with a long store name made them overlap.
+            y += 18
 
             ' Company name — centered, bold, formal letterhead style
             Using f As New Font(ReportFont, 18, FontStyle.Bold)
@@ -240,6 +314,7 @@ Public Class ReportPrinter
                 Case RowKind.TotalRow, RowKind.TwoColTotalRow : Return 40
                 Case RowKind.HighlightRow : Return 56
                 Case RowKind.StatusRow : Return 40
+                Case RowKind.Signatures : Return 150
                 Case Else : Return 30
             End Select
         End Function
@@ -344,7 +419,40 @@ Public Class ReportPrinter
                         End Using
                         g.DrawString(labelText, f, New SolidBrush(Ink), bx + 14, y + 6)
                     End Using
+
+                Case RowKind.Signatures
+                    DrawSignatures(g, left, y + 36, w)
             End Select
+        End Sub
+
+        ' Prepared by / Checked by / Approved by, side by side: caption, room
+        ' to sign, a rule, then the name and position centred under the rule.
+        ' A blank name leaves the rule to be filled in by hand.
+        Private Sub DrawSignatures(g As Graphics, left As Integer, y As Integer, w As Integer)
+            Dim signers = _doc.Signers
+            If signers Is Nothing OrElse signers.Count = 0 Then Return
+            Dim colW As Single = w / CSng(signers.Count)
+            Using fCap As New Font(ReportFont, 9.5F, FontStyle.Italic),
+                  fName As New Font(ReportFont, 10.5F, FontStyle.Bold),
+                  fPos As New Font(ReportFont, 9.5F),
+                  inkBr As New SolidBrush(Ink), mutedBr As New SolidBrush(InkMuted),
+                  rule As New Pen(Ink, 0.75F)
+                Dim center As New StringFormat With {.Alignment = StringAlignment.Center}
+                For i As Integer = 0 To signers.Count - 1
+                    Dim s = signers(i)
+                    Dim x As Single = left + i * colW
+                    Dim lineL As Single = x + 8
+                    Dim lineR As Single = x + colW - 16
+                    g.DrawString(s.Caption & ":", fCap, mutedBr, x, y)
+                    g.DrawLine(rule, lineL, y + 60, lineR, y + 60)
+                    Dim box As New RectangleF(lineL, y + 64, lineR - lineL, 20)
+                    If s.Name <> "" Then g.DrawString(s.Name, fName, inkBr, box, center)
+                    If s.Position <> "" Then
+                        g.DrawString(s.Position, fPos, mutedBr,
+                                     New RectangleF(lineL, y + 84, lineR - lineL, 20), center)
+                    End If
+                Next
+            End Using
         End Sub
     End Class
 
@@ -354,10 +462,16 @@ Public Class ReportPrinter
     Private Class PreviewForm
         Inherits Form
 
-        Public Sub New(doc As PrintDocument, title As String)
+        Public Sub New(doc As PrintDocument, report As ReportDoc,
+                       companyName As String, preparedBy As String)
+            Dim title As String = report.Title
             Me.Text = "Print Preview — " & title
-            Me.Size = New Size(900, 760)
-            Me.StartPosition = FormStartPosition.CenterParent
+            ' Most of the screen, so the page is read at a comfortable size
+            ' instead of squinting at a small window.
+            Dim scr As Rectangle = Screen.PrimaryScreen.WorkingArea
+            Me.Size = New Size(Math.Min(1200, CInt(scr.Width * 0.9)), CInt(scr.Height * 0.92))
+            Me.MinimumSize = New Size(760, 560)
+            Me.StartPosition = FormStartPosition.CenterScreen
             Me.MinimizeBox = False
             Me.MaximizeBox = True
             Me.BackColor = Color.FromArgb(245, 245, 245)
@@ -380,6 +494,12 @@ Public Class ReportPrinter
                 .Columns = 1,
                 .BackColor = Color.FromArgb(225, 225, 225)
             }
+            ' Fit the page to the window's width; the page scrolls vertically.
+            AddHandler ppc.Resize,
+                Sub()
+                    Dim avail As Integer = ppc.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 40
+                    If avail > 200 Then ppc.Zoom = Math.Min(1.6, avail / CDbl(PAGE_W))
+                End Sub
 
             Dim btnBar As New Panel With {
                 .Dock = DockStyle.Bottom, .Height = 64, .BackColor = Color.White
@@ -419,13 +539,32 @@ Public Class ReportPrinter
                     End Using
                 End Sub
 
+            Dim makeExport =
+                Function(caption As String, format As ReportExport.ExportFormat) As Button
+                    Dim b As New Button With {
+                        .Text = caption, .Size = New Size(140, 36), .FlatStyle = FlatStyle.Flat,
+                        .BackColor = Color.FromArgb(220, 235, 232), .ForeColor = BrandDark,
+                        .Font = New Font("Segoe UI Semibold", 9.5F), .Cursor = Cursors.Hand
+                    }
+                    b.FlatAppearance.BorderSize = 0
+                    b.FlatAppearance.MouseOverBackColor = Color.FromArgb(205, 228, 223)
+                    AddHandler b.Click,
+                        Sub() ReportExport.SaveWithDialog(report, format, companyName, preparedBy, Me)
+                    Return b
+                End Function
+            Dim btnExcel As Button = makeExport("Save as Excel", ReportExport.ExportFormat.Excel)
+            Dim btnPdf As Button = makeExport("Save as PDF", ReportExport.ExportFormat.Pdf)
+
             AddHandler btnBar.Resize,
                 Sub()
-                    btnPrint.Location = New Point(btnBar.Width - btnPrint.Width - 20, (btnBar.Height - btnPrint.Height) \ 2)
-                    btnClose.Location = New Point(btnPrint.Left - btnClose.Width - 10, (btnBar.Height - btnClose.Height) \ 2)
+                    Dim cy As Integer = (btnBar.Height - btnPrint.Height) \ 2
+                    btnPrint.Location = New Point(btnBar.Width - btnPrint.Width - 20, cy)
+                    btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
+                    btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
+                    btnClose.Location = New Point(20, cy)
                 End Sub
 
-            btnBar.Controls.AddRange({btnClose, btnPrint})
+            btnBar.Controls.AddRange({btnClose, btnExcel, btnPdf, btnPrint})
 
             Me.Controls.Add(ppc)
             Me.Controls.Add(btnBar)

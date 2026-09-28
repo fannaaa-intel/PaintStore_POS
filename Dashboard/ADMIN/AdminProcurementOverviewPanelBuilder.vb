@@ -682,25 +682,13 @@ Public Class AdminProcurementOverviewPanelBuilder
         }
         RoundLabel(pill, 12)
 
-        Dim btnRefresh As Button = MakePillButton("⟳  Refresh", 100,
-                                                  Color.FromArgb(220, 235, 232), MintDark)
-        AddHandler btnRefresh.Click,
-            Sub()
-                ComputePageSize()
-                LoadAll()
-                Render()
-            End Sub
-
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                pill.Left = btnRefresh.Left - pill.Width - 10
+                pill.Left = titleBar.Width - pill.Width - SIDE_PAD
                 pill.Top = (titleBar.Height - pill.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(pill)
-        titleBar.Controls.Add(btnRefresh)
 
         ' ── Tab strip (segment pills) ────────────────────────────────────────
         Dim tabBar As New Panel With {

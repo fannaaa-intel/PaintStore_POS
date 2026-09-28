@@ -220,50 +220,10 @@ Public Class InventoryPutAwayPanelBuilder
             .AutoSize = True, .Location = New Point(30, 56)
         }
 
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .Size = New Size(100, 34),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Font = New Font("Segoe UI", 9.5F),
-            .Cursor = Cursors.Hand,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect As Rectangle = bb.ClientRectangle
-                rect.Inflate(-1, -1)
-                Using path = RoundRect(rect, 8)
-                    Using br As New SolidBrush(bb.BackColor)
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click, Sub() RenderList()
-        region.Controls.AddRange({lblTitle, lblSub, btnRefresh})
+        region.Controls.AddRange({lblTitle, lblSub})
 
         Dim PositionRefresh As Action =
             Sub()
-                btnRefresh.Top = (region.Height - btnRefresh.Height) \ 2
-                btnRefresh.Left = region.Width - btnRefresh.Width - 24
             End Sub
         AddHandler region.Resize, Sub() PositionRefresh()
         PositionRefresh()

@@ -370,39 +370,6 @@ Public Class AdminSuppliersPanelBuilder
         }
         RoundLabel(pill, 12)
 
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.MouseLeave, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.Click, Sub() LoadSuppliers(_container)
-
         ' ── Search box ───────────────────────────────────────────────────────
         Dim searchWrap As New Panel With {
             .Size = New Size(250, 34),
@@ -468,9 +435,7 @@ Public Class AdminSuppliersPanelBuilder
 
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                pill.Left = btnRefresh.Left - pill.Width - 10
+                pill.Left = titleBar.Width - pill.Width - SIDE_PAD
                 pill.Top = (titleBar.Height - pill.Height) \ 2
                 searchWrap.Left = pill.Left - searchWrap.Width - 10
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
@@ -479,7 +444,6 @@ Public Class AdminSuppliersPanelBuilder
         titleBar.Controls.Add(lblTitle)
         titleBar.Controls.Add(searchWrap)
         titleBar.Controls.Add(pill)
-        titleBar.Controls.Add(btnRefresh)
 
         region.Controls.Add(titleBar)
         Return region

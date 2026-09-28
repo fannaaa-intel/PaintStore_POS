@@ -13,8 +13,9 @@ Imports MySql.Data.MySqlClient
 '    Everyone      My Account    name, username, role, email + Change Password
 '                  My Activity   this user's own history - never anyone else's
 '    Cashier       Payment Methods - view, and REQUEST an add/removal
+'    Accountant    Report Signatories - Checked by / Approved by on reports
 '    Admin         Store & Payments, Payment Requests (approve / reject),
-'                  Database Backup, Recycle Bin
+'                  Report Signatories, Database Backup, Recycle Bin
 '
 '  Nothing here shows another account's data: every query is filtered by
 '  Session.CurrentUserId, and the admin-only tabs are not built for anyone
@@ -42,6 +43,7 @@ Public Class SettingsPanelBuilder
         PayRequests
         Backup
         RecycleBin
+        Signatories
     End Enum
 
     Private Shared _container As Panel
@@ -75,18 +77,26 @@ Public Class SettingsPanelBuilder
         End Get
     End Property
 
+    Private Shared ReadOnly Property IsAccountant As Boolean
+        Get
+            Return String.Equals(Session.CurrentRole, "Accountant", StringComparison.OrdinalIgnoreCase)
+        End Get
+    End Property
+
     Private Shared Function TabsForRole() As List(Of (tab As SettingsTab, caption As String))
         Dim tabs As New List(Of (SettingsTab, String)) From {
             (SettingsTab.Account, "My Account"),
             (SettingsTab.Activity, "My Activity")
         }
         If IsCashier Then tabs.Add((SettingsTab.Payments, "Payment Methods"))
+        If IsAccountant Then tabs.Add((SettingsTab.Signatories, "Report Signatories"))
         If IsAdmin Then
             tabs.Add((SettingsTab.Store, "Store & Payments"))
             If PaymentRequests.HasTable() Then
                 Dim n As Integer = PaymentRequests.PendingCount()
                 tabs.Add((SettingsTab.PayRequests, "Payment Requests" & If(n > 0, "  (" & n.ToString() & ")", "")))
             End If
+            tabs.Add((SettingsTab.Signatories, "Report Signatories"))
             tabs.Add((SettingsTab.Backup, "Database Backup"))
             tabs.Add((SettingsTab.RecycleBin, "Recycle Bin"))
         End If
@@ -172,6 +182,7 @@ Public Class SettingsPanelBuilder
             Case SettingsTab.PayRequests : If IsAdmin Then BuildPayRequestsTab()
             Case SettingsTab.Backup : If IsAdmin Then BuildBackupTab()
             Case SettingsTab.RecycleBin : If IsAdmin Then BuildRecycleTab()
+            Case SettingsTab.Signatories : If IsAdmin OrElse IsAccountant Then BuildSignatoriesTab()
         End Select
         _host.ResumeLayout()
     End Sub
@@ -765,6 +776,94 @@ Public Class SettingsPanelBuilder
                 {btnRestore, btnPurge}))
         Next
         _host.Controls.Add(wrap)
+    End Sub
+
+    ' =========================================================================
+    '  REPORT SIGNATORIES (accountant, admin) - the names in the signature
+    '  block at the foot of every printed, PDF and Excel report.
+    ' =========================================================================
+    Private Shared Sub BuildSignatoriesTab()
+        Dim scroll As Panel = NewScrollHost()
+        Dim card As Panel = NewCard("Report Signatories", 470)
+
+        Dim ready As Boolean = ReportSignatories.HasColumns()
+        Dim s As ReportSignatories.Settings = ReportSignatories.Load()
+
+        card.Controls.Add(New Label With {
+            .Text = "These names are printed at the bottom of every report you print or save as " &
+                    "PDF or Excel. Leave a name blank to get an empty line to sign by hand.",
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = False,
+            .Size = New Size(820, 40), .Location = New Point(24, 52), .BackColor = Color.Transparent})
+
+        Dim y As Integer = 104
+        Dim addCaption As Action(Of String) =
+            Sub(text As String)
+                card.Controls.Add(New Label With {
+                    .Text = text, .Font = New Font("Segoe UI Semibold", 11), .ForeColor = MintDark,
+                    .AutoSize = True, .Location = New Point(24, y), .BackColor = Color.Transparent})
+            End Sub
+        Dim addField As Func(Of String, Integer, String, TextBox) =
+            Function(label As String, x As Integer, value As String) As TextBox
+                card.Controls.Add(New Label With {
+                    .Text = label, .Font = New Font("Segoe UI", 9.5F), .ForeColor = FaintText,
+                    .AutoSize = True, .Location = New Point(x, y + 30), .BackColor = Color.Transparent})
+                Dim tb As New TextBox With {
+                    .Text = value, .Font = New Font("Segoe UI", 11), .Width = 300,
+                    .Location = New Point(x, y + 52), .MaxLength = 100,
+                    .BorderStyle = BorderStyle.FixedSingle, .Enabled = ready}
+                card.Controls.Add(tb)
+                Return tb
+            End Function
+
+        ' Prepared by is always whoever generates the report.
+        addCaption("Prepared by")
+        card.Controls.Add(New Label With {
+            .Text = "Filled in automatically: " & Session.CurrentFullName & "  (" & Session.CurrentRole & ")" &
+                    " - or whoever is signed in when the report is made.",
+            .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(24, y + 30), .BackColor = Color.Transparent})
+        y += 70
+
+        addCaption("Checked by")
+        Dim txtCheckedName As TextBox = addField("Name", 24, s.CheckedName)
+        Dim txtCheckedPos As TextBox = addField("Position", 344, s.CheckedPosition)
+        y += 100
+
+        addCaption("Approved by")
+        Dim txtApprovedName As TextBox = addField("Name", 24, s.ApprovedName)
+        Dim txtApprovedPos As TextBox = addField("Position  (e.g. Owner)", 344, s.ApprovedPosition)
+        y += 100
+
+        Dim btnSave As Button = MakeButton("Save Signatories", True, 170)
+        btnSave.Location = New Point(24, y + 6)
+        btnSave.Enabled = ready
+        card.Controls.Add(btnSave)
+
+        If Not ready Then
+            card.Controls.Add(New Label With {
+                .Text = "Not set up in the database yet - run migrations.sql section 20 in phpMyAdmin.",
+                .Font = New Font("Segoe UI Semibold", 10), .ForeColor = Theme.Warning, .AutoSize = True,
+                .Location = New Point(210, y + 14), .BackColor = Color.Transparent})
+        End If
+
+        AddHandler btnSave.Click,
+            Sub()
+                Dim err As String = ReportSignatories.Save(New ReportSignatories.Settings With {
+                    .CheckedName = txtCheckedName.Text,
+                    .CheckedPosition = txtCheckedPos.Text,
+                    .ApprovedName = txtApprovedName.Text,
+                    .ApprovedPosition = txtApprovedPos.Text})
+                If err <> "" Then
+                    AppModal.Show(err, "Report Signatories", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Else
+                    AppModal.Show("Saved. New reports will show these names.", "Report Signatories",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    ShowTab(SettingsTab.Signatories)
+                End If
+            End Sub
+
+        scroll.Controls.Add(card)
+        _host.Controls.Add(scroll)
     End Sub
 
     ' =========================================================================

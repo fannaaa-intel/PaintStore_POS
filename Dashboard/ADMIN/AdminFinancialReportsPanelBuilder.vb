@@ -308,22 +308,15 @@ Public Class AdminFinancialReportsPanelBuilder
         Dim btnExport As Button = MakePillButton("Export / Print", 130, MintPrimary, Color.White, True)
         AddHandler btnExport.Click, Sub() ExportReport()
 
-        Dim btnRefresh As Button = MakePillButton("⟳  Refresh", 100,
-                                                  Color.FromArgb(220, 235, 232), MintDark, False)
-        AddHandler btnRefresh.Click, Sub() ReloadForRange()
-
         AddHandler titleBar.Resize,
             Sub()
                 btnExport.Left = titleBar.Width - btnExport.Width - SIDE_PAD
                 btnExport.Top = (titleBar.Height - btnExport.Height) \ 2
-                btnRefresh.Left = btnExport.Left - btnRefresh.Width - 10
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                pill.Left = btnRefresh.Left - pill.Width - 10
+                pill.Left = btnExport.Left - pill.Width - 10
                 pill.Top = (titleBar.Height - pill.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(pill)
-        titleBar.Controls.Add(btnRefresh)
         titleBar.Controls.Add(btnExport)
 
         ' ── Date range ───────────────────────────────────────────────────────

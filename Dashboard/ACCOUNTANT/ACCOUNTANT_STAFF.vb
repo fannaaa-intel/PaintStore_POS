@@ -267,7 +267,7 @@ Public Class ACCOUNTANT_STAFF
             btn.TextImageRelation = TextImageRelation.ImageBeforeText
             btn.ImageAlign = ContentAlignment.MiddleLeft
             btn.TextAlign = ContentAlignment.MiddleLeft
-            btn.Padding = New Padding(20, 0, 14, 0)
+            btn.Padding = New Padding(20, 0, 4, 0)
             btn.Image = NavIcon(btn, padded:=True)
         Else
             btn.Text = ""
@@ -305,6 +305,9 @@ Public Class ACCOUNTANT_STAFF
         navCaptions(btn) = btn.Text
 
         btn.Parent = Nav
+        ' "Income & Expenses" must show its "&", not turn it into a
+        ' keyboard-shortcut underline.
+        btn.UseMnemonic = False
 
         Dim iconPath As String = ""
         Select Case btn.Name.ToLower()
@@ -349,7 +352,7 @@ Public Class ACCOUNTANT_STAFF
         btn.TextImageRelation = TextImageRelation.ImageBeforeText
         btn.ImageAlign = ContentAlignment.MiddleLeft
         btn.TextAlign = ContentAlignment.MiddleLeft
-        btn.Padding = New Padding(20, 0, 14, 0)
+        btn.Padding = New Padding(20, 0, 4, 0)
         btn.FlatStyle = FlatStyle.Flat
         btn.FlatAppearance.BorderSize = 0
         btn.FlatAppearance.MouseOverBackColor = NavBg

@@ -31,8 +31,6 @@ Public Class AccountantReportsPanelBuilder
     ' ── STATE ─────────────────────────────────────────────────────────────────
     Private Shared _container As Panel
     Private Shared _activeTab As String = TAB_INCOME
-    Private Shared _dateFrom As DateTime = DateTime.Today.AddDays(-30)
-    Private Shared _dateTo As DateTime = DateTime.Today
 
     Private Shared _revenue As Decimal
     Private Shared _returns As Decimal
@@ -43,8 +41,18 @@ Public Class AccountantReportsPanelBuilder
     Private Shared _trialRows As New List(Of (Account As String, Debit As Decimal, Credit As Decimal))
 
     Private Shared _contentHost As Panel
-    Private Shared _dtFrom As DateTimePicker
-    Private Shared _dtTo As DateTimePicker
+
+    ' The period is the one shared by every Accountant screen.
+    Private Shared ReadOnly Property _dateFrom As DateTime
+        Get
+            Return AccountantPeriod.FromDate
+        End Get
+    End Property
+    Private Shared ReadOnly Property _dateTo As DateTime
+        Get
+            Return AccountantPeriod.ToDate
+        End Get
+    End Property
 
     ' =========================================================================
     '  ENTRY POINT
@@ -74,9 +82,12 @@ Public Class AccountantReportsPanelBuilder
                 ' Revenue must exclude sales that never took money: this query
                 ' had no status filter at all, so Voided sales and carts merely
                 ' parked OnHold were being reported as income.
+                ' 'Refunded' sales stay in GROSS revenue because Returns are
+                ' deducted on their own line; dropping them too counted the
+                ' same refund twice.
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales " &
-                    "WHERE status IN ('Completed','Partially Refunded') " &
+                    "WHERE status IN ('Completed','Partially Refunded','Refunded') " &
                     "AND sale_datetime BETWEEN @from AND @to", conn)
                     cmd.Parameters.AddWithValue("@from", fromVal)
                     cmd.Parameters.AddWithValue("@to", toVal)
@@ -114,9 +125,15 @@ Public Class AccountantReportsPanelBuilder
                     _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
+                ' Same rule as the Payables screen's "Unpaid": an order placed
+                ' with a supplier and not yet settled, as of the report date.
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total_cost),0) FROM purchase_orders " &
-                    "WHERE status NOT IN ('Received','Cancelled')", conn)
+                    "WHERE status IN ('Ordered','Partially Received','Received') " &
+                    "AND order_date <= @to" &
+                    If(AccountantPayablesPanelBuilder.HasPaidAtColumn(conn),
+                       " AND (paid_at IS NULL OR paid_at > @to)", " AND status <> 'Received'"), conn)
+                    cmd.Parameters.AddWithValue("@to", toVal)
                     _unpaidPos = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
@@ -147,23 +164,20 @@ Public Class AccountantReportsPanelBuilder
             .Dock = DockStyle.Fill,
             .BackColor = MintBg,
             .AutoScroll = True,
-            .Padding = New Padding(28, 24, 28, 24)
+            .Padding = New Padding(24, 8, 24, 24)
         }
 
-        Dim dateRow As Panel = BuildDateRow()
-        dateRow.Dock = DockStyle.Top
-        dateRow.Height = 88
-
+        ' Report tabs and the From / To period share one row, so the report
+        ' card below gets as much of the screen as possible.
         Dim tabRow As Panel = BuildTabRow()
         tabRow.Dock = DockStyle.Top
-        tabRow.Height = 56
+        tabRow.Height = 60
 
         Dim titleBar As Panel = BuildTitleBar()
         titleBar.Dock = DockStyle.Top
-        titleBar.Height = 88
+        titleBar.Height = 76
 
         _container.Controls.Add(_contentHost)
-        _container.Controls.Add(dateRow)
         _container.Controls.Add(tabRow)
         _container.Controls.Add(titleBar)
 
@@ -188,10 +202,9 @@ Public Class AccountantReportsPanelBuilder
         Const SIDE_PAD As Integer = 28
 
         Dim bar As New Panel With {
-    .BackColor = Color.FromArgb(250, 252, 251),
-    .Height = 88,
-    .Padding = New Padding(0, 14, 0, 0)
-}
+            .BackColor = MintBg,
+            .Height = 76
+        }
 
 
         Dim lblTitle As New Label With {
@@ -200,104 +213,82 @@ Public Class AccountantReportsPanelBuilder
             .ForeColor = MintDark,
             .AutoSize = True,
             .BackColor = Color.Transparent,
-            .Location = New Point(SIDE_PAD, 22)
+            .Location = New Point(SIDE_PAD - 4, 14)
         }
 
-        Dim btnPrint As New Button With {
-            .Text = "⎙  Print Report",
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI Semibold", 9.5F),
-            .ForeColor = Color.White,
-            .BackColor = MintDark,
-            .Size = New Size(148, 38),
-            .Cursor = Cursors.Hand,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnPrint.FlatAppearance.BorderSize = 0
-        AddHandler btnPrint.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    e.Graphics.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle,
-                    bb.ForeColor, TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnPrint.MouseEnter,
-            Sub()
-                btnPrint.BackColor = MintDeep
-                btnPrint.Invalidate()
-            End Sub
-        AddHandler btnPrint.MouseLeave,
-            Sub()
-                btnPrint.BackColor = MintDark
-                btnPrint.Invalidate()
-            End Sub
+        ' Generate the report on screen as Excel (editable), PDF, or print.
+        Dim btnPrint As Button = MakeActionButton("Print", 110, MintDark, MintDeep)
+        Dim btnPdf As Button = MakeActionButton("Save as PDF", 140, MintDark, MintDeep)
+        Dim btnExcel As Button = MakeActionButton("Save as Excel", 150, MintPrimary, MintDeep)
         AddHandler btnPrint.Click, Sub() PrintActiveTab()
-
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(110, 38),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    e.Graphics.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle,
-                    bb.ForeColor, TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click,
-            Sub()
-                LoadData()
-                SwapContent()
-            End Sub
+        AddHandler btnPdf.Click,
+            Sub() ReportExport.SaveWithDialog(BuildReportDoc(), ReportExport.ExportFormat.Pdf,
+                                              ReportPrinter.CompanyName(), Session.CurrentFullName,
+                                              btnPdf.FindForm())
+        AddHandler btnExcel.Click,
+            Sub() ReportExport.SaveWithDialog(BuildReportDoc(), ReportExport.ExportFormat.Excel,
+                                              ReportPrinter.CompanyName(), Session.CurrentFullName,
+                                              btnExcel.FindForm())
 
         AddHandler bar.Resize,
             Sub()
-                btnPrint.Left = bar.Width - btnPrint.Width - SIDE_PAD
-                btnPrint.Top = (bar.Height - btnPrint.Height) \ 2
-                btnRefresh.Left = btnPrint.Left - btnRefresh.Width - 10
-                btnRefresh.Top = (bar.Height - btnRefresh.Height) \ 2
+                Dim cy As Integer = (bar.Height - btnPrint.Height) \ 2
+                btnPrint.Location = New Point(bar.Width - btnPrint.Width - SIDE_PAD, cy)
+                btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
+                btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
             End Sub
 
-        bar.Controls.AddRange({lblTitle, btnRefresh, btnPrint})
+        bar.Controls.AddRange({lblTitle, btnExcel, btnPdf, btnPrint})
         Return bar
+    End Function
+
+    Private Shared Function MakeActionButton(text As String, width As Integer,
+                                             rest As Color, hover As Color) As Button
+        Dim b As New Button With {
+            .Text = text,
+            .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI Semibold", 10),
+            .ForeColor = Color.White,
+            .BackColor = rest,
+            .Size = New Size(width, 40),
+            .Cursor = Cursors.Hand,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        b.FlatAppearance.BorderSize = 0
+        AddHandler b.Paint,
+            Sub(s, e)
+                Dim bb = CType(s, Button)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using bg As New SolidBrush(bb.Parent.BackColor)
+                    e.Graphics.FillRectangle(bg, bb.ClientRectangle)
+                End Using
+                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
+                Using br As New SolidBrush(bb.BackColor)
+                    e.Graphics.FillRoundedRectangle(br, rect, 8)
+                End Using
+                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle,
+                    bb.ForeColor, TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler b.MouseEnter, Sub()
+                                     b.BackColor = hover
+                                     b.Invalidate()
+                                 End Sub
+        AddHandler b.MouseLeave, Sub()
+                                     b.BackColor = rest
+                                     b.Invalidate()
+                                 End Sub
+        Return b
     End Function
 
     ' =========================================================================
     '  2. TAB ROW
     ' =========================================================================
     Private Shared Function BuildTabRow() As Panel
-        Const SIDE_PAD As Integer = 28
+        Const SIDE_PAD As Integer = 24
 
         Dim bar As New Panel With {
             .BackColor = MintBg,
-            .Height = 56
+            .Height = 60
         }
 
 
@@ -324,7 +315,7 @@ Public Class AccountantReportsPanelBuilder
                 .Text = capLabel,
                 .FlatStyle = FlatStyle.Flat,
                 .Cursor = Cursors.Hand,
-                .Size = New Size(148, 36),
+                .Size = New Size(160, 38),
                 .Margin = New Padding(0, 0, 8, 0),
                 .Tag = capKey
             }
@@ -335,11 +326,11 @@ Public Class AccountantReportsPanelBuilder
                     If active Then
                         b.BackColor = MintPrimary
                         b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 9.5F)
+                        b.Font = New Font("Segoe UI Semibold", 10)
                     Else
                         b.BackColor = Color.FromArgb(220, 235, 232)
                         b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 9.5F)
+                        b.Font = New Font("Segoe UI", 10)
                     End If
                     b.Invalidate()
                 End Sub
@@ -386,11 +377,11 @@ Public Class AccountantReportsPanelBuilder
                             If isNowActive Then
                                 btn.BackColor = MintPrimary
                                 btn.ForeColor = Color.White
-                                btn.Font = New Font("Segoe UI Semibold", 9.5F)
+                                btn.Font = New Font("Segoe UI Semibold", 10)
                             Else
                                 btn.BackColor = Color.FromArgb(220, 235, 232)
                                 btn.ForeColor = SubText
-                                btn.Font = New Font("Segoe UI", 9.5F)
+                                btn.Font = New Font("Segoe UI", 10)
                             End If
                             btn.Invalidate()
                         End If
@@ -401,123 +392,27 @@ Public Class AccountantReportsPanelBuilder
             host.Controls.Add(b)
         Next
 
-        bar.Controls.Add(host)
-        Return bar
-    End Function
-
-    ' =========================================================================
-    '  3. DATE RANGE ROW
-    ' =========================================================================
-    Private Shared Function BuildDateRow() As Panel
-        Const SIDE_PAD As Integer = 28
-
-        Dim bar As New Panel With {
-            .BackColor = Color.FromArgb(250, 252, 251),
-            .Height = 72
-        }
-
-
-        Dim flow As New FlowLayoutPanel With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .WrapContents = False
-        }
-
-        Dim mkLbl = Function(txt As String, w As Integer) As Label
-                        Return New Label With {
-                            .Text = txt,
-                            .Font = New Font("Segoe UI", 10.5F),
-                            .ForeColor = SubText,
-                            .AutoSize = False,
-                            .Width = w,
-                            .Height = 36,
-                            .BackColor = Color.Transparent,
-                            .TextAlign = ContentAlignment.MiddleLeft,
-                            .Margin = New Padding(0, 0, 4, 0)
-                        }
-                    End Function
-
-        Dim lblFrom As Label = mkLbl("From:", 56)
-        _dtFrom = New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Value = _dateFrom,
-            .Font = New Font("Segoe UI", 10.5F),
-            .Width = 130,
-            .Height = 36,
-            .Margin = New Padding(0, 0, 20, 0)
-        }
-
-        Dim lblTo As Label = mkLbl("To:", 34)
-        _dtTo = New DateTimePicker With {
-            .Format = DateTimePickerFormat.Short,
-            .Value = _dateTo,
-            .Font = New Font("Segoe UI", 10.5F),
-            .Width = 130,
-            .Height = 36,
-            .Margin = New Padding(0, 0, 20, 0)
-        }
-
-        Dim btnApply As New Button With {
-    .Text = "Apply",
-    .FlatStyle = FlatStyle.Flat,
-    .Font = New Font("Segoe UI Semibold", 9.5F),
-    .ForeColor = Color.White,
-    .BackColor = MintPrimary,
-    .Size = New Size(78, 30),
-    .Cursor = Cursors.Hand,
-    .Margin = New Padding(0)
-}
-        btnApply.FlatAppearance.BorderSize = 0
-        RoundBtn(btnApply, 10)
-        AddHandler btnApply.MouseEnter, Sub() btnApply.BackColor = MintDeep
-        AddHandler btnApply.MouseLeave, Sub() btnApply.BackColor = MintPrimary
-
-        Dim lblRange As New Label With {
-    .Text = FormatRange(),
-    .Font = New Font("Segoe UI", 10.0F),
-    .ForeColor = SubText,
-    .AutoSize = True,
-    .BackColor = Color.Transparent,
-    .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-}
-
-        Dim applyHandler As EventHandler =
-            Sub(s, e)
-                If _dtFrom.Value.Date > _dtTo.Value.Date Then
-                    AppModal.Show("'From' date cannot be after 'To' date.",
-                                  "Invalid Range", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                    Return
-                End If
-                _dateFrom = _dtFrom.Value.Date
-                _dateTo = _dtTo.Value.Date
-                lblRange.Text = FormatRange()
-                PositionRangeLabel(bar, lblRange)
+        ' From / To on the right. Picking a date reloads the figures at once.
+        Dim period As Panel = AccountantPeriod.BuildFields(
+            Sub()
                 LoadData()
                 SwapContent()
-            End Sub
-        AddHandler btnApply.Click, applyHandler
-
+            End Sub)
         AddHandler bar.Resize,
             Sub()
-                flow.Left = SIDE_PAD
-                flow.Top = (bar.Height - flow.PreferredSize.Height) \ 2
-                PositionRangeLabel(bar, lblRange)
+                period.Location = New Point(bar.Width - period.Width - SIDE_PAD,
+                                            (bar.Height - period.Height) \ 2)
+                host.Top = (bar.Height - host.PreferredSize.Height) \ 2
             End Sub
 
-        flow.Controls.AddRange({lblFrom, _dtFrom, lblTo, _dtTo, btnApply})
-        bar.Controls.Add(flow)
-        bar.Controls.Add(lblRange)
+        bar.Controls.Add(host)
+        bar.Controls.Add(period)
         Return bar
     End Function
 
     Private Shared Function FormatRange() As String
-        Return _dateFrom.ToString("MMM d, yyyy") & "  —  " & _dateTo.ToString("MMM d, yyyy")
+        Return AccountantPeriod.Text()
     End Function
-
-    Private Shared Sub PositionRangeLabel(bar As Panel, lbl As Label)
-        lbl.Location = New Point(bar.Width - lbl.Width - 28, (bar.Height - lbl.Height) \ 2)
-    End Sub
 
     ' =========================================================================
     '  CONTENT SWAP
@@ -614,9 +509,9 @@ Public Class AccountantReportsPanelBuilder
         ("Net Income", netIncome, True, True, True, False)
     }
 
-        Const HEADING_H As Integer = 62
-        Const ROW_H As Integer = 48
-        Const HIGHLIGHT_H As Integer = 72
+        Const HEADING_H As Integer = 76
+        Const ROW_H As Integer = 58
+        Const HIGHLIGHT_H As Integer = 86
 
         Dim card As Panel = MakeCard(dividers, sections)
 
@@ -670,11 +565,11 @@ Public Class AccountantReportsPanelBuilder
         Dim row As New Panel With {.Height = h, .BackColor = bg}
 
         Dim labelFont As Font = If(bold,
-            New Font("Segoe UI Semibold", If(highlight, 12.5F, 10.5F), FontStyle.Bold),
-            New Font("Segoe UI", 10.5F))
+            New Font("Segoe UI Semibold", If(highlight, 15.0F, 12.5F), FontStyle.Bold),
+            New Font("Segoe UI", 12.5F))
         Dim valueFont As Font = If(bold,
-    New Font("Segoe UI", If(highlight, 16.0F, 11.0F), FontStyle.Bold),
-    New Font("Segoe UI", 10.5F))
+            New Font("Segoe UI", If(highlight, 19.0F, 13.0F), FontStyle.Bold),
+            New Font("Segoe UI", 12.5F))
 
         Dim labelColor As Color = If(highlight, MintDark,
                                      If(bold, Color.FromArgb(45, 45, 45), SubText))
@@ -717,10 +612,10 @@ Public Class AccountantReportsPanelBuilder
         Dim dividers As New List(Of Integer)
         Dim sections As New List(Of Integer)
 
-        Const HEADING_H As Integer = 62
-        Const COL_HDR_H As Integer = 38
-        Const ROW_H As Integer = 48
-        Const TOTAL_H As Integer = 54
+        Const HEADING_H As Integer = 76
+        Const COL_HDR_H As Integer = 46
+        Const ROW_H As Integer = 58
+        Const TOTAL_H As Integer = 62
 
         Dim card As Panel = MakeCard(dividers, sections)
 
@@ -792,7 +687,7 @@ Public Class AccountantReportsPanelBuilder
         Dim mk = Function(txt As String) As Label
                      Return New Label With {
                          .Text = txt,
-                         .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                         .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold),
                          .ForeColor = Color.FromArgb(100, 140, 130),
                          .AutoSize = True,
                          .BackColor = Color.Transparent
@@ -819,8 +714,8 @@ Public Class AccountantReportsPanelBuilder
                                               h As Integer, bg As Color) As Panel
         Dim row As New Panel With {.Height = h, .BackColor = bg}
         Dim fnt As Font = If(isTotals,
-    New Font("Segoe UI Semibold", 12.0F, FontStyle.Bold),
-    New Font("Segoe UI", 10.5F))
+            New Font("Segoe UI Semibold", 14.0F, FontStyle.Bold),
+            New Font("Segoe UI", 12.5F))
 
         Dim lblAccount As New Label With {
             .Text = account, .Font = fnt,
@@ -856,7 +751,7 @@ Public Class AccountantReportsPanelBuilder
 
         Dim badge As New Label With {
             .Text = If(balanced, "✓  Balanced", "⚠  Out of Balance"),
-            .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+            .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold),
             .ForeColor = Color.White,
             .BackColor = If(balanced, MintPrimary, AccentRed),
             .AutoSize = True,
@@ -877,11 +772,11 @@ Public Class AccountantReportsPanelBuilder
         Dim dividers As New List(Of Integer)
         Dim sections As New List(Of Integer)
 
-        Const HEADING_H As Integer = 62
-        Const SECTION_H As Integer = 40
-        Const ROW_H As Integer = 48
-        Const TOTAL_H As Integer = 54
-        Const EQUITY_H As Integer = 76
+        Const HEADING_H As Integer = 76
+        Const SECTION_H As Integer = 48
+        Const ROW_H As Integer = 58
+        Const TOTAL_H As Integer = 62
+        Const EQUITY_H As Integer = 88
         Const GAP As Integer = 12
 
         Dim netRevenue As Decimal = _revenue - _returns
@@ -997,12 +892,12 @@ Public Class AccountantReportsPanelBuilder
 
         Dim lbl As New Label With {
             .Text = title.ToUpper(),
-            .Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+            .Font = New Font("Segoe UI Semibold", 11, FontStyle.Bold),
             .ForeColor = MintDeep,
             .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Location = New Point(24, (h - 16) \ 2)
+            .BackColor = Color.Transparent
         }
+        lbl.Location = New Point(28, (h - lbl.PreferredHeight) \ 2)
         hdr.Controls.Add(lbl)
         Return hdr
     End Function
@@ -1013,8 +908,8 @@ Public Class AccountantReportsPanelBuilder
         Dim row As New Panel With {.Height = h, .BackColor = bg}
 
         Dim fnt As Font = If(bold,
-    New Font("Segoe UI Semibold", If(bg.Equals(HighlightBg), 14.0F, 10.5F), FontStyle.Bold),
-    New Font("Segoe UI", 10.5F))
+            New Font("Segoe UI Semibold", If(bg.Equals(HighlightBg), 16.0F, 12.5F), FontStyle.Bold),
+            New Font("Segoe UI", 12.5F))
 
         Dim lblLabel As New Label With {
             .Text = label, .Font = fnt,
@@ -1048,15 +943,15 @@ Public Class AccountantReportsPanelBuilder
 
         Dim lblTitle As New Label With {
             .Text = title,
-            .Font = New Font("Segoe UI Semibold", 14, FontStyle.Bold),
+            .Font = New Font("Segoe UI Semibold", 17, FontStyle.Bold),
             .ForeColor = MintDark,
             .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Location = New Point(24, (h - 20) \ 2)
+            .BackColor = Color.Transparent
         }
+        lblTitle.Location = New Point(26, (h - lblTitle.PreferredHeight) \ 2)
         Dim lblSub As New Label With {
             .Text = subtitle,
-            .Font = New Font("Segoe UI", 9.5F),
+            .Font = New Font("Segoe UI", 11),
             .ForeColor = FaintText,
             .AutoSize = True,
             .BackColor = Color.Transparent,
@@ -1075,6 +970,20 @@ Public Class AccountantReportsPanelBuilder
     '  PRINT
     ' =========================================================================
     Private Shared Sub PrintActiveTab()
+        Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
+
+        ' Financial statements leaving the system is a reportable event;
+        ' the Admin export records one, so this one does too.
+        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
+                           doc.Title & " (Print) - " & doc.PeriodValue)
+
+        ReportPrinter.Preview(doc, companyName:=ReportPrinter.CompanyName(),
+                              preparedBy:=Session.CurrentFullName)
+    End Sub
+
+    ' The report on the active tab, as rows for print, PDF and Excel alike.
+    ' Signatories are added on output (ReportPrinter.EnsureSignatures).
+    Private Shared Function BuildReportDoc() As ReportPrinter.ReportDoc
         Dim doc As New ReportPrinter.ReportDoc()
         Dim rangeStr As String = FormatRange()
 
@@ -1134,14 +1043,8 @@ Public Class AccountantReportsPanelBuilder
                 doc.Title = "Report"
         End Select
 
-        ' Financial statements leaving the system is a reportable event;
-        ' the Admin export records one, so this one does too.
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           _activeTab & " — " & _dateFrom.ToString("MMM d, yyyy") &
-                           " to " & _dateTo.ToString("MMM d, yyyy"))
-
-        ReportPrinter.Preview(doc, companyName:="PAINT STORE", preparedBy:="Accountant")
-    End Sub
+        Return doc
+    End Function
 
     ' =========================================================================
     '  HELPERS

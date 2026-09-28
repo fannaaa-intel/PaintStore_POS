@@ -451,12 +451,33 @@ Public Class POS_STAFF
                     ' first sale. The Cash Drawer adds it to "expected", so a
                     ' till started with change in it no longer reads over by
                     ' exactly that amount when counted.
-                    Dim openingCash As Decimal = AskOpeningCash()
+                    ' The cashier COUNTS the drawer and it is compared with
+                    ' what the last shift on this register left, so cash
+                    ' taken before the shift cannot be hidden by simply
+                    ' declaring a smaller opening amount.
+                    Dim last = LastDrawerHandover(conn)
+                    Dim opening As OpeningCashModal.Result = OpeningCashModal.Show(last.left, last.info)
+                    If opening Is Nothing Then
+                        AppModal.Show("The drawer was not counted, so no shift was started." & Environment.NewLine &
+                                      "Log out and back in to count it.", "Shift Not Started",
+                                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Return
+                    End If
+                    Dim openingCash As Decimal = opening.Counted
+                    Dim diff As Decimal? = If(last.left.HasValue, openingCash - last.left.Value, CType(Nothing, Decimal?))
+                    Dim hasCheck As Boolean = HasOpeningCheckColumns(conn)
+
                     Using cmd As New MySqlCommand(
-                        "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status) " &
-                        "VALUES (@uid, '01', @float, NOW(), 'Open')", conn)
+                        "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status" &
+                        If(hasCheck, ", expected_opening, opening_variance", "") & ") " &
+                        "VALUES (@uid, '01', @float, NOW(), 'Open'" &
+                        If(hasCheck, ", @exp, @var", "") & ")", conn)
                         cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                         cmd.Parameters.AddWithValue("@float", openingCash)
+                        If hasCheck Then
+                            cmd.Parameters.AddWithValue("@exp", If(last.left.HasValue, CObj(last.left.Value), DBNull.Value))
+                            cmd.Parameters.AddWithValue("@var", If(diff.HasValue, CObj(diff.Value), DBNull.Value))
+                        End If
                         cmd.ExecuteNonQuery()
                     End Using
                     Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
@@ -464,9 +485,15 @@ Public Class POS_STAFF
                     End Using
                     ' Opening a drawer starts a period of cash accountability;
                     ' the close is logged, so the open belongs in the trail too.
+                    ' The count can never be below what the last shift left (the
+                    ' window refuses it), so any difference is cash ADDED -- noted
+                    ' here so the admin can see where the extra came from.
                     ActivityLog.Record("SHIFT_OPEN", "shift", Session.ShiftId,
                                        "Register 01, initial cash " & ChrW(8369) &
-                                       openingCash.ToString("N2"))
+                                       openingCash.ToString("N2") &
+                                       If(diff.HasValue AndAlso diff.Value > 0D,
+                                          " (last shift left " & ChrW(8369) & last.left.Value.ToString("N2") &
+                                          ", added " & ChrW(8369) & diff.Value.ToString("N2") & ")", ""))
                 End If
                 ' Load quota for this user
                 Using cmd As New MySqlCommand(
@@ -488,25 +515,51 @@ Public Class POS_STAFF
         End Try
     End Sub
 
-    ' Asks for the initial cash in the drawer. Only a new shift asks: logging
-    ' back in to an open shift keeps the amount entered when it started.
-    ' Cancel means an empty drawer (0) - the shift must still open, or sales
-    ' would have no drawer to belong to.
-    Private Function AskOpeningCash() As Decimal
-        Do
-            Dim entry As String = AppModal.Prompt(
-                "Start of shift. How much cash is in the drawer right now?" &
-                Environment.NewLine & "(Change fund / initial cash. Enter 0 if empty.)",
-                "Initial Cash", "0.00")
-            If entry Is Nothing Then Return 0D
-            Dim amt As Decimal
-            If Decimal.TryParse(entry.Trim().Replace(",", "").Replace(ChrW(8369), ""), amt) AndAlso
-               amt >= 0D AndAlso amt < 10000000D Then
-                Return Math.Round(amt, 2)
+    ' What the last CLOSED shift on this register counted into the drawer --
+    ' i.e. what the next cashier should find. Also notes when another shift on
+    ' the register is still open, since then the drawer is mid-shift.
+    Private Function LastDrawerHandover(conn As MySqlConnection) As (left As Decimal?, info As String)
+        Dim leftCash As Decimal? = Nothing
+        Dim info As String = ""
+        Using cmd As New MySqlCommand(
+            "SELECT s.counted_cash, s.ended_at, u.full_name FROM shifts s " &
+            "JOIN users u ON u.user_id = s.user_id " &
+            "WHERE s.register_no = '01' AND s.status = 'Closed' AND s.counted_cash IS NOT NULL " &
+            "ORDER BY s.ended_at DESC, s.shift_id DESC LIMIT 1", conn)
+            Using rdr = cmd.ExecuteReader()
+                If rdr.Read() Then
+                    leftCash = Convert.ToDecimal(rdr("counted_cash"))
+                    info = "closed by " & rdr("full_name").ToString() &
+                           If(IsDBNull(rdr("ended_at")), "",
+                              ", " & Convert.ToDateTime(rdr("ended_at")).ToString("MMM d, h:mm tt"))
+                End If
+            End Using
+        End Using
+        Using cmd As New MySqlCommand(
+            "SELECT u.full_name FROM shifts s JOIN users u ON u.user_id = s.user_id " &
+            "WHERE s.register_no = '01' AND s.status = 'Open' AND s.user_id <> @uid " &
+            "ORDER BY s.started_at DESC LIMIT 1", conn)
+            cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+            Dim other = cmd.ExecuteScalar()
+            If other IsNot Nothing AndAlso Not IsDBNull(other) Then
+                info &= If(info = "", "", "; ") & "note: " & other.ToString() & " still has an open shift"
             End If
-            AppModal.Show("Please enter an amount of 0 or more (numbers only).",
-                          "Initial Cash", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-        Loop
+        End Using
+        Return (leftCash, info)
+    End Function
+
+    ' migrations.sql section 21. Without it the check still runs and is logged;
+    ' only the columns on the shift row are skipped.
+    Private Function HasOpeningCheckColumns(conn As MySqlConnection) As Boolean
+        Try
+            Using cmd As New MySqlCommand(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() " &
+                "AND table_name = 'shifts' AND column_name = 'opening_variance'", conn)
+                Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
+            End Using
+        Catch
+            Return False
+        End Try
     End Function
 
     Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)

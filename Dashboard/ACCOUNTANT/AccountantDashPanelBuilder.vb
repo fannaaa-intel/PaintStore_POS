@@ -39,9 +39,6 @@ Public Class AccountantDashPanelBuilder
 
     ' ── STATE ────────────────────────────────────────────────────────────────
     Private Shared _container As Panel
-    Private Shared _filter As String = "month"
-    Private Shared _filterBtns() As Button
-    Private Shared _activeFilterIdx As Integer = 2  ' default = This Month
 
     Private Shared _revenue As Decimal
     Private Shared _expenses As Decimal
@@ -58,19 +55,11 @@ Public Class AccountantDashPanelBuilder
     Private Shared _vatCollected As Decimal
     Private Shared _inventoryValue As Decimal
 
-    ' filter keys in order — index must match _activeFilterIdx
-    Private Shared ReadOnly FilterKeys() As String = {"today", "week", "month", "all"}
-    Private Shared ReadOnly FilterLabels() As String = {"Today", "This Week", "This Month", "All Time"}
-
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
-    Public Shared Sub LoadDash(container As Panel, Optional filter As String = "month")
+    Public Shared Sub LoadDash(container As Panel)
         _container = container
-        _filter = filter
-        ' keep _activeFilterIdx in sync
-        Dim idx As Integer = Array.IndexOf(FilterKeys, filter)
-        _activeFilterIdx = If(idx >= 0, idx, 2)
         LoadData()
         Render()
     End Sub
@@ -201,13 +190,9 @@ Public Class AccountantDashPanelBuilder
         End Try
     End Sub
 
+    ' The From / To period shared by the Accountant screens.
     Private Shared Function BuildDateClause(Optional col As String = "sale_datetime") As String
-        Select Case _filter
-            Case "today" : Return col & " >= CURDATE()"
-            Case "week" : Return col & " >= CURDATE() - INTERVAL 7 DAY"
-            Case "month" : Return col & " >= CURDATE() - INTERVAL 30 DAY"
-            Case Else : Return ""
-        End Select
+        Return AccountantPeriod.SqlRange(col)
     End Function
 
     ' =========================================================================
@@ -260,48 +245,7 @@ Public Class AccountantDashPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        Dim btnRefresh As New Button With {
-            .Text = "↻  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = SubText,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    e.Graphics.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                btnRefresh.ForeColor = MintDark
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.MouseLeave,
-            Sub()
-                btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                btnRefresh.ForeColor = SubText
-                btnRefresh.Invalidate()
-            End Sub
-        AddHandler btnRefresh.Click, Sub() LoadDash(_container, FilterKeys(_activeFilterIdx))
-        AddHandler titleBar.Resize, Sub()
-                                        btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                                        btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                                    End Sub
-
         titleBar.Controls.Add(lblTitle)
-        titleBar.Controls.Add(btnRefresh)
 
         ' ── Row 2: Filter pills bar (Dock=Top, Height=52) ───────────────────
         Dim pillBar As New Panel With {
@@ -310,78 +254,10 @@ Public Class AccountantDashPanelBuilder
             .BackColor = Color.Transparent
         }
 
-        ReDim _filterBtns(FilterLabels.Length - 1)
-        Dim filterHost As New FlowLayoutPanel With {
-            .FlowDirection = FlowDirection.LeftToRight,
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .WrapContents = False,
-            .Location = New Point(SIDE_PAD, 10)
-        }
-
-        For i As Integer = 0 To FilterLabels.Length - 1
-            Dim idx As Integer = i
-            Dim capKey As String = FilterKeys(i)
-            Dim b As New Button With {
-                .Text = FilterLabels(i),
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Size = New Size(96, 34),
-                .Font = New Font("Segoe UI", 9.5F),
-                .Margin = New Padding(0, 0, 6, 0)
-            }
-            b.FlatAppearance.BorderSize = 0
-
-            Dim styleBtn As Action(Of Boolean, Boolean) =
-                Sub(active As Boolean, hover As Boolean)
-                    If active Then
-                        b.BackColor = MintPrimary
-                        b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 9.5F)
-                    ElseIf hover Then
-                        b.BackColor = Color.FromArgb(210, 240, 235)
-                        b.ForeColor = MintDark
-                        b.Font = New Font("Segoe UI", 9.5F)
-                    Else
-                        b.BackColor = Color.FromArgb(220, 235, 232)
-                        b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 9.5F)
-                    End If
-                    b.Invalidate()
-                End Sub
-
-            AddHandler b.Paint,
-                Sub(s, e)
-                    Dim bb = CType(s, Button)
-                    Dim g = e.Graphics
-                    g.SmoothingMode = SmoothingMode.AntiAlias
-                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                    Using br As New SolidBrush(bb.BackColor)
-                        g.FillRoundedRectangle(br, rect, 8)
-                    End Using
-                    TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-                End Sub
-
-            AddHandler b.MouseEnter, Sub() If idx <> _activeFilterIdx Then styleBtn(False, True)
-            AddHandler b.MouseLeave, Sub() If idx <> _activeFilterIdx Then styleBtn(False, False)
-            AddHandler b.Click,
-                Sub()
-                    If _filterBtns(_activeFilterIdx) IsNot Nothing Then
-                        _filterBtns(_activeFilterIdx).BackColor = Color.FromArgb(220, 235, 232)
-                        _filterBtns(_activeFilterIdx).ForeColor = SubText
-                        _filterBtns(_activeFilterIdx).Font = New Font("Segoe UI", 9.5F)
-                        _filterBtns(_activeFilterIdx).Invalidate()
-                    End If
-                    LoadDash(_container, capKey)
-                End Sub
-
-            styleBtn(i = _activeFilterIdx, False)
-            _filterBtns(i) = b
-            filterHost.Controls.Add(b)
-        Next
-
-        pillBar.Controls.Add(filterHost)
+        ' From / To replaces the old Today / This Week / This Month / All Time.
+        Dim period As Panel = AccountantPeriod.BuildFields(Sub() LoadDash(_container))
+        period.Location = New Point(SIDE_PAD, 9)
+        pillBar.Controls.Add(period)
 
         ' ── Row 3: KPI cards (Dock=Top, Height=165) ─────────────────────────
         ' Use Dock=Top + Padding for side gutters so width is always correct.
@@ -553,7 +429,7 @@ Public Class AccountantDashPanelBuilder
         card.Controls.Add(header)
 
         Dim colHdr As New Panel With {.Height = 34, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim chNo As New Label With {.Text = "SALE NO", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
+        Dim chNo As New Label With {.Text = "RECEIPT #", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
         Dim chMethod As New Label With {.Text = "METHOD", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent}
         Dim chTotal As New Label With {.Text = "TOTAL", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right}
         colHdr.Controls.AddRange({chNo, chMethod, chTotal})
@@ -699,7 +575,7 @@ Public Class AccountantDashPanelBuilder
         card.Controls.Add(header)
 
         Dim colHdr As New Panel With {.Height = 34, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim chPo As New Label With {.Text = "PO NO", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
+        Dim chPo As New Label With {.Text = "PO NO.", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
         Dim chSup As New Label With {.Text = "SUPPLIER", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent}
         Dim chStat As New Label With {.Text = "STATUS", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right}
         colHdr.Controls.AddRange({chPo, chSup, chStat})

@@ -844,38 +844,6 @@ Public Class AdminUserPanelBuilder
         AddHandler btnNew.Click, Sub() CreateUser()
 
         ' ── Refresh ──────────────────────────────────────────────────────────
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-            Sub(s, e)
-                Dim bb = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(bb.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnRefresh.MouseEnter, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.MouseLeave, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.Click, Sub() Refresh()
 
         ' ── Search box ───────────────────────────────────────────────────────
         Dim searchWrap As New Panel With {
@@ -944,15 +912,12 @@ Public Class AdminUserPanelBuilder
             Sub()
                 btnNew.Left = titleBar.Width - btnNew.Width - SIDE_PAD
                 btnNew.Top = (titleBar.Height - btnNew.Height) \ 2
-                btnRefresh.Left = btnNew.Left - btnRefresh.Width - 10
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                searchWrap.Left = btnRefresh.Left - searchWrap.Width - 10
+                searchWrap.Left = btnNew.Left - searchWrap.Width - 10
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(lblTitle)
         titleBar.Controls.Add(searchWrap)
-        titleBar.Controls.Add(btnRefresh)
         titleBar.Controls.Add(btnNew)
 
         region.Controls.Add(titleBar)

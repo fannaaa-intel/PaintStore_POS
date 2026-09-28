@@ -194,36 +194,11 @@ Public Class AdminStoreSettingsPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint, AddressOf PaintPillButton
-        AddHandler btnRefresh.MouseEnter, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.MouseLeave, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.Click, Sub() LoadStoreSettings(_container)
-
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(lblTitle)
-        titleBar.Controls.Add(btnRefresh)
         region.Controls.Add(titleBar)
         Return region
     End Function

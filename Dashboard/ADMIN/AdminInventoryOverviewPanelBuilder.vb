@@ -428,10 +428,6 @@ Public Class AdminInventoryOverviewPanelBuilder
         }
         RoundLabel(pill, 12)
 
-        Dim btnRefresh As Button = MakePillButton("⟳  Refresh", 100,
-                                                  Color.FromArgb(220, 235, 232), MintDark)
-        AddHandler btnRefresh.Click, Sub() LoadInventoryOverview(_container)
-
         Dim searchWrap As New Panel With {
             .Size = New Size(250, 34),
             .BackColor = CardBg,
@@ -508,9 +504,7 @@ Public Class AdminInventoryOverviewPanelBuilder
 
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                pill.Left = btnRefresh.Left - pill.Width - 10
+                pill.Left = titleBar.Width - pill.Width - SIDE_PAD
                 pill.Top = (titleBar.Height - pill.Height) \ 2
                 searchWrap.Left = pill.Left - searchWrap.Width - 10
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
@@ -518,7 +512,6 @@ Public Class AdminInventoryOverviewPanelBuilder
 
         titleBar.Controls.Add(searchWrap)
         titleBar.Controls.Add(pill)
-        titleBar.Controls.Add(btnRefresh)
 
         ' ── Filter bar ───────────────────────────────────────────────────────
         Dim filterBar As New Panel With {

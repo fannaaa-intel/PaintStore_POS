@@ -209,55 +209,15 @@ Public Class ProcurementSuppliersPanelBuilder
                 btnAdd.Invalidate()
             End Sub
 
-        Dim btnRefresh As New Button With {
-    .Text = "↻  Refresh",
-    .FlatStyle = FlatStyle.Flat,
-    .Cursor = Cursors.Hand,
-    .Size = New Size(100, 34),
-    .Font = New Font("Segoe UI", 9.5F),
-    .BackColor = Color.FromArgb(220, 235, 232),
-    .ForeColor = SubText,
-    .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-}
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint,
-    Sub(s, e)
-        Dim bb = CType(s, Button)
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-        Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-        Using br As New SolidBrush(bb.BackColor)
-            e.Graphics.FillRoundedRectangle(br, rect, 8)
-        End Using
-        TextRenderer.DrawText(e.Graphics, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-            TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-    End Sub
-        AddHandler btnRefresh.MouseEnter,
-    Sub()
-        btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-        btnRefresh.ForeColor = MintDark
-        btnRefresh.Invalidate()
-    End Sub
-        AddHandler btnRefresh.MouseLeave,
-    Sub()
-        btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-        btnRefresh.ForeColor = SubText
-        btnRefresh.Invalidate()
-    End Sub
-        AddHandler btnRefresh.Click, Sub() RenderList()
-
-        region.Controls.AddRange({lblTitle, lblSub, btnAdd, btnRefresh})
+        region.Controls.AddRange({lblTitle, lblSub, btnAdd})
 
         AddHandler region.Resize,
     Sub()
         btnAdd.Top = 22
         btnAdd.Left = region.Width - 24 - btnAdd.Width
-        btnRefresh.Top = 22
-        btnRefresh.Left = btnAdd.Left - 8 - btnRefresh.Width
     End Sub
         btnAdd.Top = 22
         btnAdd.Left = 700
-        btnRefresh.Top = 22
-        btnRefresh.Left = 584
 
         Return region
     End Function

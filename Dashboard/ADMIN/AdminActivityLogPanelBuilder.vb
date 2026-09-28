@@ -355,28 +355,6 @@ Public Class AdminActivityLogPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         }
 
-        Dim btnRefresh As New Button With {
-            .Text = "⟳  Refresh",
-            .FlatStyle = FlatStyle.Flat,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(100, 34),
-            .Font = New Font("Segoe UI", 9.5F),
-            .BackColor = Color.FromArgb(220, 235, 232),
-            .ForeColor = MintDark,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        btnRefresh.FlatAppearance.BorderSize = 0
-        AddHandler btnRefresh.Paint, AddressOf PaintPillButton
-        AddHandler btnRefresh.MouseEnter, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(210, 240, 235)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.MouseLeave, Sub()
-                                              btnRefresh.BackColor = Color.FromArgb(220, 235, 232)
-                                              btnRefresh.Invalidate()
-                                          End Sub
-        AddHandler btnRefresh.Click, Sub() LoadActivityLog(_container)
-
         ' ── Search box ───────────────────────────────────────────────────────
         Dim searchWrap As New Panel With {
             .Size = New Size(260, 34),
@@ -456,15 +434,12 @@ Public Class AdminActivityLogPanelBuilder
 
         AddHandler titleBar.Resize,
             Sub()
-                btnRefresh.Left = titleBar.Width - btnRefresh.Width - SIDE_PAD
-                btnRefresh.Top = (titleBar.Height - btnRefresh.Height) \ 2
-                searchWrap.Left = btnRefresh.Left - searchWrap.Width - 10
+                searchWrap.Left = titleBar.Width - searchWrap.Width - SIDE_PAD
                 searchWrap.Top = (titleBar.Height - searchWrap.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(lblTitle)
         titleBar.Controls.Add(searchWrap)
-        titleBar.Controls.Add(btnRefresh)
 
         ' ── Zone 2: filter bar ───────────────────────────────────────────────
         Dim filterBar As New Panel With {
@@ -999,6 +974,7 @@ Public Class AdminActivityLogPanelBuilder
             Case "PAYMETHOD_DELETE" : Return "Deleted payment method"
             Case "SETTINGS_UPDATE" : Return "Updated store settings"
             Case "REPORT_EXPORT" : Return "Exported report"
+            Case "SIGNATORIES_UPDATE" : Return "Updated report signatories"
             Case "BACKUP_CREATE" : Return "Backed up database"
             Case "BACKUP_RESTORE" : Return "Restored database"
             Case "ARCHIVE_RESTORE" : Return "Restored from Recycle Bin"
