@@ -139,7 +139,8 @@ Public Module ReceiveConfirmModal
     Public Function Prompt(poNo As String, supplierName As String,
                            lineCount As Integer, totalUnits As Integer,
                            Optional phase As String = PHASE_RECEIVE,
-                           Optional summaryLine As String = Nothing) As Attestation
+                           Optional summaryLine As String = Nothing,
+                           Optional presetRemarks As String = Nothing) As Attestation
 
         Dim result As Attestation = Nothing
         Dim w As PhaseWords = WordsFor(phase)
@@ -281,6 +282,15 @@ Public Module ReceiveConfirmModal
             End Sub
         AddHandler rbGood.CheckedChanged, Sub() SyncRemarks()
         AddHandler rbBad.CheckedChanged, Sub() SyncRemarks()
+
+        ' Problems already marked on the item lines (defective / missing) mean
+        ' the delivery was not complete and good: start on "discrepancy", with
+        ' the remarks pre-filled from those lines. The receiver can add to it.
+        If Not String.IsNullOrWhiteSpace(presetRemarks) Then
+            rbBad.Checked = True
+            txtRem.Text = If(presetRemarks.Length > 500, presetRemarks.Substring(0, 500), presetRemarks)
+            SyncRemarks()
+        End If
 
         ' ── Certification ─────────────────────────────────────────────────────
         Dim chkCert As New CheckBox With {
@@ -456,9 +466,10 @@ Public Module ReceiveConfirmModal
     '  never booked in, or movements with no attestation, would both be worse
     '  than the previous behaviour.
     ' =========================================================================
-    Public Sub Save(conn As MySqlConnection, txn As MySqlTransaction,
-                    poId As Integer, att As Attestation, totalUnits As Integer)
-        If att Is Nothing Then Return
+    ' Returns the new goods_receipts id, so problem lines can point at it.
+    Public Function Save(conn As MySqlConnection, txn As MySqlTransaction,
+                         poId As Integer, att As Attestation, totalUnits As Integer) As Integer
+        If att Is Nothing Then Return 0
 
         ' The phase column arrived in migration 12, one release after the table
         ' itself. Writing it unconditionally would break receiving outright on a
@@ -486,8 +497,9 @@ Public Module ReceiveConfirmModal
                 If(String.IsNullOrWhiteSpace(att.Remarks), CObj(DBNull.Value), CObj(att.Remarks)))
             cmd.Parameters.AddWithValue("@units", totalUnits)
             cmd.ExecuteNonQuery()
+            Return CInt(cmd.LastInsertedId)
         End Using
-    End Sub
+    End Function
 
     ''' <summary>
     ''' True when goods_receipts carries the phase column (migration 12).

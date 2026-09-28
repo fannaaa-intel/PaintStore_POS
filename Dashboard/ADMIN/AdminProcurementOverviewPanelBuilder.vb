@@ -75,7 +75,7 @@ Public Class AdminProcurementOverviewPanelBuilder
         {"Draft", "Sent", "Accepted", "Rejected", "Expired"}
 
     Private Shared ReadOnly TabLabels() As String =
-        {"Purchase Orders", "Purchase Requests", "Quotations"}
+        {"Purchase Orders", "Purchase Requests", "Price Quotations"}
 
     ' ── DATA MODEL ────────────────────────────────────────────────────────────
     Private Class PoRow
@@ -166,10 +166,18 @@ Public Class AdminProcurementOverviewPanelBuilder
     ' =========================================================================
     '  ENTRY POINT
     ' =========================================================================
-    Public Shared Sub LoadProcurementOverview(container As Panel)
+    ' startTab / startStatus let the dashboard open straight onto, say, the
+    ' requests waiting for approval (tab 1, "Pending").
+    Public Shared Sub LoadProcurementOverview(container As Panel,
+                                              Optional startTab As Integer = 0,
+                                              Optional startStatus As String = Nothing)
         _container = container
-        _activeTab = 0
+        _activeTab = Math.Max(0, Math.Min(TabLabels.Length - 1, startTab))
         ResetFiltersForTab()
+        If Not String.IsNullOrEmpty(startStatus) AndAlso
+           Array.IndexOf(StatusesForTab(), startStatus) >= 0 Then
+            _statusFilter = startStatus
+        End If
         ComputePageSize()
         LoadAll()
         Render()
@@ -325,9 +333,9 @@ Public Class AdminProcurementOverviewPanelBuilder
         _prRows.Clear()
         _totalRows = 0
         SetSummary(0, "Total Requests", MintDark, "0")
-        SetSummary(1, "Pending", AccentAmber, "0")
+        SetSummary(1, "Waiting Approval", AccentAmber, "0")
         SetSummary(2, "Approved", MintPrimary, "0")
-        SetSummary(3, "Converted", MintDeep, "0")
+        SetSummary(3, "Rejected", AccentRed, "0")
 
         Try
             Using conn = Db.GetConnection()
@@ -337,16 +345,16 @@ Public Class AdminProcurementOverviewPanelBuilder
                     "SELECT COUNT(*) AS n, " &
                     "SUM(CASE WHEN pr.status = 'Pending' THEN 1 ELSE 0 END) AS pend_n, " &
                     "SUM(CASE WHEN pr.status = 'Approved' THEN 1 ELSE 0 END) AS appr_n, " &
-                    "SUM(CASE WHEN pr.status = 'Converted' THEN 1 ELSE 0 END) AS conv_n " &
+                    "SUM(CASE WHEN pr.status = 'Rejected' THEN 1 ELSE 0 END) AS rej_n " &
                     PrJoins() & PrWhere(), conn)
                     AddPrParams(cmd)
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             _totalRows = SafeInt(rdr("n"))
                             SetSummary(0, "Total Requests", MintDark, _totalRows.ToString("N0"))
-                            SetSummary(1, "Pending", AccentAmber, SafeInt(rdr("pend_n")).ToString("N0"))
+                            SetSummary(1, "Waiting Approval", AccentAmber, SafeInt(rdr("pend_n")).ToString("N0"))
                             SetSummary(2, "Approved", MintPrimary, SafeInt(rdr("appr_n")).ToString("N0"))
-                            SetSummary(3, "Converted", MintDeep, SafeInt(rdr("conv_n")).ToString("N0"))
+                            SetSummary(3, "Rejected", AccentRed, SafeInt(rdr("rej_n")).ToString("N0"))
                         End If
                     End Using
                 End Using
@@ -453,7 +461,7 @@ Public Class AdminProcurementOverviewPanelBuilder
     Private Shared Sub LoadQuotations()
         _quoteRows.Clear()
         _totalRows = 0
-        SetSummary(0, "Total Quotations", MintDark, "0")
+        SetSummary(0, "Total Price Quotations", MintDark, "0")
         SetSummary(1, "Sent", AccentAmber, "0")
         SetSummary(2, "Accepted", MintPrimary, "0")
         SetSummary(3, "Total Amount", MintDeep, Money(0D))
@@ -472,7 +480,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             _totalRows = SafeInt(rdr("n"))
-                            SetSummary(0, "Total Quotations", MintDark, _totalRows.ToString("N0"))
+                            SetSummary(0, "Total Price Quotations", MintDark, _totalRows.ToString("N0"))
                             SetSummary(1, "Sent", AccentAmber, SafeInt(rdr("sent_n")).ToString("N0"))
                             SetSummary(2, "Accepted", MintPrimary, SafeInt(rdr("acc_n")).ToString("N0"))
                             SetSummary(3, "Total Amount", MintDeep, Money(SafeDec(rdr("total_amt"))))
@@ -529,8 +537,10 @@ Public Class AdminProcurementOverviewPanelBuilder
         Select Case caption
             Case "Total POs" : Return "in the date range"
             Case "Total Requests" : Return "raised by staff"
-            Case "Total Quotations" : Return "from suppliers"
+            Case "Total Price Quotations" : Return "from suppliers"
             Case "Pending" : Return "awaiting action"
+            Case "Waiting Approval" : Return "click a request to review it"
+            Case "Rejected" : Return "sent back with a reason"
             Case "Received" : Return "delivered in full"
             Case "Approved" : Return "cleared to order"
             Case "Sent" : Return "out for pricing"
@@ -671,8 +681,9 @@ Public Class AdminProcurementOverviewPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         })
 
+        ' Purchase requests are decided here; the other two tabs only watch.
         Dim pill As New Label With {
-            .Text = "Read-only",
+            .Text = If(_activeTab = 1, "Approve / reject requests", "Read-only"),
             .Font = New Font("Segoe UI Semibold", 9.0F),
             .ForeColor = SubText,
             .BackColor = Color.FromArgb(232, 238, 236),
@@ -813,7 +824,8 @@ Public Class AdminProcurementOverviewPanelBuilder
         For Each st In StatusesForTab()
             statusNames.Add(st)
         Next
-        Dim boxStatus As Panel = FilterFields.MakeSelectField(statusNames, 186, 0,
+        Dim boxStatus As Panel = FilterFields.MakeSelectField(statusNames, 186,
+            Math.Max(0, statusNames.IndexOf(_statusFilter)),
             Sub(i As Integer)
                 _statusFilter = If(i >= 0 AndAlso i < statusNames.Count,
                                    statusNames(i), ALL_STATUS)
@@ -936,8 +948,8 @@ Public Class AdminProcurementOverviewPanelBuilder
                 texts = {"PO NO / BY", "SUPPLIER", "ORDERED / EXPECTED", "STATUS", "TOTAL COST"}
                 stops = {0.0, 0.22, 0.42, 0.62, 0.78}
             Case 1
-                texts = {"PRODUCT", "QTY", "REQUESTED BY", "STATUS", "CREATED"}
-                stops = {0.0, 0.34, 0.42, 0.62, 0.78}
+                texts = {"REQUEST / PRODUCTS", "QTY", "REQUESTED BY", "STATUS", "CREATED"}
+                stops = {0.0, 0.32, 0.4, 0.56, 0.7}
             Case Else
                 texts = {"QUOTATION / BY", "SUPPLIER", "CREATED / VALID UNTIL", "STATUS", "TOTAL"}
                 stops = {0.0, 0.22, 0.42, 0.62, 0.78}
@@ -1141,6 +1153,7 @@ Public Class AdminProcurementOverviewPanelBuilder
         ' A basket is titled by its size, not by whichever product happens to be
         ' first — "3 products" is what the approver is actually deciding on.
         Dim titleText As String =
+            RequestReviewModal.RequestNo(r.RequestId) & "   " &
             If(r.IsMultiLine,
                r.ItemCount & " products",
                r.ProductName)
@@ -1178,7 +1191,20 @@ Public Class AdminProcurementOverviewPanelBuilder
         Dim badge = MakeBadge(r.Status, badgeClr)
         Dim lblWhen = Normal(DateOrDash(r.CreatedAt, "MMM d, yyyy  h:mm tt"))
 
+        ' Waiting requests carry a Review button; any row opens the request.
+        Dim btnReview As Label = Nothing
+        If r.Status = "Pending" Then
+            btnReview = New Label With {
+                .Text = "Review  " & ChrW(8250), .Font = New Font("Segoe UI Semibold", 9.5F),
+                .ForeColor = Color.White, .BackColor = MintPrimary,
+                .AutoSize = True, .Padding = New Padding(14, 6, 14, 6), .Cursor = Cursors.Hand
+            }
+            RoundLabel(btnReview, 12)
+        End If
+
         p.Controls.AddRange({lblProduct, lblNote, lblQty, lblBy, badge, lblWhen})
+        If btnReview IsNot Nothing Then p.Controls.Add(btnReview)
+        p.Cursor = Cursors.Hand
 
         AddHandler p.Resize,
             Sub()
@@ -1187,12 +1213,27 @@ Public Class AdminProcurementOverviewPanelBuilder
                 Dim t2 As Integer = (height \ 2) + 2
                 lblProduct.Left = 24 : lblProduct.Top = t1
                 lblNote.Left = 24 : lblNote.Top = t2
-                lblNote.Width = Math.Max(60, CInt(w * 0.34) - 44)
-                lblQty.Left = CInt(w * 0.34) : lblQty.Top = (height - lblQty.Height) \ 2
-                lblBy.Left = CInt(w * 0.42) : lblBy.Top = (height - lblBy.Height) \ 2
-                badge.Left = CInt(w * 0.62) : badge.Top = (height - badge.Height) \ 2
-                lblWhen.Left = CInt(w * 0.78) : lblWhen.Top = (height - lblWhen.Height) \ 2
+                lblNote.Width = Math.Max(60, CInt(w * 0.32) - 44)
+                lblQty.Left = CInt(w * 0.32) : lblQty.Top = (height - lblQty.Height) \ 2
+                lblBy.Left = CInt(w * 0.4) : lblBy.Top = (height - lblBy.Height) \ 2
+                badge.Left = CInt(w * 0.56) : badge.Top = (height - badge.Height) \ 2
+                lblWhen.Left = CInt(w * 0.7) : lblWhen.Top = (height - lblWhen.Height) \ 2
+                If btnReview IsNot Nothing Then
+                    btnReview.Left = w - btnReview.Width - 28
+                    btnReview.Top = (height - btnReview.Height) \ 2
+                End If
             End Sub
+
+        Dim capId As Integer = r.RequestId
+        Dim openReview As Action =
+            Sub()
+                If RequestReviewModal.Show(capId) IsNot Nothing Then ReQuery(resetPage:=False)
+            End Sub
+        AddHandler p.Click, Sub() openReview()
+        For Each ctrl As Control In p.Controls
+            AddHandler ctrl.Click, Sub() openReview()
+            ctrl.Cursor = Cursors.Hand
+        Next
 
         PropagateHover(p)
         Return p

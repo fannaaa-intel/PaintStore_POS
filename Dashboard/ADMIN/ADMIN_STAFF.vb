@@ -291,6 +291,14 @@ Public Class ADMIN_STAFF
                 Select Case key
                     Case "inventory" : inventoryOverview.PerformClick()
                     Case "procurement" : procurementOverview.PerformClick()
+                    Case "requests"
+                        ' Straight to the purchase requests waiting for approval.
+                        SetActive(procurementOverview)
+                        MainContainer.SuspendLayout()
+                        MainContainer.Controls.Clear()
+                        AdminProcurementOverviewPanelBuilder.LoadProcurementOverview(MainContainer, 1, "Pending")
+                        MainContainer.ResumeLayout()
+                        MainContainer.Refresh()
                 End Select
             End Sub
         ' Roles is read-only, so its user count is the one actionable thing on

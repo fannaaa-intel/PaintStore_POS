@@ -314,6 +314,26 @@ Public Class InventoryLowStockPanelBuilder
             End Sub
         region.Controls.Add(btnNewRequest)
 
+        ' ---- My requests ----
+        ' Where the requester follows what happened to what they sent, and
+        ' edits or removes a request while it is still waiting for approval.
+        Dim btnMine As New Button With {
+            .Text = "My Requests", .Size = New Size(140, 38),
+            .FlatStyle = FlatStyle.Flat, .BackColor = CardBg, .ForeColor = MintDark,
+            .Font = New Font("Segoe UI Semibold", 10), .Cursor = Cursors.Hand,
+            .TextAlign = ContentAlignment.MiddleCenter,
+            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
+        }
+        btnMine.FlatAppearance.BorderColor = CardBorder
+        RoundControl(btnMine, 10)
+        AddHandler btnMine.Click,
+            Sub()
+                If MyRequestsModal.Show() AndAlso containerRef IsNot Nothing Then
+                    LoadLowStock(containerRef)
+                End If
+            End Sub
+        region.Controls.Add(btnMine)
+
         ' ---- Copy order summary button ----
         Dim btnCopy As New Button With {
             .Text = "  Copy order list", .Size = New Size(150, 38),
@@ -327,14 +347,17 @@ Public Class InventoryLowStockPanelBuilder
         AddHandler btnCopy.Click, Sub() CopyOrderSummary()
         region.Controls.Add(btnCopy)
 
-        ' Layout right-to-left: [+ New Request]  [Copy order list]
+        ' Layout right-to-left: [+ New Request]  [My Requests]  [Copy order list]
         Dim positionRight As Action =
             Sub()
                 btnNewRequest.Top = 22
                 btnNewRequest.Left = region.Width - 24 - btnNewRequest.Width
 
+                btnMine.Top = 22
+                btnMine.Left = btnNewRequest.Left - 10 - btnMine.Width
+
                 btnCopy.Top = 22
-                btnCopy.Left = btnNewRequest.Left - 10 - btnCopy.Width
+                btnCopy.Left = btnMine.Left - 10 - btnCopy.Width
 
             End Sub
         AddHandler region.Resize, Sub() positionRight()
@@ -776,7 +799,8 @@ Public Class InventoryLowStockPanelBuilder
         End Try
     End Function
 
-    ' Returns True if a Pending request already covers this product.
+    ' Returns True if an open request (waiting for approval, approved, or
+    ' being quoted) already covers this product.
     '
     ' Checked through purchase_request_items, not purchase_requests.product_id.
     ' A request is a basket (migrations.sql section 14), and the legacy column
@@ -790,7 +814,7 @@ Public Class InventoryLowStockPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COUNT(*) FROM purchase_request_items pri " &
                     "JOIN purchase_requests pr ON pr.request_id = pri.request_id " &
-                    "WHERE pri.product_id = @pid AND pr.status = 'Pending'", conn)
+                    "WHERE pri.product_id = @pid AND pr.status IN ('Pending','Approved','Quoted')", conn)
                     cmd.Parameters.AddWithValue("@pid", productId)
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using

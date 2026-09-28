@@ -697,10 +697,14 @@ Public Class AccountantPayablesPanelBuilder
                 End Using
             End Sub
 
+        ' Styled as a link: clicking the P.O. number shows the items bought.
         Dim lblPo As New Label With {
-            .Text = row.PoNo, .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
+            .Text = row.PoNo, .Font = New Font("Segoe UI", 11, FontStyle.Bold Or FontStyle.Underline),
+            .ForeColor = MintPrimary, .AutoSize = True, .BackColor = Color.Transparent
         }
+        Dim poTip As New ToolTip()
+        poTip.SetToolTip(lblPo, "Show the items on " & row.PoNo)
+        AddHandler p.Disposed, Sub() poTip.Dispose()
         Dim lblSupplier As New Label With {
             .Text = row.Supplier, .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
@@ -755,43 +759,25 @@ Public Class AccountantPayablesPanelBuilder
                 lblAmount.Left = w - lblAmount.Width - 24 : lblAmount.Top = (height - lblAmount.Height) \ 2
             End Sub
 
-        ' Row click: the order's details. An unpaid order whose goods are in
-        ' offers to record the payment from the supplier's receipt.
+        ' Row click: the order's details, including every item bought on it.
+        ' An unpaid order whose goods are in offers to record the payment from
+        ' the supplier's receipt, straight from the same window.
         Dim openDetail As Action =
             Sub()
-                Dim sb As New System.Text.StringBuilder()
-                sb.AppendLine($"Supplier   : {row.Supplier}")
-                sb.AppendLine($"Ordered    : {row.OrderDate:MMM dd, yyyy}")
-                sb.AppendLine($"Expected   : {If(row.HasExpected, row.ExpectedDate.ToString("MMM dd, yyyy"), "—")}")
-                sb.AppendLine($"Delivery   : {row.Delivery}")
-                sb.AppendLine($"Total Cost : {Peso}{row.TotalCost:N2}")
-                sb.AppendLine($"Status     : {If(row.IsPaid, TAB_PAID, TAB_UNPAID)}")
-                If row.IsPaid Then
-                    If row.PaidAt.HasValue Then sb.AppendLine($"Paid on    : {row.PaidAt.Value:MMM dd, yyyy}")
-                    If row.AmountPaid.HasValue Then sb.AppendLine($"Amount Paid: {Peso}{row.AmountPaid.Value:N2}")
-                End If
-                If row.IsOverdue Then sb.AppendLine(vbCrLf & "⚠ The delivery is OVERDUE.")
-
                 Dim canSettle As Boolean = _hasPaidAt AndAlso Not row.IsPaid AndAlso row.Delivery = "Received"
+                Dim note As String = Nothing
                 If canSettle Then
-                    sb.AppendLine()
-                    sb.AppendLine("The goods have been received, so this amount is owed")
-                    sb.AppendLine("to the supplier. Record the payment from their receipt?")
-                    If AppModal.Show(sb.ToString(),
-                                     caption:=$"PO Details — {row.PoNo}",
-                                     buttons:=MessageBoxButtons.YesNo,
-                                     icon:=MessageBoxIcon.Question) = DialogResult.Yes Then
-                        MarkPaid(row)
-                    End If
-                Else
-                    If Not row.IsPaid AndAlso _hasPaidAt Then
-                        sb.AppendLine()
-                        sb.AppendLine("Payment is recorded once the goods are fully received.")
-                    End If
-                    AppModal.Show(sb.ToString(),
-                                  caption:=$"PO Details — {row.PoNo}",
-                                  buttons:=MessageBoxButtons.OK,
-                                  icon:=If(row.IsOverdue, MessageBoxIcon.Warning, MessageBoxIcon.Information))
+                    note = "The goods have been received, so this amount is owed to the supplier."
+                ElseIf Not row.IsPaid AndAlso _hasPaidAt Then
+                    note = "Payment is recorded once the goods are fully received."
+                End If
+                If row.IsOverdue Then
+                    note = ChrW(9888) & " The delivery is OVERDUE." & If(note Is Nothing, "", "  " & note)
+                End If
+                If PoDetailsModal.Show(row.PoId,
+                                       actionText:=If(canSettle, "Record Payment", Nothing),
+                                       footNote:=note) Then
+                    MarkPaid(row)
                 End If
             End Sub
 

@@ -52,10 +52,10 @@ Public Module SupplierPaymentModal
 
     Private Const RADIUS As Integer = 10
 
-    ' The methods offered, in the order they appear. 'Payment on Delivery' is
-    ' first and preselected because it is how this store normally pays.
-    Private ReadOnly Methods() As String =
-        {"Payment on Delivery", "Cash", "Bank Transfer", "Cheque", "E-Wallet"}
+    ' The store pays its suppliers in cash only (owner's decision, Sept 2026),
+    ' so the method is fixed rather than picked. Older payments recorded under
+    ' other methods keep their stored value; only new payments are Cash.
+    Private Const PAY_METHOD As String = "Cash"
 
     Private Function RoundedPath(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim path As New GraphicsPath()
@@ -197,15 +197,16 @@ Public Module SupplierPaymentModal
         Dim capDate As Label = MakeCaption("DATE PAID", PAD + halfW + 12, y, halfW)
         y += 18
 
-        Dim cboMethod As New ComboBox With {
-            .Font = New Font("Segoe UI", 10.5F), .FlatStyle = FlatStyle.Flat,
-            .DropDownStyle = ComboBoxStyle.DropDownList, .BackColor = FieldBg,
-            .ForeColor = TitleClr, .Location = New Point(10, 9),
-            .Width = halfW - 20
+        ' Fixed, not a dropdown: there is nothing to choose.
+        Dim lblMethod As New Label With {
+            .Text = PAY_METHOD & "   " & ChrW(8226) & "   cash payments only",
+            .Font = New Font("Segoe UI Semibold", 10.5F),
+            .BackColor = FieldBg, .ForeColor = TitleClr,
+            .AutoSize = False, .Location = New Point(12, 10),
+            .Size = New Size(halfW - 24, 20),
+            .TextAlign = ContentAlignment.MiddleLeft
         }
-        cboMethod.Items.AddRange(Methods)
-        cboMethod.SelectedIndex = 0
-        Dim fldMethod As Panel = MakeField(cboMethod, PAD, y, halfW, 40)
+        Dim fldMethod As Panel = MakeField(lblMethod, PAD, y, halfW, 40)
 
         ' Money can be handed over on Friday and typed in on Monday, so the date
         ' is editable rather than pinned to NOW(). Future dates are refused at
@@ -333,7 +334,7 @@ Public Module SupplierPaymentModal
 
                 If SavePayment(poId, poNo, supplier, parsedAmount, poTotal,
                                txtRef.Text.Trim(),
-                               CStr(cboMethod.SelectedItem),
+                               PAY_METHOD,
                                dtPaid.Value.Date,
                                txtRemarks.Text.Trim()) Then
                     saved = True

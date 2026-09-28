@@ -77,7 +77,7 @@ Public Class AdminDashPanelBuilder
     Private Shared _trendFailed As Boolean
 
     ' Health
-    Private Shared _lowStock, _pendingPos, _openShifts As Integer
+    Private Shared _lowStock, _pendingPos, _openShifts, _pendingRequests As Integer
     Private Shared _healthFailed As Boolean
 
     ' Activity
@@ -211,7 +211,7 @@ Public Class AdminDashPanelBuilder
 
     Private Shared Sub LoadHealth()
         _healthFailed = False
-        _lowStock = 0 : _pendingPos = 0 : _openShifts = 0
+        _lowStock = 0 : _pendingPos = 0 : _openShifts = 0 : _pendingRequests = 0
 
         Try
             Using conn = Db.GetConnection()
@@ -232,6 +232,13 @@ Public Class AdminDashPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COUNT(*) FROM shifts WHERE status = 'Open'", conn)
                     _openShifts = SafeInt(cmd.ExecuteScalar())
+                End Using
+
+                ' Purchase requests only reach Procurement once the admin
+                ' approves them, so the waiting ones are the admin's to-do.
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM purchase_requests WHERE status = 'Pending'", conn)
+                    _pendingRequests = SafeInt(cmd.ExecuteScalar())
                 End Using
             End Using
         Catch ex As Exception
@@ -692,13 +699,13 @@ Public Class AdminDashPanelBuilder
 
         Dim grid As New TableLayoutPanel With {
             .Dock = DockStyle.Fill,
-            .ColumnCount = 3,
+            .ColumnCount = 4,
             .RowCount = 1,
             .BackColor = Color.Transparent,
             .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
         }
-        For i As Integer = 0 To 2
-            grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 33.33F))
+        For i As Integer = 0 To 3
+            grid.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25.0F))
         Next
         grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
@@ -708,14 +715,18 @@ Public Class AdminDashPanelBuilder
                                 "purchase orders awaiting receipt", TintAmber, "procurement")
         Dim t3 = MakeHealthTile("Open Shifts", _openShifts,
                                 "registers currently open", TintMint, "")
+        Dim t4 = MakeHealthTile("Requests to Approve", _pendingRequests,
+                                "purchase requests waiting for you", TintAmber, "requests")
 
         t1.Margin = New Padding(0, 0, 6, 0)
         t2.Margin = New Padding(6, 0, 6, 0)
-        t3.Margin = New Padding(6, 0, 0, 0)
+        t3.Margin = New Padding(6, 0, 6, 0)
+        t4.Margin = New Padding(6, 0, 0, 0)
 
         grid.Controls.Add(t1, 0, 0)
         grid.Controls.Add(t2, 1, 0)
         grid.Controls.Add(t3, 2, 0)
+        grid.Controls.Add(t4, 3, 0)
 
         bar.Controls.Add(grid)
         Return bar

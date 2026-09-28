@@ -44,13 +44,17 @@ Public Class ProcurementDeliveryPanelBuilder
         Public ExpectedDate As DateTime
         Public Status As String
         Public ItemCount As Integer
+        ' Defective / missing lines recorded at receiving (DeliveryIssues).
+        Public IssueCount As Integer
     End Class
 
     Private Class DeliveryItem
+        Public ProductId As Integer
         Public ProductName As String
         Public Sku As String
         Public OrderedQty As Integer
         Public Received As Integer
+        Public Issues As New List(Of DeliveryIssues.Issue)
     End Class
 
     ' One attested handling event for a PO: who took responsibility, when, for
@@ -278,6 +282,15 @@ Public Class ProcurementDeliveryPanelBuilder
         Dim badge As Label = OutlineBadge(st.text, badgeAccent)
         card.Controls.Add(badge)
 
+        ' Problems found at receiving: flagged on the card itself, so a
+        ' delivery with defects or short items is visible without opening it.
+        Dim defectBadge As Label = Nothing
+        If po.IssueCount > 0 Then
+            defectBadge = OutlineBadge(ChrW(9888) & "  Has defect / short", NegativeClr)
+            defectBadge.Font = New Font("Segoe UI Semibold", 9.0F)
+            card.Controls.Add(defectBadge)
+        End If
+
         Dim caret As New Label With {
             .Text = If(expandedIds.Contains(po.PoId), ChrW(9650), ChrW(9660)),
             .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True,
@@ -309,13 +322,17 @@ Public Class ProcurementDeliveryPanelBuilder
                 badge.Top = 20
                 expChip.Left = badge.Left - expChip.Width - 10
                 expChip.Top = 20
+                If defectBadge IsNot Nothing Then
+                    defectBadge.Left = expChip.Left - defectBadge.Width - 10
+                    defectBadge.Top = 20
+                End If
                 caret.Left = card.Width - caret.Width - rPad
                 caret.Top = cardH - caret.Height - 18
                 If lnkReceive IsNot Nothing Then
                     lnkReceive.Left = caret.Left - lnkReceive.Width - 16
                     lnkReceive.Top = cardH - lnkReceive.Height - 18
                 End If
-                Dim rightStop As Integer = expChip.Left - 20
+                Dim rightStop As Integer = If(defectBadge IsNot Nothing, defectBadge.Left, expChip.Left) - 20
                 lblPo.MaximumSize = New Size(Math.Max(80, rightStop - 22), 30)
                 lblMeta.MaximumSize = New Size(Math.Max(80, rightStop - 24), 26)
             End Sub
@@ -335,7 +352,12 @@ Public Class ProcurementDeliveryPanelBuilder
         If receipts.Count > 0 Then custodyH = 34 + receipts.Count * 44 + 10
 
         Dim rowH As Integer = 76
-        Dim h As Integer = custodyH + 14 + Math.Max(1, items.Count) * rowH + 8
+        ' Each recorded problem adds a line under its product.
+        Dim itemsH As Integer = 0
+        For Each it In items
+            itemsH += ItemRowHeight(it, rowH)
+        Next
+        Dim h As Integer = custodyH + 14 + Math.Max(rowH, itemsH) + 8
         Dim panel As New BufferedPanel With {
         .Height = h,
         .BackColor = Color.White
@@ -364,12 +386,13 @@ Public Class ProcurementDeliveryPanelBuilder
 
         Dim y As Integer = custodyH + 8
         For Each it In items
-            Dim r As Panel = BuildItemRow(it, rowH)
+            Dim itH As Integer = ItemRowHeight(it, rowH)
+            Dim r As Panel = BuildItemRow(it, itH)
             r.Location = New Point(0, y)
             r.Width = panel.ClientSize.Width - 4
             r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             panel.Controls.Add(r)
-            y += rowH
+            y += itH
         Next
 
         AddHandler panel.Resize,
@@ -516,6 +539,10 @@ Public Class ProcurementDeliveryPanelBuilder
         Return row
     End Function
 
+    Private Shared Function ItemRowHeight(it As DeliveryItem, baseH As Integer) As Integer
+        Return baseH + it.Issues.Count * 24
+    End Function
+
     Private Shared Function BuildItemRow(it As DeliveryItem, height As Integer) As Panel
         Dim rowH As Integer = height
         Dim row As New BufferedPanel With {.Height = rowH, .BackColor = Color.Transparent}
@@ -563,6 +590,22 @@ Public Class ProcurementDeliveryPanelBuilder
 
         row.Controls.AddRange({lblName, lblSku, lblQty})
 
+        ' One line per problem: what was wrong and what happens next.
+        Dim iy As Integer = 70
+        For Each iss In it.Issues
+            Dim isAccepted As Boolean = (iss.Action = DeliveryIssues.ACTION_ACCEPT)
+            Dim lblIssue As New Label With {
+                .Text = ChrW(9888) & "  " & iss.Summary & "   " & ChrW(183) & "   " &
+                        iss.RecordedAt.ToString("MMM d, yyyy"),
+                .Font = New Font("Segoe UI Semibold", 9.5F),
+                .ForeColor = If(isAccepted, WarningClr, NegativeClr),
+                .AutoSize = True, .Location = New Point(24, iy),
+                .BackColor = Color.Transparent, .UseMnemonic = False
+            }
+            row.Controls.Add(lblIssue)
+            iy += 24
+        Next
+
         Dim ls = LineStatus(it)
         Dim badge As Label = OutlineBadge(ls.text, ls.fore)
         row.Controls.Add(badge)
@@ -570,7 +613,7 @@ Public Class ProcurementDeliveryPanelBuilder
         AddHandler row.Resize,
         Sub()
             badge.Left = row.Width - badge.Width - 24
-            badge.Top = (rowH - badge.Height) \ 2
+            badge.Top = (76 - badge.Height) \ 2
             lblSku.Left = lblName.Right + 10
             lblSku.Top = lblName.Top + (lblName.Height - lblSku.Height) \ 2
             lblName.MaximumSize = New Size(Math.Max(80, badge.Left - 40), 30)
@@ -621,6 +664,17 @@ Public Class ProcurementDeliveryPanelBuilder
 
 
     Private Shared Function LineStatus(it As DeliveryItem) As (text As String, fore As Color, back As Color)
+        ' Still short because units went back or never came: say so, rather
+        ' than a plain "Partial" that hides why.
+        If it.Received < it.OrderedQty Then
+            If it.Issues.Any(Function(i) i.Action = DeliveryIssues.ACTION_RETURN) Then
+                Return ("Return to Supplier", NegativeClr, Color.FromArgb(251, 234, 234))
+            End If
+            If it.Issues.Any(Function(i) i.IssueType = DeliveryIssues.TYPE_MISSING) Then
+                Return ("Short " & (it.OrderedQty - it.Received) & " " & ChrW(8212) & " awaiting supplier",
+                        WarningClr, Color.FromArgb(252, 240, 228))
+            End If
+        End If
         If it.Received >= it.OrderedQty AndAlso it.OrderedQty > 0 Then
             Return ("Received", PositiveClr, Color.FromArgb(232, 245, 233))
         ElseIf it.Received > 0 Then
@@ -666,6 +720,12 @@ Public Class ProcurementDeliveryPanelBuilder
             AppModal.Show("Could not load deliveries:" & Environment.NewLine & ex.Message,
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
+
+        Dim counts As Dictionary(Of Integer, Integer) = DeliveryIssues.CountsByPo()
+        For Each po In result
+            Dim n As Integer = 0
+            If counts.TryGetValue(po.PoId, n) Then po.IssueCount = n
+        Next
         Return result
     End Function
 
@@ -676,7 +736,7 @@ Public Class ProcurementDeliveryPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT p.name AS pname, p.sku, pi.qty, " &
+                    "SELECT pi.product_id, p.name AS pname, p.sku, pi.qty, " &
                     "COALESCE((SELECT SUM(sm.qty_change) FROM stock_movements sm " &
                     " WHERE sm.reference_id = @poid AND sm.reference_type = 'receive' " &
                     " AND sm.product_id = pi.product_id), 0) AS received " &
@@ -686,6 +746,7 @@ Public Class ProcurementDeliveryPanelBuilder
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
                             result.Add(New DeliveryItem With {
+                                .ProductId = SafeInt(rdr("product_id")),
                                 .ProductName = rdr("pname").ToString(),
                                 .Sku = rdr("sku").ToString(),
                                 .OrderedQty = SafeInt(rdr("qty")),
@@ -698,6 +759,12 @@ Public Class ProcurementDeliveryPanelBuilder
         Catch ex As Exception
             Debug.WriteLine("ProcurementDelivery GetItems error (PO " & poId & "): " & ex.Message)
         End Try
+        If result.Count > 0 Then
+            Dim issues As List(Of DeliveryIssues.Issue) = DeliveryIssues.ForPo(poId)
+            For Each it In result
+                it.Issues = issues.Where(Function(i) i.ProductId = it.ProductId).ToList()
+            Next
+        End If
         itemsCache(poId) = result
         Return result
     End Function

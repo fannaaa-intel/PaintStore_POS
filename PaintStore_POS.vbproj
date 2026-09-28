@@ -232,6 +232,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Dashboard\PROCUREMENT\ProcurementQuotationsPanelBuilder.vb" />
+    <Compile Include="Dashboard\PROCUREMENT\ProcurementReportsPanelBuilder.vb" />
     <Compile Include="Dashboard\PROCUREMENT\ProcurementPOPanelBuilder.Designer.vb">
       <DependentUpon>ProcurementPOPanelBuilder.vb</DependentUpon>
     </Compile>
@@ -289,6 +290,10 @@
     <Compile Include="Modules\SupplierLogo.vb" />
     <Compile Include="Modules\SupplierPaymentModal.vb" />
     <Compile Include="Modules\PurchaseRequestModal.vb" />
+    <Compile Include="Modules\DeliveryIssues.vb" />
+    <Compile Include="Modules\PoDetailsModal.vb" />
+    <Compile Include="Modules\MyRequestsModal.vb" />
+    <Compile Include="Modules\RequestReviewModal.vb" />
     <Compile Include="Modules\POS\PaymentMethods.vb" />
     <Compile Include="Modules\POS\PaymentMethodModal.vb" />
     <Compile Include="Modules\POS\PaymentPromptModal.vb" />

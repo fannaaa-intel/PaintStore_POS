@@ -166,8 +166,39 @@ Public Module PurchaseRequestModal
     ' =========================================================================
     Public Function Show(Optional seedProductId As Integer = 0,
                          Optional seedQty As Integer = 0) As Boolean
+        Return ShowForm(0, seedProductId, seedQty)
+    End Function
+
+    ' =========================================================================
+    '  EDIT — the requester changes a request that is still Pending (not yet
+    '  approved or rejected by the admin). Same form, loaded with the saved
+    '  products and note. Returns True when the changes were saved.
+    ' =========================================================================
+    Public Function Edit(requestId As Integer) As Boolean
+        Return ShowForm(requestId, 0, 0)
+    End Function
+
+    Private Function ShowForm(editRequestId As Integer, seedProductId As Integer,
+                              seedQty As Integer) As Boolean
 
         _lines = New List(Of ReqLine)
+        Dim isEdit As Boolean = (editRequestId > 0)
+        Dim editing As RequestReviewModal.RequestInfo = Nothing
+        If isEdit Then
+            Try
+                editing = RequestReviewModal.LoadRequest(editRequestId)
+            Catch ex As Exception
+                AppModal.Show("Could not load the request:" & Environment.NewLine & ex.Message,
+                              "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return False
+            End Try
+            If editing Is Nothing OrElse editing.Status <> "Pending" Then
+                AppModal.Show("This request can no longer be edited." & Environment.NewLine &
+                              "Only requests still waiting for approval can be changed.",
+                              "Cannot Edit", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Return False
+            End If
+        End If
 
         Const CARD_W As Integer = 720
         Const CARD_H As Integer = 640
@@ -182,14 +213,18 @@ Public Module PurchaseRequestModal
         }
 
         Dim lblTitle As New Label With {
-            .Text = "New Purchase Request", .Font = New Font("Segoe UI Semibold", 13.0F),
+            .Text = If(isEdit, "Edit Purchase Request  " & RequestReviewModal.RequestNo(editRequestId),
+                       "New Purchase Request"),
+            .Font = New Font("Segoe UI Semibold", 13.0F),
             .ForeColor = TitleClr, .AutoSize = False,
             .Location = New Point(PAD, PAD), .Size = New Size(innerW, 24),
             .BackColor = Color.Transparent
         }
         Dim lblBody As New Label With {
-            .Text = "Search products, add what you need, and send the whole list " &
-                    "for approval as one request.",
+            .Text = If(isEdit,
+                       "Change quantities, add or remove products. It stays waiting for the admin's approval.",
+                       "Search products, add what you need, and send the whole list " &
+                       "for approval as one request."),
             .Font = New Font("Segoe UI", 9.5F), .ForeColor = BodyClr,
             .AutoSize = False, .Location = New Point(PAD, lblTitle.Bottom + 4),
             .Size = New Size(innerW, 20), .BackColor = Color.Transparent
@@ -556,13 +591,14 @@ Public Module PurchaseRequestModal
 
         Dim btnCancel As Button = MakeButton("Cancel", False,
             New Point(CARD_W - PAD - BTN_W * 2 - GAP, btnRowTop), New Size(BTN_W, BTN_H))
-        Dim btnSend As Button = MakeButton("Send for Approval", True,
+        Dim btnSend As Button = MakeButton(If(isEdit, "Save Changes", "Send for Approval"), True,
             New Point(CARD_W - PAD - BTN_W, btnRowTop), New Size(BTN_W, BTN_H))
 
         AddHandler btnCancel.Click,
             Sub()
                 ' A basket represents real typing, so losing it is confirmed.
-                If _lines.Count > 0 Then
+                ' (Editing: cancelling simply keeps the request as it was.)
+                If _lines.Count > 0 AndAlso Not isEdit Then
                     If AppModal.Show(
                         "Discard this request?" & Environment.NewLine &
                         _lines.Count & If(_lines.Count = 1, " product", " products") &
@@ -579,7 +615,10 @@ Public Module PurchaseRequestModal
         AddHandler btnSend.Click,
             Sub()
                 If _lines.Count = 0 Then
-                    AppModal.Show("Add at least one product before sending the request.",
+                    AppModal.Show(If(isEdit,
+                                     "A request needs at least one product." & Environment.NewLine &
+                                     "To drop the whole request, use Remove in My Requests.",
+                                     "Add at least one product before sending the request."),
                                   "Nothing to Request", MessageBoxButtons.OK,
                                   MessageBoxIcon.Warning)
                     txtSearch.Focus()
@@ -592,16 +631,19 @@ Public Module PurchaseRequestModal
                 Next
 
                 If AppModal.Show(
-                    "Send this request for approval?" & Environment.NewLine &
-                    Environment.NewLine &
+                    If(isEdit, "Save the changes to this request?", "Send this request for approval?") &
+                    Environment.NewLine & Environment.NewLine &
                     _lines.Count & If(_lines.Count = 1, " product", " products") &
                     ", " & units.ToString("N0") & If(units = 1, " unit", " units") & ".",
-                    "Send Request", MessageBoxButtons.YesNo,
+                    If(isEdit, "Save Changes", "Send Request"), MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question) <> DialogResult.Yes Then
                     Return
                 End If
 
-                If SaveRequest(_lines, txtNote.Text.Trim()) Then
+                Dim ok As Boolean = If(isEdit,
+                                       UpdateRequest(editRequestId, _lines, txtNote.Text.Trim()),
+                                       SaveRequest(_lines, txtNote.Text.Trim()))
+                If ok Then
                     submitted = True
                     f.DialogResult = DialogResult.OK
                     f.Close()
@@ -648,6 +690,18 @@ Public Module PurchaseRequestModal
                     End If
                 End If
             End Sub
+
+        ' Editing: the saved basket and note come back exactly as sent.
+        If isEdit Then
+            For Each ln In editing.Lines
+                _lines.Add(New ReqLine With {
+                    .ProductId = ln.ProductId, .Name = ln.Name, .Sku = ln.Sku,
+                    .StockQty = ln.StockQty, .ReorderLevel = ln.ReorderLevel,
+                    .UnitPrice = ln.UnitPrice, .Qty = Math.Max(ln.Qty, 1)
+                })
+            Next
+            txtNote.Text = RequestReviewModal.TypedNote(editing.Note)
+        End If
 
         ' Seed the product the requester came in with, if any.
         If seedProductId > 0 Then
@@ -835,6 +889,106 @@ Public Module PurchaseRequestModal
 
         Catch ex As Exception
             AppModal.Show("Could not send the request:" & Environment.NewLine & ex.Message,
+                          "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return False
+        End Try
+    End Function
+
+    ' =========================================================================
+    '  UPDATE — rewrite a Pending request's basket and note.
+    '
+    '  Locked and re-checked inside the transaction: if the admin approved or
+    '  rejected it while the form was open, nothing is changed and the
+    '  requester is told why.
+    ' =========================================================================
+    Private Function UpdateRequest(requestId As Integer, lines As List(Of ReqLine), note As String) As Boolean
+        If lines.Count = 0 Then Return False
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using tx = conn.BeginTransaction()
+                    Dim status As String = ""
+                    Dim owner As Integer = 0
+                    Using cmd As New MySqlCommand(
+                        "SELECT status, requested_by FROM purchase_requests " &
+                        "WHERE request_id = @id FOR UPDATE", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", requestId)
+                        Using rdr = cmd.ExecuteReader()
+                            If rdr.Read() Then
+                                status = rdr("status").ToString()
+                                owner = Convert.ToInt32(rdr("requested_by"))
+                            End If
+                        End Using
+                    End Using
+                    If status <> "Pending" OrElse owner <> Session.CurrentUserId Then
+                        tx.Rollback()
+                        AppModal.Show(If(status = "", "This request no longer exists.",
+                                         If(status <> "Pending",
+                                            "This request was " & status.ToLower() & " while you were editing it." &
+                                            Environment.NewLine & "Your changes were not saved.",
+                                            "Only the person who sent this request can change it.")),
+                                      "Not Saved", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Return False
+                    End If
+
+                    Dim head As ReqLine = lines(0)
+                    Dim fullNote As String = note
+                    If lines.Count > 1 Then
+                        Dim prefix As String =
+                            "Request for " & lines.Count & " products (" &
+                            head.Name & " + " & (lines.Count - 1) & " more)"
+                        fullNote = If(note.Length = 0, prefix, prefix & " — " & note)
+                    End If
+                    If fullNote.Length > 150 Then fullNote = fullNote.Substring(0, 150)
+
+                    ' updated_at arrived with review_note in migration 22.
+                    Dim hasUpdatedAt As Boolean = RequestReviewModal.HasReviewNote(conn, tx)
+                    Using cmd As New MySqlCommand(
+                        "UPDATE purchase_requests SET product_id = @pid, qty_requested = @qty, note = @note" &
+                        If(hasUpdatedAt, ", updated_at = NOW()", "") & " WHERE request_id = @id", conn, tx)
+                        cmd.Parameters.AddWithValue("@pid", head.ProductId)
+                        cmd.Parameters.AddWithValue("@qty", head.Qty)
+                        cmd.Parameters.AddWithValue("@note", If(fullNote.Length = 0, CObj(DBNull.Value), fullNote))
+                        cmd.Parameters.AddWithValue("@id", requestId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+
+                    Using cmd As New MySqlCommand(
+                        "DELETE FROM purchase_request_items WHERE request_id = @id", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", requestId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    For Each ln In lines
+                        Using cmd As New MySqlCommand(
+                            "INSERT INTO purchase_request_items " &
+                            "(request_id, product_id, qty_requested, note) " &
+                            "VALUES (@rid, @pid, @qty, @note)", conn, tx)
+                            cmd.Parameters.AddWithValue("@rid", requestId)
+                            cmd.Parameters.AddWithValue("@pid", ln.ProductId)
+                            cmd.Parameters.AddWithValue("@qty", ln.Qty)
+                            cmd.Parameters.AddWithValue("@note",
+                                If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
+                                   "Stock " & ln.StockQty & ", restock level " & ln.ReorderLevel,
+                                   CObj(DBNull.Value)))
+                            cmd.ExecuteNonQuery()
+                        End Using
+                    Next
+
+                    tx.Commit()
+                End Using
+            End Using
+
+            Dim units As Integer = lines.Sum(Function(l) l.Qty)
+            ActivityLog.Record("REQUEST_EDIT", "purchase_request", requestId,
+                               RequestReviewModal.RequestNo(requestId) & ": " &
+                               lines.Count & If(lines.Count = 1, " product, ", " products, ") &
+                               units.ToString("N0") & If(units = 1, " unit", " units"))
+            AppModal.Show("Request updated." & Environment.NewLine &
+                          "It is still waiting for the admin's approval.",
+                          "Changes Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return True
+        Catch ex As Exception
+            AppModal.Show("Could not save the changes:" & Environment.NewLine & ex.Message,
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try

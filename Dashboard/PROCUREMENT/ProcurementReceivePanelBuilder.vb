@@ -70,6 +70,27 @@ Public Class ProcurementReceivePanelBuilder
                 Return Math.Max(0, OrderedQty - AlreadyReceived)
             End Get
         End Property
+
+        ' Condition of this line's delivery. IssueType "" = arrived complete
+        ' and good; otherwise DeliveryIssues.TYPE_DEFECTIVE / TYPE_MISSING.
+        Public IssueType As String = ""
+        Public IssueQty As Integer
+        Public IssueDetails As String = ""
+        Public IssueAction As String = ""
+
+        Public ReadOnly Property HasIssue As Boolean
+            Get
+                Return IssueType <> ""
+            End Get
+        End Property
+
+        ' Units booked in now: everything still owed, less what is going back
+        ' or never came. Accepted-as-is defects are still booked in.
+        Public Sub Recompute()
+            Dim notStocked As Integer =
+                If(HasIssue, DeliveryIssues.UnitsNotStocked(IssueType, IssueAction, IssueQty), 0)
+            ReceiveNow = Math.Max(0, Remaining - notStocked)
+        End Sub
     End Class
 
     ' ── STATE ────────────────────────────────────────────────────────────────────
@@ -398,7 +419,7 @@ Public Class ProcurementReceivePanelBuilder
             .Dock = DockStyle.Fill, .BackColor = MintBg, .Padding = New Padding(0, 4, 0, 20), .AutoScroll = True
         }
         ' ---- Lines card ----
-        Dim linesHeight As Integer = 80 + Math.Max(1, receiveLines.Count) * 92 + 14
+        Dim linesHeight As Integer = 80 + Math.Max(1, receiveLines.Count) * (ROW_BASE_H + 8) + 14
         Dim linesCard As New BufferedPanel With {.Height = linesHeight, .BackColor = CardBg, .Dock = DockStyle.Top}
         AddHandler linesCard.Paint,
               Sub(s, e)
@@ -421,7 +442,8 @@ Public Class ProcurementReceivePanelBuilder
         PillLabel(itemCountPill)
         itemCountPill.Top = lblHead.Top + (lblHead.PreferredHeight - itemCountPill.PreferredHeight) \ 2
         Dim lblHint As New Label With {
-            .Text = "All remaining quantities will be received on save.",
+            .Text = "Everything still owed is received on save. If an item arrived damaged or short, " &
+                    "change its Condition.",
             .Font = New Font("Segoe UI", 9.0F), .ForeColor = FaintText, .AutoSize = True,
             .Location = New Point(22, 48), .BackColor = Color.Transparent
         }
@@ -434,15 +456,27 @@ Public Class ProcurementReceivePanelBuilder
                 .AutoSize = True, .Location = New Point(20, 72), .BackColor = Color.Transparent
             })
         Else
-            Dim y As Integer = 72
+            ' Rows grow when a Condition other than Good is picked (the problem
+            ' details open under the row), so positions are recomputed then.
+            Dim rowPanels As New List(Of Panel)
+            Dim relayout As Action =
+                Sub()
+                    Dim ry As Integer = 72
+                    For Each rp In rowPanels
+                        rp.Top = ry
+                        ry += rp.Height + 8
+                    Next
+                    linesCard.Height = ry + 14
+                End Sub
             For Each ln In receiveLines
-                Dim r As Panel = BuildReceiveLineRow(ln, 84)
-                r.Location = New Point(12, y)
+                Dim r As Panel = BuildReceiveLineRow(ln, relayout)
+                r.Location = New Point(12, 72)
                 r.Width = linesCard.ClientSize.Width - 24
                 r.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 linesCard.Controls.Add(r)
-                y += 92
+                rowPanels.Add(r)
             Next
+            relayout()
             AddHandler linesCard.Resize,
                 Sub()
                     Dim w As Integer = linesCard.ClientSize.Width - 24
@@ -541,18 +575,29 @@ Public Class ProcurementReceivePanelBuilder
         body.PerformLayout()
     End Sub
 
-    Private Shared Function BuildReceiveLineRow(ln As ReceiveLine, height As Integer) As Panel
+    ' Height of a line row with nothing wrong, and of the problem panel that
+    ' opens under it when the Condition is Defective or Missing.
+    Private Const ROW_BASE_H As Integer = 84
+    Private Const ROW_ISSUE_H As Integer = 74
+
+    Private Shared ReadOnly ConditionChoices() As String = {"Good", "Defective", "Missing (short)"}
+
+    Private Shared Function BuildReceiveLineRow(ln As ReceiveLine, relayout As Action) As Panel
+        Dim height As Integer = ROW_BASE_H
         Dim row As New BufferedPanel With {.Height = height, .BackColor = Color.Transparent}
 
         AddHandler row.Paint,
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect As New Rectangle(0, 3, row.Width - 1, row.Height - 6)
+                ' A line with a problem is tinted, so it stands out in a long list.
+                Dim fill As Color = If(ln.HasIssue, Color.FromArgb(254, 247, 240), Color.FromArgb(246, 251, 249))
+                Dim edge As Color = If(ln.HasIssue, Color.FromArgb(240, 200, 160), Color.FromArgb(200, 228, 218))
                 Using path As GraphicsPath = RoundRect(rect, 10)
-                    Using br As New SolidBrush(Color.FromArgb(246, 251, 249))
+                    Using br As New SolidBrush(fill)
                         e.Graphics.FillPath(br, path)
                     End Using
-                    Using pen As New Pen(Color.FromArgb(200, 228, 218), 1.0F)
+                    Using pen As New Pen(edge, 1.0F)
                         e.Graphics.DrawPath(pen, path)
                     End Using
                 End Using
@@ -629,14 +674,15 @@ Public Class ProcurementReceivePanelBuilder
             .Location = New Point(textX, 36), .BackColor = Color.Transparent
         }
         Dim lblOrderInfo As New Label With {
-            .Text = "Ordered: " & ln.OrderedQty,
+            .Text = "Ordered: " & ln.OrderedQty &
+                    If(ln.AlreadyReceived > 0, "   " & ChrW(8226) & "   Already received: " & ln.AlreadyReceived, ""),
             .Font = New Font("Segoe UI", 10.5F), .ForeColor = Color.FromArgb(72, 92, 87),
             .AutoSize = True,
             .Location = New Point(textX, 56), .BackColor = Color.Transparent
         }
         row.Controls.AddRange({lblName, lblSku, lblOrderInfo})
 
-        ' ── Qty tile ─────────────────────────────────────────────────────────
+        ' ── Qty tile — units booked in now ───────────────────────────────────
         Dim tileW As Integer = 78
         Dim tileH As Integer = 60
         Dim qtyTile As New BufferedPanel With {
@@ -649,26 +695,24 @@ Public Class ProcurementReceivePanelBuilder
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Dim r As New Rectangle(0, 0, tileW - 1, tileH - 1)
                 Using path As GraphicsPath = RoundRect(r, 10)
-                    ' White fill
                     Using br As New SolidBrush(Color.White)
                         e.Graphics.FillPath(br, path)
                     End Using
-                    ' Hairline mint border
                     Using pen As New Pen(Color.FromArgb(180, 210, 198), 1.0F)
                         e.Graphics.DrawPath(pen, path)
                     End Using
                 End Using
-                ' Big number in MintDark
+                ' Fewer than still owed: shown in the warning colour.
+                Dim numClr As Color = If(ln.ReceiveNow < ln.Remaining, WarningClr, MintDark)
                 Using f As New Font("Segoe UI", 22, FontStyle.Bold),
-                      br As New SolidBrush(MintDark)
+                      br As New SolidBrush(numClr)
                     Dim sf As New StringFormat With {
                         .Alignment = StringAlignment.Center,
                         .LineAlignment = StringAlignment.Near
                     }
-                    e.Graphics.DrawString(ln.Remaining.ToString(), f, br,
+                    e.Graphics.DrawString(ln.ReceiveNow.ToString(), f, br,
                         New RectangleF(0, 6, tileW, 36), sf)
                 End Using
-                ' Small label in SubText
                 Using f As New Font("Segoe UI", 7.5F),
                       br As New SolidBrush(SubText)
                     Dim sf As New StringFormat With {
@@ -681,11 +725,116 @@ Public Class ProcurementReceivePanelBuilder
             End Sub
         row.Controls.Add(qtyTile)
 
+        ' ── Condition picker ─────────────────────────────────────────────────
+        Dim lblCond As New Label With {
+            .Text = "CONDITION", .Font = New Font("Segoe UI Semibold", 8.0F),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
+        }
+        Dim cmbCond As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 10.5F), .Width = 170, .BackColor = CardBg,
+            .Cursor = Cursors.Hand
+        }
+        cmbCond.Items.AddRange(ConditionChoices)
+        cmbCond.SelectedIndex = 0
+        row.Controls.AddRange({lblCond, cmbCond})
+
+        ' ── Problem panel (opens under the row) ─────────────────────────────
+        Dim issuePanel As New Panel With {
+            .Location = New Point(textX, ROW_BASE_H - 4), .Height = ROW_ISSUE_H - 6,
+            .BackColor = Color.Transparent, .Visible = False
+        }
+        Dim mkCap = Function(text As String, x As Integer) As Label
+                        Return New Label With {
+                            .Text = text, .Font = New Font("Segoe UI Semibold", 8.0F),
+                            .ForeColor = WarningClr, .AutoSize = True,
+                            .Location = New Point(x, 0), .BackColor = Color.Transparent
+                        }
+                    End Function
+        Dim numQty As New NumericUpDown With {
+            .Minimum = 1, .Maximum = Math.Max(1, ln.Remaining), .Value = 1,
+            .Font = New Font("Segoe UI", 10.5F), .Width = 80,
+            .Location = New Point(0, 20), .TextAlign = HorizontalAlignment.Center
+        }
+        Dim txtWhat As New TextBox With {
+            .Font = New Font("Segoe UI", 10.5F), .Location = New Point(96, 20),
+            .MaxLength = 300, .BorderStyle = BorderStyle.FixedSingle
+        }
+        Dim cmbAction As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 10.5F), .Width = 190, .BackColor = CardBg,
+            .Location = New Point(0, 20)
+        }
+        Dim capQty As Label = mkCap("QTY AFFECTED", 0)
+        Dim capWhat As Label = mkCap("WHAT IS WRONG", 96)
+        Dim capAction As Label = mkCap("WHAT HAPPENS NEXT", 0)
+        issuePanel.Controls.AddRange({capQty, numQty, capWhat, txtWhat, capAction, cmbAction})
+        row.Controls.Add(issuePanel)
+
+        Dim layoutIssue As Action =
+            Sub()
+                Dim w As Integer = issuePanel.Width
+                cmbAction.Left = w - cmbAction.Width
+                capAction.Left = cmbAction.Left
+                txtWhat.Width = Math.Max(120, cmbAction.Left - 16 - txtWhat.Left)
+            End Sub
+        AddHandler issuePanel.Resize, Sub() layoutIssue()
+
+        Dim applyState As Action =
+            Sub()
+                ln.IssueQty = CInt(numQty.Value)
+                ln.IssueDetails = txtWhat.Text.Trim()
+                ln.IssueAction = If(cmbAction.SelectedItem Is Nothing, "", cmbAction.SelectedItem.ToString())
+                ln.Recompute()
+                qtyTile.Invalidate()
+            End Sub
+
+        AddHandler cmbCond.SelectedIndexChanged,
+            Sub()
+                Select Case cmbCond.SelectedIndex
+                    Case 1 : ln.IssueType = DeliveryIssues.TYPE_DEFECTIVE
+                    Case 2 : ln.IssueType = DeliveryIssues.TYPE_MISSING
+                    Case Else : ln.IssueType = ""
+                End Select
+
+                cmbAction.Items.Clear()
+                If ln.IssueType = DeliveryIssues.TYPE_DEFECTIVE Then
+                    cmbAction.Items.AddRange({DeliveryIssues.ACTION_RETURN, DeliveryIssues.ACTION_ACCEPT})
+                    cmbAction.Enabled = True
+                    capWhat.Text = "WHAT IS WRONG  *"
+                ElseIf ln.IssueType = DeliveryIssues.TYPE_MISSING Then
+                    cmbAction.Items.Add(DeliveryIssues.ACTION_AWAITING)
+                    cmbAction.Enabled = False
+                    capWhat.Text = "NOTE  (optional)"
+                End If
+                If cmbAction.Items.Count > 0 Then cmbAction.SelectedIndex = 0
+
+                issuePanel.Visible = ln.HasIssue
+                row.Height = If(ln.HasIssue, ROW_BASE_H + ROW_ISSUE_H, ROW_BASE_H)
+                applyState()
+                row.Invalidate()
+                relayout()
+                If ln.HasIssue Then txtWhat.Focus()
+            End Sub
+        AddHandler numQty.ValueChanged, Sub() applyState()
+        AddHandler txtWhat.TextChanged, Sub() applyState()
+        AddHandler cmbAction.SelectedIndexChanged, Sub() applyState()
+
+        ' A line with nothing left to receive has no condition to set.
+        If ln.Remaining = 0 Then
+            cmbCond.Enabled = False
+        End If
+
         AddHandler row.Resize,
             Sub()
                 qtyTile.Left = row.Width - qtyTile.Width - 16
-                qtyTile.Top = (height - qtyTile.Height) \ 2
-                Dim rightStop As Integer = qtyTile.Left - 14
+                qtyTile.Top = (ROW_BASE_H - qtyTile.Height) \ 2
+                cmbCond.Left = qtyTile.Left - 18 - cmbCond.Width
+                cmbCond.Top = 36
+                lblCond.Left = cmbCond.Left
+                lblCond.Top = 17
+                issuePanel.Width = Math.Max(300, qtyTile.Right - textX)
+                Dim rightStop As Integer = cmbCond.Left - 14
                 lblName.MaximumSize = New Size(Math.Max(80, rightStop - textX), 28)
                 lblSku.MaximumSize = New Size(Math.Max(80, rightStop - textX), 22)
                 lblOrderInfo.MaximumSize = New Size(Math.Max(80, rightStop - textX), 24)
@@ -700,21 +849,52 @@ Public Class ProcurementReceivePanelBuilder
     Private Shared Sub CommitReceive()
         If btnSaveRef IsNot Nothing AndAlso CStr(If(btnSaveRef.Tag, "")) = "done" Then Return
 
-        ' Collect lines actually being received
+        ' Collect lines actually being received, and lines with a problem.
         Dim toReceive As New List(Of ReceiveLine)
+        Dim issueLines As New List(Of ReceiveLine)
         For Each ln In receiveLines
+            ln.Recompute()
             If ln.ReceiveNow < 0 Then
                 AppModal.Show("Received quantity cannot be negative." & Environment.NewLine &
                               "Check: " & ln.ProductName, "Invalid Quantity",
                               MessageBoxButtons.OK, MessageBoxIcon.Warning)
                 Return
             End If
+            If ln.HasIssue Then
+                If ln.IssueQty < 1 OrElse ln.IssueQty > ln.Remaining Then
+                    AppModal.Show("The quantity affected must be between 1 and " & ln.Remaining & "." &
+                                  Environment.NewLine & "Check: " & ln.ProductName, "Check the Quantity",
+                                  MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+                If ln.IssueType = DeliveryIssues.TYPE_DEFECTIVE AndAlso ln.IssueDetails = "" Then
+                    AppModal.Show("Say what is wrong with the defective " & ln.ProductName & "." &
+                                  Environment.NewLine & "For example: dented cans, wrong colour, leaking.",
+                                  "Describe the Defect", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+                If ln.IssueAction = "" Then
+                    AppModal.Show("Choose what happens next for " & ln.ProductName & ".",
+                                  "Choose an Action", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+                issueLines.Add(ln)
+            End If
             If ln.ReceiveNow > 0 Then toReceive.Add(ln)
         Next
 
-        If toReceive.Count = 0 Then
+        If toReceive.Count = 0 AndAlso issueLines.Count = 0 Then
             AppModal.Show("Enter a quantity on at least one line to receive.", "Nothing to Receive",
                           MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
+        ' Problems are stored in goods_receipt_issues (migrations.sql section 22).
+        ' Without it they could not be recorded, so stop rather than lose them.
+        If issueLines.Count > 0 AndAlso Not DeliveryIssues.HasTable() Then
+            AppModal.Show("Recording defective or missing items needs the latest database update" &
+                          Environment.NewLine & "(migrations.sql, section 22). Ask the admin to run it first.",
+                          "Database Update Needed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
 
@@ -760,6 +940,19 @@ Public Class ProcurementReceivePanelBuilder
         Next
         Dim newStatus As String = If(fullyReceived, "Received", "Partially Received")
         Dim note As String = "Received via PO " & currentPoNo
+        Dim unitsNow As Integer = toReceive.Sum(Function(l) l.ReceiveNow)
+        ' Nothing booked in (the whole delivery went back, or never came): the
+        ' problems are recorded but the PO keeps the status it had.
+        Dim changeStatus As Boolean = unitsNow > 0
+
+        ' One readable line per problem, for the attestation remarks, the log
+        ' and the printed receipt.
+        Dim issueText As New List(Of String)
+        For Each ln In issueLines
+            issueText.Add(ln.ProductName & ": " & ln.IssueType & " " & ln.IssueQty &
+                          If(ln.IssueDetails = "", "", " (" & ln.IssueDetails & ")") &
+                          " - " & ln.IssueAction)
+        Next
 
         ' ── ATTESTATION GATE ─────────────────────────────────────────────────
         ' Nothing is written until a named person confirms they inspected this
@@ -770,10 +963,11 @@ Public Class ProcurementReceivePanelBuilder
         '
         ' Placed after every validation above so the receiver is only asked to
         ' certify a receipt that would actually save.
-        Dim unitsNow As Integer = toReceive.Sum(Function(l) l.ReceiveNow)
         Dim att As ReceiveConfirmModal.Attestation =
             ReceiveConfirmModal.Prompt(currentPoNo, currentSupplierName,
-                                       toReceive.Count, unitsNow)
+                                       toReceive.Count, unitsNow,
+                                       presetRemarks:=If(issueText.Count = 0, Nothing,
+                                                         String.Join("; ", issueText)))
         If att Is Nothing Then Return   ' backed out — nothing written
 
         ' The attestation row only lands where the table exists; on an
@@ -806,7 +1000,9 @@ Public Class ProcurementReceivePanelBuilder
                         Next
 
                         ' Update PO status (+ received_at when fully received)
-                        If fullyReceived Then
+                        If Not changeStatus Then
+                            ' Nothing booked in: keep the PO's status.
+                        ElseIf fullyReceived Then
                             Using cmd As New MySqlCommand(
                                 "UPDATE purchase_orders SET status = 'Received', received_at = NOW() " &
                                 "WHERE po_id = @poid", conn, txn)
@@ -826,9 +1022,17 @@ Public Class ProcurementReceivePanelBuilder
                         ' describes: an attestation for goods never booked in,
                         ' or movements with no attestation, are both worse than
                         ' the old behaviour, so they share one transaction.
+                        Dim receiptId As Integer = 0
                         If canStoreAttestation Then
-                            ReceiveConfirmModal.Save(conn, txn, currentPoId, att, unitsNow)
+                            receiptId = ReceiveConfirmModal.Save(conn, txn, currentPoId, att, unitsNow)
                         End If
+
+                        ' Problem lines commit with the receipt they belong to.
+                        For Each ln In issueLines
+                            DeliveryIssues.Save(conn, txn, receiptId, currentPoId, ln.PoItemId,
+                                                ln.ProductId, ln.IssueType, ln.IssueQty,
+                                                ln.IssueDetails, ln.IssueAction)
+                        Next
 
                         txn.Commit()
 
@@ -837,8 +1041,11 @@ Public Class ProcurementReceivePanelBuilder
                         ' The receiver's name is recorded here too, so the log
                         ' answers "who accepted this" without a second lookup.
                         ActivityLog.Record("PO_RECEIVED", "purchase_order", currentPoId,
-                            If(fullyReceived, "Fully received", "Partially received") &
+                            If(Not changeStatus, "Nothing booked in",
+                               If(fullyReceived, "Fully received", "Partially received")) &
                             ", " & unitsNow & " unit(s)" &
+                            If(issueLines.Count = 0, "",
+                               ", " & issueLines.Count & " problem(s): " & String.Join("; ", issueText)) &
                             ", received by " & att.ReceiverName &
                             If(att.ConditionNote = "Discrepancy",
                                " (DISCREPANCY: " & att.Remarks & ")", " (good condition)"))
@@ -858,7 +1065,8 @@ Public Class ProcurementReceivePanelBuilder
             Return
         End Try
 
-        ShowReceiveReceipt(currentPoNo, currentSupplierName, toReceive, newStatus, att)
+        ShowReceiveReceipt(currentPoNo, currentSupplierName, toReceive,
+                           If(changeStatus, newStatus, "Unchanged (nothing booked in)"), att, issueLines)
         RenderList()
     End Sub
 
@@ -905,7 +1113,8 @@ Public Class ProcurementReceivePanelBuilder
     Private Shared Sub ShowReceiveReceipt(poNo As String, supplierName As String,
                                           receivedLines As List(Of ReceiveLine),
                                           newStatus As String,
-                                          att As ReceiveConfirmModal.Attestation)
+                                          att As ReceiveConfirmModal.Attestation,
+                                          issueLines As List(Of ReceiveLine))
         Dim lines As New List(Of RLine)
 
         lines.Add(New RLine("Purchase Order", poNo, LineStyle.Bold))
@@ -936,6 +1145,18 @@ Public Class ProcurementReceivePanelBuilder
         Dim totalLines As Integer = receivedLines.Where(Function(l) l.ReceiveNow > 0).Count()
         lines.Add(New RLine("Total Products", totalLines & If(totalLines = 1, " product", " products")))
         lines.Add(New RLine("Total Units", totalUnits & If(totalUnits = 1, " unit", " units"), LineStyle.Bold))
+
+        ' Defective / missing items, with what happens to each.
+        If issueLines IsNot Nothing AndAlso issueLines.Count > 0 Then
+            lines.Add(Divider())
+            lines.Add(Section("Problems Found"))
+            For Each ln In issueLines
+                lines.Add(New RLine(ln.ProductName, ln.IssueType & " x" & ln.IssueQty, LineStyle.Bold))
+                If ln.IssueDetails <> "" Then lines.Add(New RLine(ln.IssueDetails, "", LineStyle.Normal))
+                lines.Add(New RLine("Action: " & ln.IssueAction, "", LineStyle.Muted))
+                lines.Add(Spacer())
+            Next
+        End If
 
         ' The attestation printed on the document. A discrepancy is called out
         ' rather than tucked away: it is the part someone will need to act on.

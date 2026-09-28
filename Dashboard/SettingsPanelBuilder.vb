@@ -137,7 +137,7 @@ Public Class SettingsPanelBuilder
             .Location = New Point(SIDE_PAD, 12)
         })
         titleBar.Controls.Add(New Label With {
-            .Text = "Signed in as " & Session.CurrentFullName & "  -  " & Session.CurrentRole,
+            .Text = "Logged in as " & Session.CurrentFullName & "  -  " & Session.CurrentRole,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText, .AutoSize = True,
             .Location = New Point(SIDE_PAD + 3, 74)

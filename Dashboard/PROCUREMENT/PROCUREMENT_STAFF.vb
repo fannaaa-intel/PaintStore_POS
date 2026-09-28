@@ -13,6 +13,9 @@ Public Class PROCUREMENT_STAFF
 
     Private MainContainer As Panel
     Private _btnSettings As Button          ' pinned above Logout
+    Private _btnStockLevel As Button        ' built in code, like Settings
+    Private _btnReports As Button
+    Private _navButtons As Button()         ' the MENU list, top to bottom
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     Private Const NAV_OPEN_WIDTH As Integer = 260
@@ -156,7 +159,7 @@ Public Class PROCUREMENT_STAFF
         dashboard.Text = "Dashboard"
         purchaseOrders.Text = "Purchase Orders"
         suppliers.Text = "Suppliers"
-        quotations.Text = "Quotations"
+        quotations.Text = "Price Quotations"
         receiveGoods.Text = "Receive Goods"
         deliveryTracking.Text = "Delivery Tracking"
         logout.Text = "Logout"
@@ -170,17 +173,22 @@ Public Class PROCUREMENT_STAFF
         }
         Nav.Controls.Add(lblMenu)
 
-        Dim navButtons() As Button = {dashboard, purchaseOrders, suppliers, quotations, receiveGoods, deliveryTracking}
-        Dim topPos As Integer = 128
-        For Each btn In navButtons
+        ' Stock Level and Reports are built in code rather than in the designer.
+        _btnStockLevel = New Button With {.Name = "stocklevel", .Text = "Stock Level"}
+        _btnReports = New Button With {.Name = "reports", .Text = "Reports"}
+        AddHandler _btnStockLevel.Click, AddressOf stockLevel_Click
+        AddHandler _btnReports.Click, AddressOf reports_Click
+
+        _navButtons = {dashboard, _btnStockLevel, purchaseOrders, suppliers, quotations,
+                       receiveGoods, deliveryTracking, _btnReports}
+        For Each btn In _navButtons
             StyleButton(btn)
             btn.Left = 14
-            btn.Top = topPos
             btn.Width = Nav.Width - 28
             btn.Height = 48
-            RoundButton(btn, 12)
-            topPos += 58
         Next
+        LayoutNavButtons()
+        AddHandler Nav.Resize, Sub() LayoutNavButtons()
 
 
         ' ── SETTINGS ────────────────────────────────────────────────────────────
@@ -228,6 +236,28 @@ Public Class PROCUREMENT_STAFF
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
         btnHamburger.BringToFront()
+    End Sub
+
+    ' Stacks the MENU buttons from y=128 at the usual 58px pitch. Eight buttons
+    ' would run under Settings (pinned at Nav.Height - 168) on a 768px-high
+    ' screen, so there the pitch tightens and the list always ends above it.
+    Private Sub LayoutNavButtons()
+        If _navButtons Is Nothing OrElse _navButtons.Length = 0 Then Return
+        Const TOP_Y As Integer = 128
+        Dim bottomLimit As Integer = Nav.Height - 168 - 10
+        Dim pitch As Integer = 58
+        If TOP_Y + _navButtons.Length * pitch > bottomLimit Then
+            pitch = Math.Max(40, (bottomLimit - TOP_Y) \ _navButtons.Length)
+        End If
+        Dim h As Integer = Math.Min(48, pitch - 6)
+        For i As Integer = 0 To _navButtons.Length - 1
+            Dim btn As Button = _navButtons(i)
+            btn.Top = TOP_Y + i * pitch
+            If btn.Height <> h OrElse btn.Region Is Nothing Then
+                btn.Height = h
+                RoundButton(btn, 12)
+            End If
+        Next
     End Sub
 
     ' ===========================================================================
@@ -337,6 +367,8 @@ Public Class PROCUREMENT_STAFF
             Case "purchaseorders" : iconPath = "cart.png"
             Case "suppliers" : iconPath = "group.png"
             Case "quotations" : iconPath = "quotation.png"
+            Case "stocklevel" : iconPath = "bar-chart.png"
+            Case "reports" : iconPath = "newspaper.png"
             Case "receivegoods" : iconPath = "received.png"
             Case "deliverytracking" : iconPath = "express-delivery.png"
             Case "logout" : iconPath = "logout.png"
@@ -487,6 +519,26 @@ Public Class PROCUREMENT_STAFF
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()   ' safe — burger is on Form, not MainContainer
         ProcurementDashPanelBuilder.LoadDash(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub stockLevel_Click(sender As Object, e As EventArgs)
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
+        SetActive(_btnStockLevel)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        InventoryStockLevelPanelBuilder.LoadStockLevels(MainContainer, forProcurement:=True)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub reports_Click(sender As Object, e As EventArgs)
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
+        SetActive(_btnReports)
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        ProcurementReportsPanelBuilder.LoadReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub

@@ -215,7 +215,7 @@ Public Class ProcurementQuotationsPanelBuilder
         Const TITLE_Y As Integer = 18
 
         Dim lblTitle As New Label With {
-            .Text = "Quotations", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .Text = "Price Quotations", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, TITLE_Y),
             .BackColor = Color.Transparent
         }
@@ -230,7 +230,7 @@ Public Class ProcurementQuotationsPanelBuilder
         Next
 
         Dim lblSub As New Label With {
-            .Text = rows.Count & If(rows.Count = 1, " quotation", " quotations") &
+            .Text = rows.Count & If(rows.Count = 1, " price quotation", " price quotations") &
                     "   " & ChrW(8226) & "   " & pending & " awaiting reply" &
                     "   " & ChrW(8226) & "   " & accepted & " accepted" &
                     "   " & ChrW(8226) & "   " & Peso & totalAmt.ToString("N2") & " quoted",
@@ -471,8 +471,8 @@ Public Class ProcurementQuotationsPanelBuilder
         Dim lbl As New Label With {
             .Text = If(currentFilter = "All",
                        "No quotations yet." & Environment.NewLine &
-                       "Record a supplier's price from Purchase Orders ▸ New PO ▸ Add Quote.",
-                       "No " & currentFilter.ToLower() & " quotations."),
+                       "Record a supplier's price from Purchase Orders ▸ New PO ▸ Add Price Quote.",
+                       "No " & currentFilter.ToLower() & " price quotations."),
             .Font = New Font("Segoe UI", 11), .ForeColor = FaintText,
             .AutoSize = False, .Dock = DockStyle.Fill,
             .TextAlign = ContentAlignment.MiddleCenter, .BackColor = Color.Transparent
@@ -511,7 +511,7 @@ Public Class ProcurementQuotationsPanelBuilder
             .Height = 104, .BackColor = MintBg, .Padding = New Padding(24, 18, 24, 0),
             .Dock = DockStyle.Top
         }
-        Dim lnkBack As Label = MakeLink(ChrW(8592) & "  Back to quotations", MintDeep)
+        Dim lnkBack As Label = MakeLink(ChrW(8592) & "  Back to price quotations", MintDeep)
         lnkBack.Location = New Point(26, 16)
         AddHandler lnkBack.Click, Sub() RenderList()
 
@@ -846,7 +846,7 @@ Public Class ProcurementQuotationsPanelBuilder
                    " on request #" & q.RequestId & " will be rejected."
         End If
 
-        If AppModal.Show(msg, "Accept Quotation",
+        If AppModal.Show(msg, "Accept Price Quotation",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
             Return
         End If
@@ -894,9 +894,9 @@ Public Class ProcurementQuotationsPanelBuilder
     End Sub
 
     Private Shared Sub DeleteQuote(q As QuoteRow)
-        If AppModal.Show("Delete draft quotation " & q.QuotationNo & "?" & Environment.NewLine &
+        If AppModal.Show("Delete draft price quotation " & q.QuotationNo & "?" & Environment.NewLine &
                          If(Archive.HasArchiveTable(), "An admin can restore it from the Recycle Bin.",
-                            "This cannot be undone."), "Delete Quotation",
+                            "This cannot be undone."), "Delete Price Quotation",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
@@ -996,7 +996,7 @@ Public Class ProcurementQuotationsPanelBuilder
         }
         Dim backText As String = If(fromQuotationId > 0,
                                     ChrW(8592) & "  Back to quotation",
-                                    ChrW(8592) & "  Back to quotations")
+                                    ChrW(8592) & "  Back to price quotations")
         Dim lnkBack As Label = MakeLink(backText, MintDeep)
         lnkBack.Location = New Point(26, 16)
         AddHandler lnkBack.Click,

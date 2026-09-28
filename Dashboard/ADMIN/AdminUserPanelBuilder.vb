@@ -529,7 +529,7 @@ Public Class AdminUserPanelBuilder
         Dim defs = {
             ("Total Users", accountTotal.ToString("N0"), "accounts on file",
              MintPrimary, ""),
-            ("Active", ActiveCount().ToString("N0"), "able to sign in",
+            ("Active", ActiveCount().ToString("N0"), "able to log in",
              MintDark, "Live"),
             ("Disabled", DisabledCount().ToString("N0"), "switched off by an admin",
              AccentBlue, ""),
@@ -1542,7 +1542,7 @@ Public Class AdminUserPanelBuilder
             Environment.NewLine & Environment.NewLine &
             "        " & temp & Environment.NewLine & Environment.NewLine &
             "Give this to them directly. They will be asked to choose a new " &
-            "password the next time they sign in.",
+            "password the next time they log in.",
             "Password Issued", MessageBoxButtons.OK, MessageBoxIcon.Information)
         Refresh()
     End Sub

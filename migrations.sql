@@ -717,3 +717,51 @@ ALTER TABLE shifts
     ADD COLUMN IF NOT EXISTS opening_variance DECIMAL(10,2) DEFAULT NULL AFTER expected_opening;
 
 SHOW COLUMNS FROM shifts LIKE '%opening%';
+
+-- -----------------------------------------------------------------------------
+--  22. Procurement revision - request approval and delivery problems
+--
+--     a) purchase_requests.review_note
+--        Inventory sends a request; it stays 'Pending' until the ADMIN approves
+--        or rejects it (Admin > Procurement Overview > Purchase Requests).
+--        A rejection must say why - the reason is stored here and shown to the
+--        requester in Low Stock Alerts > My Requests. While a request is still
+--        Pending the requester may edit it or remove it; updated_at records
+--        the last edit.
+--
+--        Requests that were already 'Pending' before this update were never
+--        approved by anyone (there was no approval step), so they now wait for
+--        the admin like any new request.
+--
+--     b) goods_receipt_issues
+--        Receive Goods records, per product, units that arrived Defective or
+--        were Missing (short delivery), what was wrong, and what happens next:
+--          Return to Supplier  not stocked; the PO stays open for replacements
+--          Accept as-is        stocked anyway, kept on record
+--          Awaiting Supplier   missing units; the PO stays open for the rest
+--        Shown in Delivery Tracking, the PO details window and Reports.
+-- -----------------------------------------------------------------------------
+ALTER TABLE purchase_requests
+    ADD COLUMN IF NOT EXISTS review_note VARCHAR(255) DEFAULT NULL AFTER reviewed_at,
+    ADD COLUMN IF NOT EXISTS updated_at  DATETIME     DEFAULT NULL AFTER review_note;
+
+CREATE TABLE IF NOT EXISTS goods_receipt_issues (
+    issue_id      INT(11)      NOT NULL AUTO_INCREMENT,
+    receipt_id    INT(11)      DEFAULT NULL,
+    po_id         INT(11)      NOT NULL,
+    po_item_id    INT(11)      DEFAULT NULL,
+    product_id    INT(11)      NOT NULL,
+    issue_type    ENUM('Defective','Missing') NOT NULL,
+    qty           INT(11)      NOT NULL,
+    details       VARCHAR(300) DEFAULT NULL,
+    action_taken  ENUM('Return to Supplier','Accept as-is','Awaiting Supplier') NOT NULL,
+    recorded_by   INT(11)      DEFAULT NULL,
+    recorded_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (issue_id),
+    KEY idx_gri_po (po_id),
+    KEY idx_gri_receipt (receipt_id),
+    KEY idx_gri_product (product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SHOW COLUMNS FROM purchase_requests LIKE 're%';
+SHOW COLUMNS FROM goods_receipt_issues;

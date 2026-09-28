@@ -39,6 +39,13 @@ Imports MySql.Data.MySqlClient
 '
 '  Each row carries an "Adjust" link that opens Stock Adjustment with that
 '  product already selected, via INVENTORY_STAFF.OpenStockAdjustmentFor.
+'
+'  PROCUREMENT MODE (forProcurement:=True)
+'  ---------------------------------------
+'  Procurement sees the very same table so both roles read stock the same way.
+'  The one difference is the last column: Procurement cannot adjust stock, so
+'  "Adjust" becomes ON ORDER — units still owed on Ordered / Partially Received
+'  purchase orders, which is what a buyer needs next to a Low or Out badge.
 ' =============================================================================
 Public Class InventoryStockLevelPanelBuilder
 
@@ -125,6 +132,10 @@ Public Class InventoryStockLevelPanelBuilder
     Private Shared activeTier As String = ""
     Private Shared searchTerm As String = ""
 
+    ' True when opened from the Procurement dashboard (see header).
+    Private Shared forProcurementView As Boolean = False
+    Private Shared onOrderQty As New Dictionary(Of Integer, Integer)
+
     ' ── CONTROL REFERENCES ────────────────────────────────────────────────────────
     Private Shared containerRef As Panel
     ' Fixed row pitch — shared by real rows and the blank filler rows painted
@@ -150,9 +161,11 @@ Public Class InventoryStockLevelPanelBuilder
     ' =========================================================================
     Public Shared Sub LoadStockLevels(container As Panel,
                                       Optional categoryFilter As String = "",
-                                      Optional tierFilter As String = "")
+                                      Optional tierFilter As String = "",
+                                      Optional forProcurement As Boolean = False)
 
         containerRef = container
+        forProcurementView = forProcurement
         activeCategory = If(categoryFilter, "")
         activeTier = If(tierFilter, "")
         searchTerm = ""
@@ -269,6 +282,27 @@ Public Class InventoryStockLevelPanelBuilder
                         End While
                     End Using
                 End Using
+
+                ' Units still owed by suppliers, per product. Only needed for
+                ' the Procurement view's ON ORDER column.
+                onOrderQty.Clear()
+                If forProcurementView Then
+                    Using cmd As New MySqlCommand(
+                        "SELECT pi.product_id, SUM(GREATEST(pi.qty - COALESCE((" &
+                        "  SELECT SUM(sm.qty_change) FROM stock_movements sm " &
+                        "  WHERE sm.reference_type = 'receive' AND sm.reference_id = pi.po_id " &
+                        "    AND sm.product_id = pi.product_id), 0), 0)) AS open_qty " &
+                        "FROM po_items pi JOIN purchase_orders po ON po.po_id = pi.po_id " &
+                        "WHERE po.status IN ('Ordered','Partially Received') " &
+                        "GROUP BY pi.product_id", conn)
+                        Using rdr = cmd.ExecuteReader()
+                            While rdr.Read()
+                                Dim n As Integer = SafeInt(rdr("open_qty"))
+                                If n > 0 Then onOrderQty(SafeInt(rdr("product_id"))) = n
+                            End While
+                        End Using
+                    End Using
+                End If
             End Using
         Catch ex As Exception
             AppModal.Show("Could not load stock levels:" & Environment.NewLine & ex.Message,
@@ -792,7 +826,7 @@ Public Class InventoryStockLevelPanelBuilder
             ("STOCK LEVEL", ContentAlignment.MiddleLeft),
             ("STATUS", ContentAlignment.MiddleCenter),
             ("LINE VALUE", ContentAlignment.MiddleRight),
-            ("ACTION", ContentAlignment.MiddleCenter)
+            (If(forProcurementView, "ON ORDER", "ACTION"), ContentAlignment.MiddleCenter)
         }
         ' Margin must be zero on both this grid and the row grid, otherwise the
         ' default 3px cell margin shifts header text off its column. Col 0 is
@@ -1093,18 +1127,31 @@ Public Class InventoryStockLevelPanelBuilder
             .BackColor = Color.Transparent
         }
 
-        ' Col 6 — action (Adjust link -> Stock Adjustment, pre-loaded)
+        ' Col 6 — action (Adjust link -> Stock Adjustment, pre-loaded), or for
+        ' Procurement the units still owed on open purchase orders.
         Dim cAct As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
-        Dim btnAdjust As Label = MakeLink("Adjust", MintPrimary)
+        Dim btnAdjust As Label
+        If forProcurementView Then
+            Dim owed As Integer = 0
+            onOrderQty.TryGetValue(it.Id, owed)
+            btnAdjust = New Label With {
+                .Text = If(owed > 0, owed.ToString("N0") & " on order", ChrW(8212)),
+                .Font = New Font("Segoe UI", 9.5F, If(owed > 0, FontStyle.Bold, FontStyle.Regular)),
+                .ForeColor = If(owed > 0, MintPrimary, FaintText),
+                .AutoSize = True, .BackColor = Color.Transparent
+            }
+        Else
+            btnAdjust = MakeLink("Adjust", MintPrimary)
+            Dim capId As Integer = it.Id
+            Dim capName As String = it.Name
+            AddHandler btnAdjust.Click, Sub() OpenStockAdjustment(capId, capName)
+        End If
         cAct.Controls.Add(btnAdjust)
         AddHandler cAct.Resize,
             Sub()
                 btnAdjust.Left = (cAct.Width - btnAdjust.Width) \ 2
                 btnAdjust.Top = (cAct.Height - btnAdjust.Height) \ 2
             End Sub
-        Dim capId As Integer = it.Id
-        Dim capName As String = it.Name
-        AddHandler btnAdjust.Click, Sub() OpenStockAdjustment(capId, capName)
 
         For Each cell As Control In New Control() {cProduct, lblCat, cStock, cLevel, cStatus, lblValue, cAct}
             cell.Margin = New Padding(0)

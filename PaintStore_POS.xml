@@ -241,6 +241,33 @@ PaintStore_POS
 <member name="M:PaintStore_POS.SupplierLogo.InitialOf(System.String)">
  <summary>First letter of a supplier name, or "?" when it is blank.</summary>
 </member>
+<member name="M:PaintStore_POS.DeliveryIssues.UnitsNotStocked(System.String,System.String,System.Int32)">
+ <summary>
+ Units that do NOT go into stock for this problem: defective units sent
+ back and units that never arrived. Accepted-as-is units are stocked.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.DeliveryIssues.HasTable">
+ <summary>True when goods_receipt_issues exists (migration 22 applied).</summary>
+</member>
+<member name="M:PaintStore_POS.DeliveryIssues.Save(MySql.Data.MySqlClient.MySqlConnection,MySql.Data.MySqlClient.MySqlTransaction,System.Int32,System.Int32,System.Int32,System.Int32,System.String,System.Int32,System.String,System.String)">
+ <summary>Writes one problem line inside the caller's receipt transaction.</summary>
+</member>
+<member name="M:PaintStore_POS.DeliveryIssues.ForPo(System.Int32)">
+ <summary>Every problem recorded against a PO, oldest first. Empty when none or un-migrated.</summary>
+</member>
+<member name="M:PaintStore_POS.DeliveryIssues.CountsByPo">
+ <summary>How many problem lines each PO has, for badges on a list.</summary>
+</member>
+<member name="M:PaintStore_POS.RequestReviewModal.RequestNo(System.Int32)">
+ <summary>"REQ-0007" — the one way a request number is written.</summary>
+</member>
+<member name="M:PaintStore_POS.RequestReviewModal.HasReviewNote(MySql.Data.MySqlClient.MySqlConnection,MySql.Data.MySqlClient.MySqlTransaction)">
+ <summary>True when migration 22 added purchase_requests.review_note.</summary>
+</member>
+<member name="M:PaintStore_POS.RequestReviewModal.LoadRequest(System.Int32)">
+ <summary>Loads a request and its product lines. Nothing when not found.</summary>
+</member>
 <member name="M:PaintStore_POS.ReceiptPrinter.Preview(System.String,System.Collections.Generic.List{PaintStore_POS.ReceiptPrinter.RLine},System.String,System.String,System.String,System.Boolean)">
  <param name="internal">
  True for an in-house document (a cash count, a stock sheet) rather than

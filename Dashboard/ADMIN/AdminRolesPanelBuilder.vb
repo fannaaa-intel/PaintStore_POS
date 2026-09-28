@@ -82,7 +82,7 @@ Public Class AdminRolesPanelBuilder
             Case "Accountant"
                 Return "Income, Ledger, Payables, Sales history, Financial reports"
             Case "Procurement"
-                Return "Suppliers, Purchase orders, Quotations, Receiving, Deliveries"
+                Return "Suppliers, Purchase orders, Price quotations, Receiving, Deliveries, Stock level, Reports"
             Case Else
                 Return ""
         End Select
@@ -465,7 +465,7 @@ Public Class AdminRolesPanelBuilder
         ' "Unknown role". Say so on the row rather than leaving it to be found
         ' by a member of staff who cannot get in.
         Dim lblTotal As New Label With {
-            .Text = If(routable, "", "⚠ cannot sign in"),
+            .Text = If(routable, "", "⚠ cannot log in"),
             .Font = New Font("Segoe UI Semibold", 9),
             .ForeColor = Color.FromArgb(198, 40, 40),
             .AutoSize = True, .BackColor = Color.Transparent
@@ -473,7 +473,7 @@ Public Class AdminRolesPanelBuilder
         If Not routable Then
             _tips.SetToolTip(lblTotal,
                 "No login route exists for this role name, so anyone assigned it " &
-                "would be refused at sign-in.")
+                "would be refused at log-in.")
         End If
 
         p.Controls.AddRange({lblName, lblDesc, activePill, lblTotal})

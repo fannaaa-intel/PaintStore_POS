@@ -74,7 +74,7 @@ Public Module LoginThrottle
                 ' Worth an audit row: repeated failures are what a break-in
                 ' attempt looks like from the inside.
                 ActivityLog.Record("LOGIN_LOCKOUT", "user", Nothing,
-                                   "Too many failed sign-ins for '" & key & "' — locked for " &
+                                   "Too many failed log-ins for '" & key & "' — locked for " &
                                    LockoutMinutes.ToString() & " minutes")
                 Return True
             End If

@@ -62,7 +62,8 @@ Public Module Archive
             Case "color_formulas" : Return "Colour formula"
             Case "payment_methods" : Return "Payment method"
             Case "suppliers" : Return "Supplier"
-            Case "quotations" : Return "Quotation"
+            Case "quotations" : Return "Price quotation"
+            Case "purchase_requests" : Return "Purchase request"
             Case "products" : Return "Product"
             Case Else : Return sourceTable
         End Select

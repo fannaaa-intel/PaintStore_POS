@@ -809,7 +809,7 @@ Public Class ProcurementPOPanelBuilder
 
         Dim pendings As List(Of PendingReqLite) = LoadPendingLite()
 
-        Dim header As Panel = BuildCardHeader("Pending Requests",
+        Dim header As Panel = BuildCardHeader("Approved Requests",
             If(pendings.Count = 0, "Nothing waiting",
                pendings.Count & If(pendings.Count = 1, " request waiting", " requests waiting") &
                "  " & ChrW(8226) & "  tap to add"))
@@ -825,7 +825,7 @@ Public Class ProcurementPOPanelBuilder
 
         If pendings.Count = 0 Then
             Dim lbl As New Label With {
-                .Text = "No pending requests right now." & Environment.NewLine &
+                .Text = "No approved requests right now." & Environment.NewLine &
                         "Use Search Product, under Line Items, to add items manually.",
                 .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = False,
                 .TextAlign = ContentAlignment.TopCenter, .Dock = DockStyle.Top, .Height = 60,
@@ -1255,8 +1255,8 @@ Public Class ProcurementPOPanelBuilder
 
         ' --- Add Quote button — matches palette: solid MintDeep, white text, icon from file ---
         Dim btnAddQuote As New Button With {
-            .Text = "  Add Quote",
-            .Size = New Size(148, 44),
+            .Text = "  Add Price Quote",
+            .Size = New Size(196, 44),
             .FlatStyle = FlatStyle.Flat,
             .BackColor = MintDeep,
             .ForeColor = Color.White,
@@ -1405,11 +1405,11 @@ Public Class ProcurementPOPanelBuilder
                 quoteMargin.Visible = quoteExpanded
                 quoteHostPanelRef.Visible = quoteExpanded
                 If quoteExpanded Then
-                    btnAddQuote.Text = "  Hide Quote"
+                    btnAddQuote.Text = "  Hide Price Quote"
                     btnAddQuote.Image = iconUp
                     btnAddQuote.BackColor = DeepHover
                 Else
-                    btnAddQuote.Text = "  Add Quote"
+                    btnAddQuote.Text = "  Add Price Quote"
                     btnAddQuote.Image = iconDown
                     btnAddQuote.BackColor = MintDeep
                 End If
@@ -1438,7 +1438,7 @@ Public Class ProcurementPOPanelBuilder
 
         ' Header — generous top padding, bigger title, clearly separated subtitle
         Dim lblHead As New Label With {
-            .Text = "Quote Details",
+            .Text = "Price Quote Details",
             .Font = New Font("Segoe UI", 15, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True,
             .Location = New Point(24, 20), .BackColor = Color.Transparent
@@ -1516,7 +1516,7 @@ Public Class ProcurementPOPanelBuilder
 
         ' Save Quote button
         Dim btnSaveQuote As New Button With {
-            .Text = "Save Quote", .Size = New Size(148, 44),
+            .Text = "Save Price Quote", .Size = New Size(170, 44),
             .FlatStyle = FlatStyle.Flat, .BackColor = MintDeep, .ForeColor = Color.White,
             .Font = New Font("Segoe UI Semibold", 11), .Cursor = Cursors.Hand,
             .TextAlign = ContentAlignment.MiddleCenter
@@ -1635,9 +1635,9 @@ Public Class ProcurementPOPanelBuilder
                     RebuildLines()
                     RecomputeGrand()
 
-                    AppModal.Show("Quote " & quotNo & " saved as Draft." & Environment.NewLine &
+                    AppModal.Show("Price quote " & quotNo & " saved as Draft." & Environment.NewLine &
                                   "The item has been added to the line items at the quoted price.",
-                                  "Quote Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                                  "Price Quote Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
 
                     ' Reset quote form for another entry. The request we just quoted
                     ' is no longer 'Approved', so reload the picker rather than
@@ -1828,7 +1828,7 @@ Public Class ProcurementPOPanelBuilder
             ph.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
             Dim lbl As New Label With {
                 .Text = "No line items yet" & Environment.NewLine &
-                        "Add from a pending request, or type in Search Product above.",
+                        "Add from an approved request, or type in Search Product above.",
                 .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleCenter, .Dock = DockStyle.Fill,
                 .BackColor = Color.Transparent
@@ -2238,16 +2238,14 @@ Public Class ProcurementPOPanelBuilder
                             ' Mark sourced request as Converted
                             If ln.RequestId > 0 Then
                                 ' A request reaches a PO by two routes: straight from
-                                ' the queue (Pending/Approved), or via a quotation,
-                                ' which parks it at Quoted. Matching only Pending left
-                                ' every quoted request stuck open, free to be pulled
-                                ' into a second PO.
+                                ' the approved queue, or via a quotation, which parks
+                                ' it at Quoted. Only admin-approved requests qualify.
+                                ' reviewed_by / reviewed_at record the ADMIN'S
+                                ' approval, so they are left alone here.
                                 Using cmd As New MySqlCommand(
-                                    "UPDATE purchase_requests SET status = 'Converted', " &
-                                    "reviewed_by = @uid, reviewed_at = NOW() " &
+                                    "UPDATE purchase_requests SET status = 'Converted' " &
                                     "WHERE request_id = @rid " &
-                                    "AND status IN ('Pending','Approved','Quoted')", conn, txn)
-                                    cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                                    "AND status IN ('Approved','Quoted')", conn, txn)
                                     cmd.Parameters.AddWithValue("@rid", ln.RequestId)
                                     cmd.ExecuteNonQuery()
                                 End Using
@@ -3086,7 +3084,7 @@ Public Class ProcurementPOPanelBuilder
                         Using cmd As New MySqlCommand(
                             "UPDATE purchase_requests pr " &
                             "JOIN po_items pi ON pi.request_id = pr.request_id " &
-                            "SET pr.status = 'Approved', pr.reviewed_by = NULL, pr.reviewed_at = NULL " &
+                            "SET pr.status = 'Approved' " &
                             "WHERE pi.po_id = @id AND pr.status = 'Converted'", conn, txn)
                             cmd.Parameters.AddWithValue("@id", poId)
                             cmd.ExecuteNonQuery()
@@ -3244,7 +3242,7 @@ Public Class ProcurementPOPanelBuilder
                     "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &
                     "JOIN products p ON pri.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
-                    "WHERE pr.status = 'Pending' " &
+                    "WHERE pr.status = 'Approved' " &
                     "ORDER BY pr.created_at DESC, pri.pr_item_id", conn)
                     Using rdr = cmd.ExecuteReader()
                         While rdr.Read()
@@ -3264,7 +3262,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load pending requests:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ex.Message,
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result

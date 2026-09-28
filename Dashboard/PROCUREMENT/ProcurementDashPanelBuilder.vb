@@ -127,9 +127,11 @@ Public Class ProcurementDashPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
 
-                ' ---- KPI 1: Pending requests ----
+                ' ---- KPI 1: Approved requests ----
+                ' Requests reach Procurement only once the admin approves them;
+                ' 'Pending' ones are still waiting for that decision.
                 Using cmd As New MySqlCommand(
-                    "SELECT COUNT(*) FROM purchase_requests WHERE status = 'Pending'", conn)
+                    "SELECT COUNT(*) FROM purchase_requests WHERE status = 'Approved'", conn)
                     kpiPending = Convert.ToInt32(cmd.ExecuteScalar())
                 End Using
 
@@ -172,7 +174,7 @@ Public Class ProcurementDashPanelBuilder
                     "FROM purchase_requests pr " &
                     "JOIN products p ON pr.product_id = p.product_id " &
                     "LEFT JOIN users u ON pr.requested_by = u.user_id " &
-                    "WHERE pr.status = 'Pending' " &
+                    "WHERE pr.status = 'Approved' " &
                     "ORDER BY pr.created_at DESC " &
                     "LIMIT 8", conn)
                     Using rdr = cmd.ExecuteReader()
@@ -258,7 +260,7 @@ Public Class ProcurementDashPanelBuilder
         Next
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        Dim card1 As Panel = MakeKpiCard("Pending Requests", kpiPending.ToString("N0"), WarningClr, "Awaiting review")
+        Dim card1 As Panel = MakeKpiCard("Approved Requests", kpiPending.ToString("N0"), WarningClr, "Approved by admin, ready to order")
         Dim card2 As Panel = MakeKpiCard("Active POs", kpiActivePOs.ToString("N0"), MintDark, "Not received or cancelled")
         Dim card3 As Panel = MakeKpiCard("Expected This Week", kpiExpectedWeek.ToString("N0"), MintPrimary, "Due within 7 days")
         Dim card4 As Panel = MakeKpiCard("Total PO Value", Peso & kpiTotalValue.ToString("N2"), MintDeep, "Active purchase orders")
@@ -280,7 +282,7 @@ Public Class ProcurementDashPanelBuilder
     End Function
 
     Private Shared Function SubtitleText() As String
-        Dim parts As String = kpiPending.ToString() & If(kpiPending = 1, " request", " requests") & " pending"
+        Dim parts As String = kpiPending.ToString() & If(kpiPending = 1, " approved request", " approved requests") & " to order"
         Return parts & "   " & ChrW(8226) & "   " & kpiActivePOs & " active " & If(kpiActivePOs = 1, "PO", "POs")
     End Function
 
@@ -311,7 +313,7 @@ Public Class ProcurementDashPanelBuilder
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
 
-        Dim header As Panel = BuildListHeader("Pending Requests",
+        Dim header As Panel = BuildListHeader("Approved Requests",
         If(pending.Count = 0, "Nothing waiting", pending.Count & If(pending.Count = 1, " request", " requests")))
         header.Dock = DockStyle.Top
         card.Controls.Add(header)
@@ -365,7 +367,7 @@ Public Class ProcurementDashPanelBuilder
         rowsHost.BringToFront()
 
         If pending.Count = 0 Then
-            rowsHost.Controls.Add(BuildEmptyRow("All caught up — no pending requests."))
+            rowsHost.Controls.Add(BuildEmptyRow("All caught up — no approved requests waiting."))
         Else
             Dim y As Integer = 4
             For Each req In pending

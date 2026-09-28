@@ -237,7 +237,7 @@ Public Class LogIn
         curY += 30
 
         Dim lblWelcomeSub As New Label With {
-            .Text = "Sign in to continue to your dashboard.",
+            .Text = "Log in to continue to your dashboard.",
             .Font = New Font("Segoe UI", 9.5F),
             .ForeColor = SubText,
             .AutoSize = True,
@@ -312,7 +312,7 @@ Public Class LogIn
 
         ' ===== SIGN IN BUTTON =====
         Dim btnLogin As New Button With {
-            .Text = "Sign in",
+            .Text = "Log In",
             .Size = New Size(fieldW, 46),
             .Location = New Point(padL, curY),
             .FlatStyle = FlatStyle.Flat,
@@ -487,7 +487,7 @@ Public Class LogIn
         If LoginThrottle.IsLockedOut(username) Then
             Dim wait = LoginThrottle.LockoutRemaining(username)
             Dim mins As Integer = CInt(Math.Ceiling(wait.TotalMinutes))
-            AppModal.Show("Too many failed sign-in attempts." & vbCrLf &
+            AppModal.Show("Too many failed log-in attempts." & vbCrLf &
                         "Please wait " & mins.ToString() & " minute" & If(mins = 1, "", "s") & " and try again.",
                         "Temporarily Locked", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             txtPass.Text = ""
@@ -564,7 +564,7 @@ Public Class LogIn
             Return
         Finally
             ' Runs on every exit path, including the early Returns above, so the
-            ' form can never be left stuck on "Signing in...".
+            ' form can never be left stuck on "Logging in...".
             SetBusy(False)
         End Try
 
@@ -572,7 +572,7 @@ Public Class LogIn
         ' it is replaced before the session goes anywhere. This sits AFTER the
         ' Try block on purpose: the reader and connection are closed by now, and
         ' SetBusy(False) has already run in the Finally, so the dialog does not
-        ' appear over a form still reading "Signing in...".
+        ' appear over a form still reading "Logging in...".
         '
         ' Nothing has been routed yet either - Session was populated, but no
         ' dashboard exists - so declining leaves the user on the login screen
@@ -597,7 +597,7 @@ Public Class LogIn
     Private Sub ShowLoginFailed(username As String)
         Dim nowLocked As Boolean = LoginThrottle.RecordFailure(username)
         If nowLocked Then
-            AppModal.Show("Too many failed sign-in attempts." & vbCrLf &
+            AppModal.Show("Too many failed log-in attempts." & vbCrLf &
                         "This account is locked for a few minutes.",
                         "Temporarily Locked", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         Else
@@ -619,7 +619,7 @@ Public Class LogIn
     Private Sub SetBusy(busy As Boolean)
         If _btnLogin IsNot Nothing Then
             _btnLogin.Enabled = Not busy
-            _btnLogin.Text = If(busy, "Signing in...", "Sign in")
+            _btnLogin.Text = If(busy, "Logging in...", "Log In")
             _btnLogin.Cursor = If(busy, Cursors.Default, Cursors.Hand)
             _btnLogin.Invalidate()
         End If

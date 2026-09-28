@@ -130,7 +130,7 @@ Public Module Mailer
                "  Username : " & username & vbCrLf &
                "  Role     : " & roleName & vbCrLf & vbCrLf &
                "Your administrator will give you your first password in person." & vbCrLf &
-               "Change it after you sign in: Settings > Change Password." & vbCrLf & vbCrLf &
+               "Change it after you log in: Settings > Change Password." & vbCrLf & vbCrLf &
                "If you were not expecting this account, tell the store administrator." & vbCrLf & vbCrLf &
                "- " & StoreSettings.StoreName
     End Function
