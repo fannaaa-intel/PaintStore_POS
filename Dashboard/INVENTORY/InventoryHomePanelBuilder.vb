@@ -307,8 +307,8 @@ Public Class InventoryHomePanelBuilder
 
         Dim statData() As (title As String, value As String, subtitle As String, badge As String, valColor As Color) = {
             ("Total Products", totalProducts.ToString(), "Active items", "Items", MintDark),
-            ("In Stock", inStockCount.ToString(), "Above reorder", "Good", MintGreen),
-            ("Low Stock", lowStockCount.ToString(), "Needs reorder", "Low", AccentYellow),
+            ("In Stock", inStockCount.ToString(), "Above restock level", "Good", MintGreen),
+            ("Low Stock", lowStockCount.ToString(), "Needs restock", "Low", AccentYellow),
             ("Out of Stock", outStockCount.ToString(), "Zero on hand", "Out", AccentRed)
         }
         Dim statTargets() As String = {"", "in", "low", "out"}
@@ -472,7 +472,7 @@ Public Class InventoryHomePanelBuilder
                     .AutoSize = True
                 }
                 Dim lblReorder As New Label With {
-                    .Text = "Min: " & capIt.reorder.ToString(),
+                    .Text = "Restock: " & capIt.reorder.ToString(),
                     .Font = New Font("Segoe UI", 9),
                     .ForeColor = SubText, .AutoSize = True
                 }
@@ -652,7 +652,7 @@ Public Class InventoryHomePanelBuilder
             ("Item List", "Browse all products", "inventory.png", "▦", Color.Transparent, "itemList"),
             ("Stock Adjustment", "Adjust quantities", "transfer.png", "⇄", Color.Transparent, "stockAdjustment"),
             ("Stock Levels", "View stock health", "bar-chart.png", "▤", Color.Transparent, "stockLevels"),
-            ("Low Stock Alerts", "Items to reorder", "notification.png", "!", Color.Transparent, "lowStock")
+            ("Low Stock Alerts", "Items to restock", "notification.png", "!", Color.Transparent, "lowStock")
         }
 
         Dim qaColIndex As Integer = 0

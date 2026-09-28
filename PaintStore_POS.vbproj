@@ -220,6 +220,9 @@
       <DependentUpon>InventoryStockAdjustmentPanelBuilder.vb</DependentUpon>
     </Compile>
     <Compile Include="Dashboard\INVENTORY\InventoryStockAdjustmentPanelBuilder.vb" />
+    <Compile Include="Dashboard\INVENTORY\InventoryMovements.vb" />
+    <Compile Include="Dashboard\INVENTORY\InventoryHistoryPanelBuilder.vb" />
+    <Compile Include="Dashboard\INVENTORY\InventoryReportsPanelBuilder.vb" />
     <Compile Include="Dashboard\POS\HomePanelBuilder.vb" />
     <Compile Include="Dashboard\POS\CashPanelBuilder.vb" />
     <Compile Include="Dashboard\PROCUREMENT\ProcurementDeliveryPanelBuilder.Designer.vb">

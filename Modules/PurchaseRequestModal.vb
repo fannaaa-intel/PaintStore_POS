@@ -315,7 +315,7 @@ Public Module PurchaseRequestModal
                 ' screen. This is the justification, not decoration.
                 Dim stockNote As String = ln.Sku & "   " & ChrW(8226) & "   stock " & ln.StockQty
                 If ln.ReorderLevel > 0 Then
-                    stockNote &= " / reorder at " & ln.ReorderLevel
+                    stockNote &= " / restock at " & ln.ReorderLevel
                 End If
                 Dim lblSku As New Label With {
                     .Text = stockNote, .Font = New Font("Segoe UI", 8.5F),
@@ -456,7 +456,7 @@ Public Module PurchaseRequestModal
                         }
 
                         Dim meta As String = hit.Sku & "   " & ChrW(8226) & "   stock " & hit.StockQty
-                        If hit.ReorderLevel > 0 Then meta &= " / reorder at " & hit.ReorderLevel
+                        If hit.ReorderLevel > 0 Then meta &= " / restock at " & hit.ReorderLevel
                         If hit.IsLow Then meta &= "   " & ChrW(8226) & "   LOW"
 
                         Dim lblMeta As New Label With {
@@ -804,7 +804,7 @@ Public Module PurchaseRequestModal
                             cmd.Parameters.AddWithValue("@qty", ln.Qty)
                             cmd.Parameters.AddWithValue("@note",
                                 If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
-                                   "Stock " & ln.StockQty & ", reorder level " & ln.ReorderLevel,
+                                   "Stock " & ln.StockQty & ", restock level " & ln.ReorderLevel,
                                    CObj(DBNull.Value)))
                             cmd.ExecuteNonQuery()
                         End Using

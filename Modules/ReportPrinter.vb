@@ -16,6 +16,10 @@ Public Class ReportPrinter
         StatusRow
         Spacer
         Signatures
+        ' Multi-column table rows; their columns come from ReportDoc.Columns.
+        TableHeader
+        TableRow
+        TableTotal
     End Enum
 
     Public Class Row
@@ -25,6 +29,21 @@ Public Class ReportPrinter
         Public Col2 As String = ""
         Public IsNegative As Boolean = False
         Public IsGood As Boolean = True
+        Public Cells As String() = {}
+    End Class
+
+    ' How a table column's values are shown, and stored in Excel.
+    Public Enum ColumnKind
+        Text            ' left-aligned, kept as text (names, SKUs, dates)
+        Number          ' right-aligned whole number
+        SignedNumber    ' right-aligned, with a + on increases (stock movements)
+        Money           ' right-aligned peso amount
+    End Enum
+
+    Public Class Column
+        Public Header As String = ""
+        Public Weight As Single = 1.0F       ' share of the page width
+        Public Kind As ColumnKind = ColumnKind.Text
     End Class
 
     Public Class ReportDoc
@@ -32,10 +51,17 @@ Public Class ReportPrinter
         Public PeriodLabel As String = ""
         Public PeriodValue As String = ""
         Public Rows As New List(Of Row)
+        ' Set for a tabular report; Nothing for the label / amount statements.
+        Public Columns As List(Of Column)
         ' Printed as a Prepared / Checked / Approved block after the last row.
         ' Left Nothing, the configured signatories are filled in on output.
         Public Signers As List(Of ReportSignatories.Signer)
     End Class
+
+    Public Shared Function Col(header As String, weight As Single,
+                               Optional kind As ColumnKind = ColumnKind.Text) As Column
+        Return New Column With {.Header = header, .Weight = weight, .Kind = kind}
+    End Function
 
     ' Appends the signature block once, as the final row, so it paginates like
     ' any other row and never lands in the page footer.
@@ -96,6 +122,19 @@ Public Class ReportPrinter
 
     Public Shared Function TwoColTotal(label As String, col1 As String, col2 As String) As Row
         Return New Row With {.Kind = RowKind.TwoColTotalRow, .Label = label, .Col1 = col1, .Col2 = col2}
+    End Function
+
+    ' Column captions are taken from ReportDoc.Columns.
+    Public Shared Function TableHeader() As Row
+        Return New Row With {.Kind = RowKind.TableHeader}
+    End Function
+
+    Public Shared Function TableRow(ParamArray cells As String()) As Row
+        Return New Row With {.Kind = RowKind.TableRow, .Cells = cells}
+    End Function
+
+    Public Shared Function TableTotal(ParamArray cells As String()) As Row
+        Return New Row With {.Kind = RowKind.TableTotal, .Cells = cells}
     End Function
 
     ' ── PALETTE — formal, grayscale only; no color accents ─────────────────
@@ -225,6 +264,16 @@ Public Class ReportPrinter
             End Using
             y += 20
 
+            ' A table that runs onto this page gets its column captions again,
+            ' so the figures on page 2 are not left without headings.
+            If _pageNo > 1 AndAlso _rowIdx < _doc.Rows.Count Then
+                Dim nextKind = _doc.Rows(_rowIdx).Kind
+                If nextKind = RowKind.TableRow OrElse nextKind = RowKind.TableTotal Then
+                    DrawTableHeader(g, bounds.Left, y, contentW)
+                    y += MeasureRowHeight(New Row With {.Kind = RowKind.TableHeader})
+                End If
+            End If
+
             While _rowIdx < _doc.Rows.Count
                 Dim row = _doc.Rows(_rowIdx)
                 Dim rowH As Integer = MeasureRowHeight(row)
@@ -315,6 +364,9 @@ Public Class ReportPrinter
                 Case RowKind.HighlightRow : Return 56
                 Case RowKind.StatusRow : Return 40
                 Case RowKind.Signatures : Return 150
+                Case RowKind.TableHeader : Return 28
+                Case RowKind.TableRow : Return 22
+                Case RowKind.TableTotal : Return 34
                 Case Else : Return 30
             End Select
         End Function
@@ -422,7 +474,64 @@ Public Class ReportPrinter
 
                 Case RowKind.Signatures
                     DrawSignatures(g, left, y + 36, w)
+
+                Case RowKind.TableHeader
+                    DrawTableHeader(g, left, y, w)
+
+                Case RowKind.TableRow
+                    Using f As New Font(ReportFont, 9.5F)
+                        DrawCells(g, row.Cells, f, InkBody, left, y, w)
+                    End Using
+                    Using rule As New Pen(RuleLight, 0.5F)
+                        g.DrawLine(rule, left, y + 19, right, y + 19)
+                    End Using
+
+                Case RowKind.TableTotal
+                    Using rule As New Pen(RuleMedium, 0.75F)
+                        g.DrawLine(rule, left, y + 2, right, y + 2)
+                    End Using
+                    Using f As New Font(ReportFont, 10, FontStyle.Bold)
+                        DrawCells(g, row.Cells, f, Ink, left, y + 8, w)
+                    End Using
             End Select
+        End Sub
+
+        Private Sub DrawTableHeader(g As Graphics, left As Integer, y As Integer, w As Integer)
+            If _doc.Columns Is Nothing Then Return
+            Dim captions As String() = _doc.Columns.Select(Function(c) c.Header.ToUpper()).ToArray()
+            Using f As New Font(ReportFont, 8.5F, FontStyle.Bold)
+                DrawCells(g, captions, f, InkMuted, left, y + 4, w)
+            End Using
+            Using rule As New Pen(RuleMedium, 0.75F)
+                g.DrawLine(rule, left, y + 22, left + w, y + 22)
+            End Using
+        End Sub
+
+        ' One line of table cells: each column gets its weighted share of the
+        ' width; text columns sit left, figures right, and anything too long
+        ' for its column ends in "..." instead of running into the next one.
+        Private Sub DrawCells(g As Graphics, cells As String(), f As Font, clr As Color,
+                              left As Integer, y As Integer, w As Integer)
+            Dim cols = _doc.Columns
+            If cols Is Nothing OrElse cols.Count = 0 OrElse cells Is Nothing Then Return
+            Dim totalW As Single = cols.Sum(Function(c) c.Weight)
+            If totalW <= 0 Then Return
+            Dim x As Single = left
+            Using br As New SolidBrush(clr)
+                For i As Integer = 0 To cols.Count - 1
+                    Dim colW As Single = w * cols(i).Weight / totalW
+                    Dim text As String = If(i < cells.Length, If(cells(i), ""), "")
+                    If text <> "" Then
+                        Using sf As New StringFormat(StringFormatFlags.NoWrap)
+                            sf.Trimming = StringTrimming.EllipsisCharacter
+                            sf.Alignment = If(cols(i).Kind = ColumnKind.Text,
+                                              StringAlignment.Near, StringAlignment.Far)
+                            g.DrawString(text, f, br, New RectangleF(x + 2, y, colW - 6, 20), sf)
+                        End Using
+                    End If
+                    x += colW
+                Next
+            End Using
         End Sub
 
         ' Prepared by / Checked by / Approved by, side by side: caption, room
@@ -483,7 +592,8 @@ Public Class ReportPrinter
             Dim lblTitle As New Label With {
                 .Text = title, .Font = New Font("Segoe UI Semibold", 13, FontStyle.Bold),
                 .ForeColor = Color.White, .AutoSize = True,
-                .Location = New Point(20, 16), .BackColor = Color.Transparent
+                .Location = New Point(20, 16), .BackColor = Color.Transparent,
+                .UseMnemonic = False
             }
             titleBar.Controls.Add(lblTitle)
 

@@ -643,10 +643,10 @@ Public Class HomePanelBuilder
         "Stock OK:", " All items are well-stocked.", "inventory", "stock"))
         ElseIf lowStockCount <= 3 Then
             smartNotifs.Add(("⚠", Color.FromArgb(255, 248, 215), AccentYellow,
-        "Stock alert:", $" {lowStockCount} item(s) need reordering.", "inventory", "stock"))
+        "Stock alert:", $" {lowStockCount} item(s) need restocking.", "inventory", "stock"))
         Else
             smartNotifs.Add(("⚠", Color.FromArgb(252, 230, 230), AccentRed,
-        "Urgent:", $" {lowStockCount} items below reorder level!", "inventory", "stock"))
+        "Urgent:", $" {lowStockCount} items below restock level!", "inventory", "stock"))
         End If
 
         ' 3. Sales — smarter messaging
@@ -759,9 +759,9 @@ Public Class HomePanelBuilder
                                 If newLowStock = 0 Then
                                     normL.Text = " All items are well-stocked."
                                 ElseIf newLowStock <= 3 Then
-                                    normL.Text = $" {newLowStock} item(s) need reordering."
+                                    normL.Text = $" {newLowStock} item(s) need restocking."
                                 Else
-                                    normL.Text = $" {newLowStock} items below reorder level!"
+                                    normL.Text = $" {newLowStock} items below restock level!"
                                 End If
                             End If
                         Next

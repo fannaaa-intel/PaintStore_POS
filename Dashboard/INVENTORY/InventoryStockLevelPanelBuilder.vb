@@ -621,8 +621,8 @@ Public Class InventoryStockLevelPanelBuilder
 
         Dim kpiDef() As (title As String, tier As String, clr As Color, sub1 As String, badge As String) = {
             ("Healthy", TierHealthy, HealthyClr, "Comfortable stock", "OK"),
-            ("Low", TierLow, LowClr, "Near reorder point", "Low"),
-            ("Critical", TierCritical, CriticalClr, "At or below reorder", "Crit"),
+            ("Low", TierLow, LowClr, "Near restock level", "Low"),
+            ("Critical", TierCritical, CriticalClr, "At or below restock level", "Crit"),
             ("Out of Stock", TierOut, OutClr, "Zero on hand", "Out")
         }
 
@@ -788,7 +788,7 @@ Public Class InventoryStockLevelPanelBuilder
         Dim titles() As (t As String, align As ContentAlignment) = {
             ("PRODUCT", ContentAlignment.MiddleLeft),
             ("CATEGORY", ContentAlignment.MiddleLeft),
-            ("QTY / REORDER", ContentAlignment.MiddleCenter),
+            ("QTY / RESTOCK", ContentAlignment.MiddleCenter),
             ("STOCK LEVEL", ContentAlignment.MiddleLeft),
             ("STATUS", ContentAlignment.MiddleCenter),
             ("LINE VALUE", ContentAlignment.MiddleRight),
@@ -1052,7 +1052,7 @@ Public Class InventoryStockLevelPanelBuilder
             .TextAlign = ContentAlignment.BottomCenter, .BackColor = Color.Transparent
         }
         Dim lblRe As New Label With {
-            .Text = "reorder " & it.ReorderLevel, .Font = New Font("Segoe UI", 8),
+            .Text = "restock " & it.ReorderLevel, .Font = New Font("Segoe UI", 8),
             .ForeColor = FaintText, .AutoSize = False, .Dock = DockStyle.Top, .Height = 16,
             .TextAlign = ContentAlignment.TopCenter, .BackColor = Color.Transparent
         }

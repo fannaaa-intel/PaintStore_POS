@@ -354,10 +354,10 @@ Public Class InventoryLowStockPanelBuilder
         ' FIX B: MakeKpiCard no longer takes a ByRef parameter that was never
         ' assigned internally. The label reference is returned via card.Tag and
         ' extracted by the caller — same mechanism, cleaner signature.
-        Dim card1 As Panel = MakeKpiCard("Items To Reorder", "0", MintDark, "Flagged below reorder")
+        Dim card1 As Panel = MakeKpiCard("Items To Restock", "0", MintDark, "Near or below restock level")
         lblKpiItems = CType(card1.Tag, Label)
 
-        Dim card2 As Panel = MakeKpiCard("Units Short", "0", CriticalClr, "Below reorder level")
+        Dim card2 As Panel = MakeKpiCard("Units Short", "0", CriticalClr, "Below restock level")
         lblKpiShort = CType(card2.Tag, Label)
 
         Dim card3 As Panel = MakeKpiCard("Estimated Value", Peso & "0.00", MintPrimary, "Suggested order " & ChrW(215) & " price")
@@ -406,7 +406,7 @@ Public Class InventoryLowStockPanelBuilder
     Private Shared Function SubtitleText() As String
         If items.Count = 0 Then Return "Everything is stocked " & ChrW(8226) & "   Purchase plan"
         Return items.Count.ToString() & If(items.Count = 1, " item needs", " items need") &
-               " reordering   " & ChrW(8226) & "   Purchase plan"
+               " restocking   " & ChrW(8226) & "   Purchase plan"
     End Function
 
     Private Shared Sub RefreshKpis()
@@ -448,7 +448,7 @@ Public Class InventoryLowStockPanelBuilder
 
                 Dim c = ColX(strip.Width)
                 Dim hCat As Label = ColCap("CATEGORY")
-                Dim hQty As Label = ColCap("QTY / REORDER")
+                Dim hQty As Label = ColCap("QTY / RESTOCK")
                 Dim hStatus As Label = ColCap("STATUS")
                 Dim hValue As Label = ColCap("LINE VALUE")
                 Dim hAction As Label = ColCap("ACTIONS")   ' was "REQUEST" — now holds both Request + Receive
@@ -545,7 +545,7 @@ Public Class InventoryLowStockPanelBuilder
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(28, 44), .BackColor = Color.Transparent
         }
         Dim sub_ As New Label With {
-            .Text = "No products are at or below their reorder level. Nothing to order right now.",
+            .Text = "No products are at or below their restock level. Nothing to order right now.",
             .Font = New Font("Segoe UI", 10.5F), .ForeColor = SubText, .AutoSize = True,
             .Location = New Point(30, 76), .BackColor = Color.Transparent
         }
@@ -594,7 +594,7 @@ Public Class InventoryLowStockPanelBuilder
             .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblReorder As New Label With {
-            .Text = "reorder " & it.ReorderLevel, .Font = New Font("Segoe UI", 8.5F),
+            .Text = "restock " & it.ReorderLevel, .Font = New Font("Segoe UI", 8.5F),
             .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
         }
         row.Controls.AddRange({lblQty, lblReorder})
@@ -822,7 +822,7 @@ Public Class InventoryLowStockPanelBuilder
     ' Builds a plain-text purchase list and copies it to the clipboard.
     Private Shared Sub CopyOrderSummary()
         If items.Count = 0 Then
-            AppModal.Show("There's nothing to reorder right now.", "Nothing To Copy",
+            AppModal.Show("There's nothing to restock right now.", "Nothing To Copy",
                           MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return
         End If

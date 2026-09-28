@@ -638,7 +638,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 .Anchor = AnchorStyles.Top Or AnchorStyles.Right
             }
             Dim lblReorder As New Label With {
-                .Text = "reorder at " & selected.ReorderLevel, .Font = New Font("Segoe UI", 9),
+                .Text = "restock at " & selected.ReorderLevel, .Font = New Font("Segoe UI", 9),
                 .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent,
                 .Anchor = AnchorStyles.Top Or AnchorStyles.Right
             }

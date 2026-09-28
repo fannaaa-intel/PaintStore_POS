@@ -398,8 +398,8 @@ Public Class InventoryItemListPanelBuilder
 
         Dim kpiDef() As (title As String, status As String, clr As Color, sub1 As String, badge As String) = {
             ("Total Products", "", MintDark, "Active items", "Items"),
-            ("In Stock", "in", MintGreen, "Above reorder", "Good"),
-            ("Low Stock", "low", AccentYellow, "Needs reorder", "Low"),
+            ("In Stock", "in", MintGreen, "Above restock level", "Good"),
+            ("Low Stock", "low", AccentYellow, "Needs restock", "Low"),
             ("Out of Stock", "out", AccentRed, "Zero on hand", "Out")
         }
 
@@ -855,7 +855,7 @@ Public Class InventoryItemListPanelBuilder
             .TextAlign = ContentAlignment.BottomCenter, .BackColor = Color.Transparent
         }
         Dim lblRe As New Label With {
-            .Text = "reorder " & it.ReorderLevel, .Font = New Font("Segoe UI", 8),
+            .Text = "restock " & it.ReorderLevel, .Font = New Font("Segoe UI", 8),
             .ForeColor = FaintText, .AutoSize = False, .Dock = DockStyle.Top, .Height = 16,
             .TextAlign = ContentAlignment.TopCenter, .BackColor = Color.Transparent
         }
@@ -1234,7 +1234,16 @@ Public Class InventoryItemListPanelBuilder
         Dim txtPrice = AddField(body, "Unit Price", rightX, y, 234)
         y += 80
         Dim numStock = AddNumeric(body, "Stock Qty", L, y, 234, 0, 1000000)
-        Dim numReorder = AddNumeric(body, "Reorder Level", rightX, y, 234, 0, 1000000)
+        Dim numReorder = AddNumeric(body, "Restock Level", rightX, y, 234, 0, 1000000)
+
+        ' Says what the number does, so it is not mistaken for an order quantity.
+        If Not viewOnly Then
+            body.Controls.Add(New Label With {
+                .Text = "Low-stock alert at or below this qty",
+                .Font = New Font("Segoe UI", 7.5F), .ForeColor = FaintText,
+                .AutoSize = True, .Location = New Point(rightX, y + 50), .BackColor = Color.Transparent
+            })
+        End If
 
         If editing AndAlso Not viewOnly Then
             numStock.Enabled = False
@@ -1247,8 +1256,8 @@ Public Class InventoryItemListPanelBuilder
         End If
 
         ' y + 48 is where the last input actually ends (22 label offset + control
-        ' height); the lock hint below it needs a further ~16.
-        y += If(editing AndAlso Not viewOnly, 48 + 22, 48)
+        ' height); the lock / restock hints below it need a further ~16.
+        y += If(Not viewOnly, 48 + 22, 48)
         body.Controls.Add(New Panel With {.Location = New Point(0, y), .Size = New Size(1, 16), .BackColor = Color.Transparent})
         y += 16
 
@@ -1315,7 +1324,7 @@ Public Class InventoryItemListPanelBuilder
 
         f.Controls.Add(footer)
         ' body is added last so the Fill region is measured after the Bottom dock
-        ' has claimed its 72px; otherwise the footer overlaps the Reorder Level row.
+        ' has claimed its 72px; otherwise the footer overlaps the Restock Level row.
         f.Controls.Add(body)
 
         Dim layoutFooter As Action =

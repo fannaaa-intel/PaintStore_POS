@@ -3,8 +3,8 @@ Imports System.IO
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
-'  Backup - whole-database backup and restore (Admin > Settings > Database
-'  Backup).
+'  Backup - whole-database backup and restore (Settings > Database Backup).
+'  Admin and Inventory can back up; only the Admin can restore.
 '
 '  A backup is a plain .sql file written by mysqldump: it can be restored
 '  from this screen, or pasted into phpMyAdmin if this PC is lost.
@@ -107,6 +107,10 @@ Public Module Backup
     ' safety backup's location either way (when one was made).
     Public Function RestoreFrom(sqlFile As String, ByRef safetyPath As String) As String
         safetyPath = ""
+        ' Backing up is open to Inventory staff; replacing every record is not.
+        If Not String.Equals(Session.CurrentRole, "Admin", StringComparison.OrdinalIgnoreCase) Then
+            Return "Only the Admin can restore a backup."
+        End If
         Dim mysql As String = FindTool("mysql.exe")
         If mysql = "" Then Return "mysql.exe was not found in C:\xampp\mysql\bin. Is XAMPP installed?"
         If Not File.Exists(sqlFile) Then Return "That backup file no longer exists."

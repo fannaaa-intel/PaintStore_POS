@@ -14,6 +14,8 @@ Imports MySql.Data.MySqlClient
 '                  My Activity   this user's own history - never anyone else's
 '    Cashier       Payment Methods - view, and REQUEST an add/removal
 '    Accountant    Report Signatories - Checked by / Approved by on reports
+'    Inventory     Database Backup - back up only; restoring stays Admin-only
+'                  because it replaces every sale, user and stock record
 '    Admin         Store & Payments, Payment Requests (approve / reject),
 '                  Report Signatories, Database Backup, Recycle Bin
 '
@@ -83,6 +85,19 @@ Public Class SettingsPanelBuilder
         End Get
     End Property
 
+    Private Shared ReadOnly Property IsInventory As Boolean
+        Get
+            Return String.Equals(Session.CurrentRole, "Inventory", StringComparison.OrdinalIgnoreCase)
+        End Get
+    End Property
+
+    ' Who may make a backup. Restoring is checked separately (IsAdmin).
+    Private Shared ReadOnly Property CanBackUp As Boolean
+        Get
+            Return IsAdmin OrElse IsInventory
+        End Get
+    End Property
+
     Private Shared Function TabsForRole() As List(Of (tab As SettingsTab, caption As String))
         Dim tabs As New List(Of (SettingsTab, String)) From {
             (SettingsTab.Account, "My Account"),
@@ -90,6 +105,7 @@ Public Class SettingsPanelBuilder
         }
         If IsCashier Then tabs.Add((SettingsTab.Payments, "Payment Methods"))
         If IsAccountant Then tabs.Add((SettingsTab.Signatories, "Report Signatories"))
+        If IsInventory Then tabs.Add((SettingsTab.Backup, "Database Backup"))
         If IsAdmin Then
             tabs.Add((SettingsTab.Store, "Store & Payments"))
             If PaymentRequests.HasTable() Then
@@ -180,7 +196,7 @@ Public Class SettingsPanelBuilder
                     AdminStoreSettingsPanelBuilder.LoadStoreSettings(inner)
                 End If
             Case SettingsTab.PayRequests : If IsAdmin Then BuildPayRequestsTab()
-            Case SettingsTab.Backup : If IsAdmin Then BuildBackupTab()
+            Case SettingsTab.Backup : If CanBackUp Then BuildBackupTab()
             Case SettingsTab.RecycleBin : If IsAdmin Then BuildRecycleTab()
             Case SettingsTab.Signatories : If IsAdmin OrElse IsAccountant Then BuildSignatoriesTab()
         End Select
@@ -590,17 +606,21 @@ Public Class SettingsPanelBuilder
     End Function
 
     ' =========================================================================
-    '  DATABASE BACKUP (admin)
+    '  DATABASE BACKUP (admin: back up + restore; inventory: back up only)
     ' =========================================================================
     Private Shared Sub BuildBackupTab()
+        Dim canRestore As Boolean = IsAdmin
         Dim card As Panel = NewCard("Database Backup", 0)
         Dim wrap As Panel = FillCardWrap(card, topBand:=150)
 
         Dim lblInfo As New Label With {
             .Text = "A backup is a full copy of the database (.sql file). Keep copies on a USB " &
                     "drive or another computer, not only on this PC." & vbCrLf &
-                    "Restoring replaces ALL current data with the backup. A safety copy of the " &
-                    "current data is made automatically first.",
+                    If(canRestore,
+                       "Restoring replaces ALL current data with the backup. A safety copy of the " &
+                       "current data is made automatically first.",
+                       "To restore a backup, ask the Admin. Restoring replaces ALL current data, " &
+                       "so only the Admin can do it."),
             .Font = New Font("Segoe UI", 9.5F), .ForeColor = SubText, .AutoSize = False,
             .Location = New Point(24, 52), .Size = New Size(800, 44), .BackColor = Color.Transparent}
         Dim lblFolder As New Label With {
@@ -611,6 +631,7 @@ Public Class SettingsPanelBuilder
         Dim btnFolder As Button = MakeButton("Change Folder", False, 130)
         Dim btnOpen As Button = MakeButton("Open Folder", False, 120)
         Dim btnFile As Button = MakeButton("Restore from File...", False, 170)
+        btnFile.Visible = canRestore
         card.Controls.AddRange({lblInfo, lblFolder, btnNow, btnFolder, btnOpen, btnFile})
         AddHandler card.Resize,
             Sub()
@@ -619,7 +640,7 @@ Public Class SettingsPanelBuilder
                 btnFolder.Location = New Point(btnNow.Left - btnFolder.Width - 8, 104)
                 btnOpen.Location = New Point(btnFolder.Left - btnOpen.Width - 8, 104)
                 btnFile.Location = New Point(btnOpen.Left - btnFile.Width - 8, 104)
-                lblFolder.Width = Math.Max(120, btnFile.Left - 36)
+                lblFolder.Width = Math.Max(120, If(canRestore, btnFile.Left, btnOpen.Left) - 36)
             End Sub
 
         AddHandler btnNow.Click,
@@ -670,16 +691,26 @@ Public Class SettingsPanelBuilder
         End If
         For Each fi In files
             Dim f As FileInfo = fi
-            Dim btn As Button = MakeButton("Restore", False, 90)
-            AddHandler btn.Click, Sub() DoRestore(f.FullName)
+            Dim actions As Button() = {}
+            If canRestore Then
+                Dim btn As Button = MakeButton("Restore", False, 90)
+                AddHandler btn.Click, Sub() DoRestore(f.FullName)
+                actions = {btn}
+            End If
             list.Controls.Add(TwoLineRow(f.Name,
                 f.LastWriteTime.ToString("MMM d, yyyy  h:mm tt") & "   -   " & SizeText(f.Length),
-                {btn}))
+                actions))
         Next
         _host.Controls.Add(wrap)
     End Sub
 
     Private Shared Sub DoRestore(file As String)
+        ' The buttons are only built for the Admin; this guards any other path.
+        If Not IsAdmin Then
+            AppModal.Show("Only the Admin can restore a backup.", "Restore Database",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
         If AppModal.Show("Restore the database from:" & vbCrLf & Path.GetFileName(file) & vbCrLf & vbCrLf &
                          "ALL current data (sales, stock, users...) will be replaced by this backup. " &
                          "Anything recorded after it was made will be lost." & vbCrLf & vbCrLf &

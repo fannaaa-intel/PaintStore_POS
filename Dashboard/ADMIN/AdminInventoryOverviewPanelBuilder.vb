@@ -586,7 +586,7 @@ Public Class AdminInventoryOverviewPanelBuilder
         Dim c1 = MakeSummaryCard("Total Products", MintDark,
                                  _totProducts.ToString("N0"), "active items", _lblTotProducts)
         Dim c2 = MakeSummaryCard("Low Stock", AccentAmber,
-                                 _lowCount.ToString("N0"), "at or near reorder level", _lblLow)
+                                 _lowCount.ToString("N0"), "at or near restock level", _lblLow)
         Dim c3 = MakeSummaryCard("Out of Stock", AccentRed,
                                  _outCount.ToString("N0"), "nothing on hand", _lblOut)
         Dim c4 = MakeSummaryCard("Stock Value", MintDeep,
@@ -653,7 +653,7 @@ Public Class AdminInventoryOverviewPanelBuilder
             MakeColLabel("CATEGORY / SUPPLIER", New Point(0, 13)),
             MakeColLabel("PRICE", New Point(0, 13)),
             MakeColLabel("STOCK", New Point(0, 13)),
-            MakeColLabel("REORDER", New Point(0, 13)),
+            MakeColLabel("RESTOCK", New Point(0, 13)),
             MakeColLabel("STATUS", New Point(0, 13))
         }
         hdr.Controls.AddRange(labels)

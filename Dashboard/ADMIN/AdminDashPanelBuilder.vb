@@ -703,7 +703,7 @@ Public Class AdminDashPanelBuilder
         grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim t1 = MakeHealthTile("Low Stock", _lowStock,
-                                "items at or near reorder level", TintRed, "inventory")
+                                "items at or near restock level", TintRed, "inventory")
         Dim t2 = MakeHealthTile("Pending POs", _pendingPos,
                                 "purchase orders awaiting receipt", TintAmber, "procurement")
         Dim t3 = MakeHealthTile("Open Shifts", _openShifts,

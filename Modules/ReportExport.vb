@@ -138,6 +138,10 @@ Public Module ReportExport
     Private Const XF_SIG_CAPTION As Integer = 14
     Private Const XF_SIG_NAME As Integer = 15
     Private Const XF_SIG_POS As Integer = 16
+    Private Const XF_NUMBER As Integer = 17
+    Private Const XF_TOTAL_NUMBER As Integer = 18
+    Private Const XF_SIGNED As Integer = 19
+    Private Const XF_TOTAL_SIGNED As Integer = 20
 
     Private Class SheetWriter
         Public ReadOnly Rows As New StringBuilder()
@@ -191,31 +195,75 @@ Public Module ReportExport
         End Sub
     End Class
 
+    ' Column letter for a 0-based index: 0 -> A, 25 -> Z, 26 -> AA.
+    Private Function ColLetter(index As Integer) As String
+        Dim s As String = ""
+        Dim n As Integer = index + 1
+        While n > 0
+            Dim m As Integer = (n - 1) Mod 26
+            s = ChrW(65 + m) & s
+            n = (n - 1) \ 26
+        End While
+        Return s
+    End Function
+
+    ' One table line. Figures become real numbers (so they can be summed and
+    ' re-totalled in Excel); a cell that is not a figure, such as "—", stays text.
+    Private Sub WriteTableCells(w As SheetWriter, r As StringBuilder,
+                                cols As List(Of ReportPrinter.Column), cells As String(),
+                                isTotal As Boolean)
+        For i As Integer = 0 To cols.Count - 1
+            Dim c As String = ColLetter(i)
+            Dim v As String = If(cells IsNot Nothing AndAlso i < cells.Length, If(cells(i), ""), "")
+            Select Case cols(i).Kind
+                Case ReportPrinter.ColumnKind.Money
+                    w.Money(r, c, v, If(isTotal, XF_TOTAL_MONEY, XF_MONEY), If(isTotal, XF_TOTAL, XF_TEXT_R))
+                Case ReportPrinter.ColumnKind.Number, ReportPrinter.ColumnKind.SignedNumber
+                    Dim d As Decimal
+                    If TryParseMoney(v, d) Then
+                        Dim signed As Boolean = cols(i).Kind = ReportPrinter.ColumnKind.SignedNumber
+                        w.Number(r, c, d, If(isTotal, If(signed, XF_TOTAL_SIGNED, XF_TOTAL_NUMBER),
+                                                      If(signed, XF_SIGNED, XF_NUMBER)))
+                    Else
+                        w.Text(r, c, v, If(isTotal, XF_TOTAL, XF_TEXT_R))
+                    End If
+                Case Else
+                    w.Text(r, c, v, If(isTotal, XF_TOTAL, XF_TEXT))
+            End Select
+        Next
+    End Sub
+
     Public Sub SaveExcel(doc As ReportPrinter.ReportDoc, path As String,
                          companyName As String, preparedBy As String)
         ReportPrinter.EnsureSignatures(doc)
         Dim w As New SheetWriter()
 
+        ' A tabular report spreads over as many columns as it has; the
+        ' statements use three (label, and up to two figures).
+        Dim cols As List(Of ReportPrinter.Column) = doc.Columns
+        Dim isTable As Boolean = cols IsNot Nothing AndAlso cols.Count > 0
+        Dim lastCol As String = If(isTable, ColLetter(Math.Max(2, cols.Count - 1)), "C")
+
         ' ── Letterhead ────────────────────────────────────────────────────────
         Dim r As StringBuilder = w.NewRow(24)
         w.Text(r, "A", companyName, XF_COMPANY) : w.Text(r, "B", "", XF_COMPANY) : w.Text(r, "C", "", XF_COMPANY)
-        w.EndRow(r) : w.MergeRow("A", "C")
+        w.EndRow(r) : w.MergeRow("A", lastCol)
 
         r = w.NewRow(20)
         w.Text(r, "A", doc.Title.ToUpperInvariant(), XF_TITLE) : w.Text(r, "B", "", XF_TITLE) : w.Text(r, "C", "", XF_TITLE)
-        w.EndRow(r) : w.MergeRow("A", "C")
+        w.EndRow(r) : w.MergeRow("A", lastCol)
 
         If doc.PeriodValue <> "" Then
             r = w.NewRow()
             w.Text(r, "A", doc.PeriodLabel & ":  " & doc.PeriodValue, XF_META)
-            w.EndRow(r) : w.MergeRow("A", "C")
+            w.EndRow(r) : w.MergeRow("A", lastCol)
         End If
 
         r = w.NewRow()
         Dim gen As String = "Generated " & DateTime.Now.ToString("MMM d, yyyy h:mm tt")
         If preparedBy <> "" Then gen &= " by " & preparedBy
         w.Text(r, "A", gen, XF_META)
-        w.EndRow(r) : w.MergeRow("A", "C")
+        w.EndRow(r) : w.MergeRow("A", lastCol)
 
         r = w.NewRow() : w.EndRow(r)
 
@@ -241,7 +289,7 @@ Public Module ReportExport
                 Case ReportPrinter.RowKind.DataRow
                     r = w.NewRow()
                     w.Text(r, "A", row.Label, XF_TEXT)
-                    w.Money(r, "C", row.Col1, XF_MONEY, XF_TEXT_R)
+                    w.Money(r, lastCol, row.Col1, XF_MONEY, XF_TEXT_R)
                     w.EndRow(r)
 
                 Case ReportPrinter.RowKind.TwoColRow
@@ -255,7 +303,7 @@ Public Module ReportExport
                     r = w.NewRow()
                     w.Text(r, "A", row.Label, XF_TOTAL)
                     w.Text(r, "B", "", XF_TOTAL)
-                    w.Money(r, "C", row.Col1, XF_TOTAL_MONEY, XF_TOTAL)
+                    w.Money(r, lastCol, row.Col1, XF_TOTAL_MONEY, XF_TOTAL)
                     w.EndRow(r)
 
                 Case ReportPrinter.RowKind.TwoColTotalRow
@@ -269,8 +317,25 @@ Public Module ReportExport
                     r = w.NewRow(22)
                     w.Text(r, "A", row.Label, XF_HIGH)
                     w.Text(r, "B", "", XF_HIGH)
-                    w.Money(r, "C", row.Col1, XF_HIGH_MONEY, XF_HIGH)
+                    w.Money(r, lastCol, row.Col1, XF_HIGH_MONEY, XF_HIGH)
                     w.EndRow(r)
+
+                Case ReportPrinter.RowKind.TableHeader
+                    If isTable Then
+                        r = w.NewRow()
+                        For i As Integer = 0 To cols.Count - 1
+                            w.Text(r, ColLetter(i), cols(i).Header.ToUpperInvariant(),
+                                   If(cols(i).Kind = ReportPrinter.ColumnKind.Text, XF_HEAD, XF_HEAD_R))
+                        Next
+                        w.EndRow(r)
+                    End If
+
+                Case ReportPrinter.RowKind.TableRow, ReportPrinter.RowKind.TableTotal
+                    If isTable Then
+                        r = w.NewRow()
+                        WriteTableCells(w, r, cols, row.Cells, row.Kind = ReportPrinter.RowKind.TableTotal)
+                        w.EndRow(r)
+                    End If
 
                 Case ReportPrinter.RowKind.StatusRow
                     r = w.NewRow()
@@ -287,11 +352,24 @@ Public Module ReportExport
         sheet.Append("<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>")
         sheet.Append("<worksheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" ")
         sheet.Append("xmlns:r=""http://schemas.openxmlformats.org/officeDocument/2006/relationships"">")
+        ' A wide table is printed scaled to one page across.
+        If isTable Then sheet.Append("<sheetPr><pageSetUpPr fitToPage=""1""/></sheetPr>")
         sheet.Append("<sheetViews><sheetView workbookViewId=""0""/></sheetViews>")
         sheet.Append("<sheetFormatPr defaultRowHeight=""16""/>")
         sheet.Append("<cols>")
-        sheet.Append("<col min=""1"" max=""1"" width=""46"" customWidth=""1""/>")
-        sheet.Append("<col min=""2"" max=""3"" width=""26"" customWidth=""1""/>")
+        If isTable Then
+            ' Each column's share of about 120 characters, never narrower than 10.
+            Dim totalW As Single = Math.Max(0.01F, cols.Sum(Function(c) c.Weight))
+            For i As Integer = 0 To cols.Count - 1
+                Dim chars As Double = Math.Max(10.0, Math.Round(120.0 * cols(i).Weight / totalW, 1))
+                sheet.Append("<col min=""").Append(i + 1).Append(""" max=""").Append(i + 1).
+                      Append(""" width=""").Append(chars.ToString(CultureInfo.InvariantCulture)).
+                      Append(""" customWidth=""1""/>")
+            Next
+        Else
+            sheet.Append("<col min=""1"" max=""1"" width=""46"" customWidth=""1""/>")
+            sheet.Append("<col min=""2"" max=""3"" width=""26"" customWidth=""1""/>")
+        End If
         sheet.Append("</cols>")
         sheet.Append("<sheetData>").Append(w.Rows).Append("</sheetData>")
         If w.Merges.Count > 0 Then
@@ -302,7 +380,9 @@ Public Module ReportExport
             sheet.Append("</mergeCells>")
         End If
         sheet.Append("<pageMargins left=""0.7"" right=""0.7"" top=""0.75"" bottom=""0.75"" header=""0.3"" footer=""0.3""/>")
-        sheet.Append("<pageSetup paperSize=""1"" orientation=""portrait""/>")
+        sheet.Append(If(isTable,
+                        "<pageSetup paperSize=""1"" orientation=""portrait"" fitToWidth=""1"" fitToHeight=""0""/>",
+                        "<pageSetup paperSize=""1"" orientation=""portrait""/>"))
         sheet.Append("</worksheet>")
 
         Dim safeSheetName As String = SecurityElement.Escape(MakeSheetName(doc.Title))
@@ -394,6 +474,7 @@ Public Module ReportExport
     Private Function BuildStyles() As String
         Dim peso As String = "&quot;" & ChrW(8369) & "&quot;"
         Dim fmt As String = peso & "#,##0.00;(" & peso & "#,##0.00);" & peso & "0.00"
+        Dim signedFmt As String = "+#,##0;-#,##0;0"
 
         ' xf(font, border, numFmt, align)
         Dim xf = Function(font As Integer, border As Integer, numFmt As Integer, align As String) As String
@@ -425,12 +506,17 @@ Public Module ReportExport
             xf(0, 0, 0, "right"),         ' 13 text, right
             xf(3, 0, 0, "left"),          ' 14 signature caption
             xf(1, 2, 0, "center"),        ' 15 signature name over a rule
-            xf(3, 0, 0, "center")         ' 16 signature position
+            xf(3, 0, 0, "center"),        ' 16 signature position
+            xf(0, 0, 3, "right"),         ' 17 whole number (built-in #,##0)
+            xf(1, 2, 3, "right"),         ' 18 total whole number
+            xf(0, 0, 165, "right"),       ' 19 signed whole number (+5 / -3)
+            xf(1, 2, 165, "right")        ' 20 total signed whole number
         }
 
         Return "<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>" &
             "<styleSheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"">" &
-            "<numFmts count=""1""><numFmt numFmtId=""164"" formatCode=""" & fmt & """/></numFmts>" &
+            "<numFmts count=""2""><numFmt numFmtId=""164"" formatCode=""" & fmt & """/>" &
+            "<numFmt numFmtId=""165"" formatCode=""" & signedFmt & """/></numFmts>" &
             "<fonts count=""5"">" &
             "<font><sz val=""11""/><name val=""Calibri""/></font>" &
             "<font><b/><sz val=""11""/><name val=""Calibri""/></font>" &

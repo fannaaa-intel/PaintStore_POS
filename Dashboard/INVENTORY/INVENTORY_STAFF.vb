@@ -13,6 +13,9 @@ Public Class INVENTORY_STAFF
 
     Private MainContainer As Panel
     Private _btnSettings As Button          ' pinned above Logout
+    Private _btnHistory As Button           ' Transaction History
+    Private _btnReports As Button           ' Reports
+    Private _navButtons As Button()         ' the MENU list, top to bottom
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     Private Const NAV_OPEN_WIDTH As Integer = 260
@@ -171,17 +174,21 @@ Public Class INVENTORY_STAFF
         }
         Nav.Controls.Add(lblMenu)
 
-        Dim navButtons() As Button = {home, itemList, stockLevels, stockAdjustment, putAway, lowStock}
-        Dim topPos As Integer = 128
-        For Each btn In navButtons
+        ' Built in code (like Settings) rather than in the designer file.
+        _btnHistory = New Button With {.Name = "history", .Text = "Transaction History"}
+        _btnReports = New Button With {.Name = "reports", .Text = "Reports"}
+        AddHandler _btnHistory.Click, AddressOf history_Click
+        AddHandler _btnReports.Click, AddressOf reports_Click
+
+        _navButtons = {home, itemList, stockLevels, stockAdjustment, putAway, lowStock, _btnHistory, _btnReports}
+        For Each btn In _navButtons
             StyleButton(btn)
             btn.Left = 14
-            btn.Top = topPos
             btn.Width = Nav.Width - 28
             btn.Height = 48
-            RoundButton(btn, 12)
-            topPos += 58
         Next
+        LayoutNavButtons()
+        AddHandler Nav.Resize, Sub() LayoutNavButtons()
 
 
         ' ── SETTINGS ────────────────────────────────────────────────────────────
@@ -230,6 +237,28 @@ Public Class INVENTORY_STAFF
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
         btnHamburger.BringToFront()
+    End Sub
+
+    ' Stacks the MENU buttons from y=128. Eight buttons at the usual 58px pitch
+    ' end at y=592, which on a 768px-high screen runs under Settings (pinned at
+    ' Nav.Height - 168); there the pitch tightens so the list always ends above it.
+    Private Sub LayoutNavButtons()
+        If _navButtons Is Nothing OrElse _navButtons.Length = 0 Then Return
+        Const TOP_Y As Integer = 128
+        Dim bottomLimit As Integer = Nav.Height - 168 - 10
+        Dim pitch As Integer = 58
+        If TOP_Y + _navButtons.Length * pitch > bottomLimit Then
+            pitch = Math.Max(40, (bottomLimit - TOP_Y) \ _navButtons.Length)
+        End If
+        Dim h As Integer = Math.Min(48, pitch - 6)
+        For i As Integer = 0 To _navButtons.Length - 1
+            Dim btn As Button = _navButtons(i)
+            btn.Top = TOP_Y + i * pitch
+            If btn.Height <> h OrElse btn.Region Is Nothing Then
+                btn.Height = h
+                RoundButton(btn, 12)
+            End If
+        Next
     End Sub
 
     ' ===========================================================================
@@ -341,6 +370,8 @@ Public Class INVENTORY_STAFF
             Case "stockadjustment" : iconPath = "transfer.png"
             Case "putaway" : iconPath = "add.png"
             Case "lowstock" : iconPath = "notification.png"
+            Case "history" : iconPath = "time-past.png"
+            Case "reports" : iconPath = "newspaper.png"
             Case "logout" : iconPath = "logout.png"
             Case "account" : iconPath = "user.png"
             Case "settings" : iconPath = "settings.png"
@@ -574,6 +605,26 @@ Public Class INVENTORY_STAFF
         MainContainer.SuspendLayout()
         MainContainer.Controls.Clear()
         InventoryLowStockPanelBuilder.LoadLowStock(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub history_Click(sender As Object, e As EventArgs)
+        SetActive(_btnHistory)
+        InventoryHomePanelBuilder.StopTimer()
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        InventoryHistoryPanelBuilder.LoadHistory(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub reports_Click(sender As Object, e As EventArgs)
+        SetActive(_btnReports)
+        InventoryHomePanelBuilder.StopTimer()
+        MainContainer.SuspendLayout()
+        MainContainer.Controls.Clear()
+        InventoryReportsPanelBuilder.LoadReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub
