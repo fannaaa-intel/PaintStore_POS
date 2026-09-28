@@ -6,6 +6,17 @@ Public Module ActivityLog
                       Optional entityType As String = Nothing,
                       Optional entityId As Integer? = Nothing,
                       Optional details As String = Nothing)
+        RecordAs(Session.CurrentUserId, action, entityType, entityId, details)
+    End Sub
+
+    ' Same, but for an explicit user. Work finishing on a background thread
+    ' (a queued email) cannot trust Session: the person may have logged out,
+    ' or someone else signed in, by the time it completes.
+    Public Sub RecordAs(userId As Integer,
+                        action As String,
+                        Optional entityType As String = Nothing,
+                        Optional entityId As Integer? = Nothing,
+                        Optional details As String = Nothing)
         Try
             Using cn = Db.GetConnection()
                 cn.Open()
@@ -13,7 +24,7 @@ Public Module ActivityLog
                           "VALUES (@uid, @action, @etype, @eid, @details)"
                 Using cmd As New MySqlCommand(sql, cn)
                     cmd.Parameters.AddWithValue("@uid",
-                        If(Session.CurrentUserId = 0, CObj(DBNull.Value), CObj(Session.CurrentUserId)))
+                        If(userId = 0, CObj(DBNull.Value), CObj(userId)))
                     cmd.Parameters.AddWithValue("@action", action)
                     cmd.Parameters.AddWithValue("@etype",
                         If(String.IsNullOrEmpty(entityType), CObj(DBNull.Value), CObj(entityType)))

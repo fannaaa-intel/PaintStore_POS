@@ -908,7 +908,8 @@ Public Class ProcurementQuotationsPanelBuilder
 
     Private Shared Sub DeleteQuote(q As QuoteRow)
         If AppModal.Show("Delete draft quotation " & q.QuotationNo & "?" & Environment.NewLine &
-                         "This cannot be undone.", "Delete Quotation",
+                         If(Archive.HasArchiveTable(), "An admin can restore it from the Recycle Bin.",
+                            "This cannot be undone."), "Delete Quotation",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
@@ -919,6 +920,8 @@ Public Class ProcurementQuotationsPanelBuilder
                 Using tx = conn.BeginTransaction()
                     ' quotation_items cascades on delete, but the source request
                     ' must be handed back so it can be quoted again.
+                    Archive.Capture(conn, tx, "quotations", "quotation_id", q.QuotationId, q.QuotationNo,
+                                    children:={("quotation_items", "quotation_id")})
                     Using cmd As New MySqlCommand(
                         "DELETE FROM quotations WHERE quotation_id = @id AND status = 'Draft'", conn, tx)
                         cmd.Parameters.AddWithValue("@id", q.QuotationId)

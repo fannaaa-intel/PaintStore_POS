@@ -1600,9 +1600,17 @@ Public Class InventoryItemListPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand("UPDATE products SET is_active = 0 WHERE product_id = @id", conn)
-                    cmd.Parameters.AddWithValue("@id", productId)
-                    cmd.ExecuteNonQuery()
+                ' Products are only switched off (sales point at them), so the
+                ' Recycle Bin copy is a soft one: restoring turns it back on.
+                Using tx = conn.BeginTransaction()
+                    Archive.Capture(conn, tx, "products", "product_id", productId,
+                                    If(String.IsNullOrEmpty(productName), "Product #" & productId.ToString(), productName),
+                                    soft:=True)
+                    Using cmd As New MySqlCommand("UPDATE products SET is_active = 0 WHERE product_id = @id", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", productId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    tx.Commit()
                 End Using
             End Using
             ActivityLog.Record("PRODUCT_DELETE", "product", productId, productName)

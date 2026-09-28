@@ -3,3 +3,5 @@ obj/
 bin/
 objcheckbuild*/
 Tests/bin/
+mail.config
+Backups/

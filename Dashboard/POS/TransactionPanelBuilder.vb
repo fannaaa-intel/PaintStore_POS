@@ -55,14 +55,14 @@ Public Class TransactionPanelBuilder
         Public Name As String
         Public Sku As String
         Public Subtitle As String
-        Public Category As String      ' mapped tab category
+        Public Category As String      ' category name exactly as in the categories table
         Public UnitPrice As Decimal
         Public Stock As Integer
         Public Swatch As Color
         Public ImagePath As String     ' for non-paint items (photo)
         Public ReadOnly Property IsPaint As Boolean
             Get
-                Return String.Equals(Category, "Paint", StringComparison.OrdinalIgnoreCase)
+                Return String.Equals(MapToTabCategory(Category), "Paint", StringComparison.OrdinalIgnoreCase)
             End Get
         End Property
     End Class
@@ -83,7 +83,8 @@ Public Class TransactionPanelBuilder
     ' Rebuilding the whole catalog on every keystroke made typing stutter on a
     ' large product list; the timer coalesces a burst of keys into one render.
     Private Shared _searchDebounce As Timer
-    Private Shared _activeCategory As String = "All"
+    Private Const ALL_CATEGORIES As String = "All categories"
+    Private Shared _activeCategory As String = ALL_CATEGORIES
 
     Private Shared _catalogHost As FlowLayoutPanel
     Private Shared _cartHost As FlowLayoutPanel
@@ -142,6 +143,9 @@ Public Class TransactionPanelBuilder
     Private Shared _lastSaleTendered As Decimal = 0
     Private Shared _lastSaleChange As Decimal = 0
     Private Shared _lastSaleRef As String = ""
+    Private Shared _lastSaleChequeAcct As String = ""
+    ' Account name typed at the cheque prompt, carried to CompleteSale.
+    Private Shared _chequeAccountName As String = ""
     Private Shared _lastSaleLines As New List(Of (name As String, qty As Integer, price As Decimal, line As Decimal))
 
     ' =========================================================================
@@ -158,7 +162,7 @@ Public Class TransactionPanelBuilder
         _discountIdNo = ""
         _discountIdName = ""
         _searchText = ""
-        _activeCategory = "All"
+        _activeCategory = ALL_CATEGORIES
 
         _lastSaleNo = ""
         _lastSaleAt = DateTime.MinValue
@@ -175,6 +179,8 @@ Public Class TransactionPanelBuilder
         _lastSaleTendered = 0
         _lastSaleChange = 0
         _lastSaleRef = ""
+        _lastSaleChequeAcct = ""
+        _chequeAccountName = ""
         _lastSaleLines.Clear()
 
         ImageCache.ClearAndDispose(_thumbCache, Nothing)
@@ -265,7 +271,7 @@ Public Class TransactionPanelBuilder
                                 .Name = rdr.GetString("name"),
                                 .Sku = If(rdr.IsDBNull(rdr.GetOrdinal("sku")), "", rdr.GetString("sku")),
                                 .Subtitle = sub_,
-                                .Category = MapToTabCategory(catName),
+                                .Category = catName,
                                 .UnitPrice = rdr.GetDecimal("unit_price"),
                                 .Stock = rdr.GetInt32("stock_qty"),
                                 .ImagePath = imagePath,
@@ -680,64 +686,38 @@ Public Class TransactionPanelBuilder
         searchBox.Controls.Add(txtSearch)
         searchRow.Controls.Add(searchBox)
 
-        ' Tabs
+        ' Category filter. A dropdown filled from the categories table, so a
+        ' category the admin adds shows up here without a code change - the
+        ' old fixed tabs (All / Paint / Tools / Thinner / Accessories) never
+        ' showed a new one, and its products were only findable by search.
         Dim tabHost As New Panel With {.Dock = DockStyle.Fill, .BackColor = TileBg, .Padding = New Padding(10, 6, 10, 4)}
-        Dim cats() As String = {"All", "Paint", "Tools", "Thinner", "Accessories"}
-        Dim tabBtns(cats.Length - 1) As Button
-        Dim selIdx As Integer = Array.IndexOf(cats, _activeCategory) : If selIdx < 0 Then selIdx = 0
-        For i = 0 To cats.Length - 1
-            Dim idx = i
-            Dim b As New Button With {.Text = cats(i), .FlatStyle = FlatStyle.Flat, .Cursor = Cursors.Hand,
-                .Margin = New Padding(0), .Height = 30, .Font = New Font("Segoe UI", 9.5F)}
-            b.FlatAppearance.BorderSize = 0
-            Dim style As Action(Of Boolean, Boolean) =
-                Sub(active As Boolean, hover As Boolean)
-                    If active Then
-                        b.BackColor = MintPrimary : b.ForeColor = Color.White : b.Font = New Font("Segoe UI Semibold", 9.5F)
-                    ElseIf hover Then
-                        b.BackColor = Color.FromArgb(210, 240, 235) : b.ForeColor = MintDark : b.Font = New Font("Segoe UI", 9.5F)
-                    Else
-                        b.BackColor = Color.FromArgb(220, 235, 232) : b.ForeColor = SubText : b.Font = New Font("Segoe UI", 9.5F)
-                    End If
-                    b.Invalidate()
-                End Sub
-            AddHandler b.Paint,
-                Sub(s, e)
-                    Dim bb = CType(s, Button) : Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
-                    Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
-                    Using br As New SolidBrush(bb.BackColor) : g.FillRoundedRectangle(br, rect, 8) : End Using
-                    TextRenderer.DrawText(g, bb.Text, bb.Font, bb.ClientRectangle, bb.ForeColor,
-                        TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-                End Sub
-            AddHandler b.MouseEnter, Sub() If idx <> selIdx Then style(False, True)
-            AddHandler b.MouseLeave, Sub() If idx <> selIdx Then style(False, False)
-            AddHandler b.Click,
-                Sub()
-                    Dim prev = selIdx : selIdx = idx
-                    If tabBtns(prev) IsNot Nothing Then
-                        tabBtns(prev).BackColor = Color.FromArgb(220, 235, 232)
-                        tabBtns(prev).ForeColor = SubText
-                        tabBtns(prev).Font = New Font("Segoe UI", 9.5F)
-                        tabBtns(prev).Invalidate()
-                    End If
-                    style(True, False)
-                    _activeCategory = cats(idx)
-                    RenderCatalog()
-                End Sub
-            style(i = selIdx, False)
-            tabBtns(i) = b
-            tabHost.Controls.Add(b)
+        Dim lblCat As New Label With {
+            .Text = "Category", .Font = New Font("Segoe UI Semibold", 9.5F),
+            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent}
+        Dim cboCat As New ComboBox With {
+            .DropDownStyle = ComboBoxStyle.DropDownList, .FlatStyle = FlatStyle.Flat,
+            .Font = New Font("Segoe UI", 10.0F), .Cursor = Cursors.Hand,
+            .IntegralHeight = False, .MaxDropDownItems = 12}
+        cboCat.Items.Add(ALL_CATEGORIES)
+        For Each c In LoadCategoryNames()
+            cboCat.Items.Add(c)
         Next
+        Dim selIdx As Integer = cboCat.Items.IndexOf(_activeCategory)
+        cboCat.SelectedIndex = If(selIdx < 0, 0, selIdx)
+        _activeCategory = cboCat.SelectedItem.ToString()
+        AddHandler cboCat.SelectedIndexChanged,
+            Sub()
+                _activeCategory = If(cboCat.SelectedItem, ALL_CATEGORIES).ToString()
+                RenderCatalog()
+            End Sub
+        tabHost.Controls.Add(lblCat)
+        tabHost.Controls.Add(cboCat)
         AddHandler tabHost.Resize,
             Sub()
-                Dim gap = 6
-                Dim total = tabHost.Width - tabHost.Padding.Horizontal
-                Dim bw = (total - gap * (tabBtns.Length - 1)) \ tabBtns.Length
-                Dim xx = tabHost.Padding.Left
-                For Each tb In tabBtns
-                    tb.SetBounds(xx, tabHost.Padding.Top, bw, tabHost.Height - tabHost.Padding.Vertical)
-                    xx += bw + gap
-                Next
+                lblCat.Location = New Point(tabHost.Padding.Left + 2, (tabHost.Height - lblCat.Height) \ 2)
+                cboCat.Left = lblCat.Right + 10
+                cboCat.Width = Math.Max(120, tabHost.Width - cboCat.Left - tabHost.Padding.Right)
+                cboCat.Top = (tabHost.Height - cboCat.Height) \ 2
             End Sub
 
         ' List
@@ -778,7 +758,8 @@ Public Class TransactionPanelBuilder
         Dim shown As Integer = 0
         Dim n As Integer = 1
         For Each p In _allProducts
-            If _activeCategory <> "All" AndAlso p.Category <> _activeCategory Then Continue For
+            If _activeCategory <> ALL_CATEGORIES AndAlso
+               Not String.Equals(p.Category, _activeCategory, StringComparison.OrdinalIgnoreCase) Then Continue For
             ' SKU is matched as well as the name so a scanned or typed barcode
             ' finds the item -- searching name-only made the scanner useless.
             If q <> "" AndAlso Not (p.Name.ToLower().Contains(q) OrElse
@@ -1480,13 +1461,23 @@ Public Class TransactionPanelBuilder
                 ' treated as physical cash. On an un-migrated database the type
                 ' falls back to the (gcash-aware) name guess inside PaymentMethods.
                 Dim payIsCash As Boolean = False
+                Dim payIsCheque As Boolean = False
                 For Each pm In _payMethodList
                     If String.Equals(pm.Name, dbName, StringComparison.OrdinalIgnoreCase) Then
                         payIsCash = pm.IsCash
+                        payIsCheque = pm.IsCheque
                         Exit For
                     End If
                 Next
-                If payIsCash Then
+                _chequeAccountName = ""
+                If payIsCheque Then
+                    ' Cheque: the account it is drawn on and its number. The
+                    ' number goes in reference_no like any other reference.
+                    Dim chq As ChequePromptModal.Result = ChequePromptModal.Show(dbName, grand)
+                    If chq Is Nothing Then Return   ' cashier cancelled
+                    refNo = chq.ChequeNo
+                    _chequeAccountName = chq.AccountName
+                ElseIf payIsCash Then
                     Do
                         Dim entry As String = PaymentPromptModal.Show("Cash", grand, PaymentPromptModal.FieldKind.AmountTendered, grand.ToString("0.00"))
                         If entry Is Nothing Then Return   ' cashier cancelled
@@ -1517,7 +1508,7 @@ Public Class TransactionPanelBuilder
                     Loop
                 End If
 
-                If ConfirmSaleModal.Show(dbName, grand, tendered, changeDue, refNo) Then
+                If ConfirmSaleModal.Show(dbName, grand, tendered, changeDue, refNo, _chequeAccountName) Then
                     CompleteSale(grand, tendered, changeDue, refNo)
                 End If
             End Sub
@@ -1677,6 +1668,29 @@ Public Class TransactionPanelBuilder
         End Select
     End Function
 
+    ' Every category in the categories table, for the catalog dropdown.
+    Private Shared Function LoadCategoryNames() As List(Of String)
+        Dim names As New List(Of String)
+        Try
+            Using conn As MySqlConnection = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand("SELECT name FROM categories ORDER BY name", conn)
+                    Using rdr = cmd.ExecuteReader()
+                        While rdr.Read()
+                            names.Add(rdr.GetString(0))
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch
+            ' Without the list the dropdown still offers "All categories", so
+            ' the till keeps selling.
+        End Try
+        Return names
+    End Function
+
+    ' Normalises spelling variants ("Paints", "tool") - used to decide which
+    ' products draw as a colour swatch.
     Private Shared Function MapToTabCategory(dbCategory As String) As String
         Select Case dbCategory.Trim().ToLower()
             Case "paint", "paints" : Return "Paint"
@@ -1763,10 +1777,14 @@ Public Class TransactionPanelBuilder
                             End Using
                         Next
 
+                        Dim withCheque As Boolean = _chequeAccountName <> "" AndAlso PaymentMethods.SupportsCheque()
                         Using cmd As New MySqlCommand(
                             "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
-                            "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due, reference_no) " &
-                        "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, @vat, @total, @tendered, @change, @ref)", conn, txn)
+                            "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due, reference_no" &
+                            If(withCheque, ", cheque_account_name", "") & ") " &
+                        "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, @vat, @total, @tendered, @change, @ref" &
+                            If(withCheque, ", @chqacct", "") & ")", conn, txn)
+                            If withCheque Then cmd.Parameters.AddWithValue("@chqacct", _chequeAccountName)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                             cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
@@ -1856,6 +1874,8 @@ Public Class TransactionPanelBuilder
             _lastSaleTendered = amountTendered
             _lastSaleChange = changeDue
             _lastSaleRef = referenceNo
+            _lastSaleChequeAcct = _chequeAccountName
+            _chequeAccountName = ""
             _lastSaleLines = items.Select(Function(it) (it.pname, it.qty, it.price, it.lineTotal)).ToList()
 
             SaleCompleteModal.Show(_payMethodName, saleNo, items.Count, total)
@@ -2146,6 +2166,7 @@ Public Class TransactionPanelBuilder
                     End Try
                 End Using
             End Using
+            ActivityLog.Record("SALE_HOLD", "sale", Nothing, saleNo)
             AppModal.Show("Sale held as " & saleNo & "." & Environment.NewLine & "Use RETRIEVE to bring it back.",
                 "Sale Held", MessageBoxButtons.OK, MessageBoxIcon.Information)
             _cart = New Dictionary(Of Integer, CartLine)
@@ -2278,6 +2299,7 @@ Public Class TransactionPanelBuilder
         _discountAmount = heldDiscount
         _discountType = If(heldDiscount > 0, heldDiscountType, "None")
 
+        ActivityLog.Record("SALE_RETRIEVE", "sale", CInt(chosenId), "Brought a held sale back to the cart")
         LoadTransaction(_mainContainer)
 
         If shortfalls.Count > 0 Then
@@ -2478,7 +2500,10 @@ Public Class TransactionPanelBuilder
                 lines.Add(New ReceiptPrinter.RLine("Tendered", "P " & _lastSaleTendered.ToString("N2")))
                 lines.Add(New ReceiptPrinter.RLine("Change", "P " & _lastSaleChange.ToString("N2")))
             End If
-            If Not String.IsNullOrEmpty(_lastSaleRef) Then
+            If Not String.IsNullOrEmpty(_lastSaleChequeAcct) Then
+                lines.Add(New ReceiptPrinter.RLine("Account Name:", _lastSaleChequeAcct))
+                lines.Add(New ReceiptPrinter.RLine("Check No:", _lastSaleRef))
+            ElseIf Not String.IsNullOrEmpty(_lastSaleRef) Then
                 lines.Add(New ReceiptPrinter.RLine("Ref No:", _lastSaleRef))
             End If
         Else

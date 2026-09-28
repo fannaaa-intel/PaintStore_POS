@@ -12,6 +12,7 @@ Public Class ADMIN_STAFF
     Private NavHover As Color = Color.FromArgb(238, 248, 244)
 
     Private MainContainer As Panel
+    Private _btnSettings As Button          ' pinned above Logout
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     ' 310 not 260: the longest label ("Procurement Overview") needs 178px of text
@@ -176,7 +177,10 @@ Public Class ADMIN_STAFF
         dashHome.Text = "Dashboard"
         userMgmt.Text = "User Management"
         roles.Text = "Roles"
+        ' Store Settings moved into Settings > Store & Payments.
         storeSettings.Text = "Store Settings"
+        storeSettings.Visible = False
+        Nav.Controls.Remove(storeSettings)
         ' Field stays "products"; the screen manages the category list, since
         ' product CRUD already lives in Inventory ▸ Item List.
         products.Text = "Categories"
@@ -204,7 +208,7 @@ Public Class ADMIN_STAFF
 
         Dim sections = {
             ("OVERVIEW", New Button() {dashHome}),
-            ("ADMINISTRATION", New Button() {userMgmt, roles, storeSettings}),
+            ("ADMINISTRATION", New Button() {userMgmt, roles}),
             ("MASTER DATA", New Button() {products, suppliers, colorFormulas}),
             ("OVERSIGHT", New Button() {salesOverview, inventoryOverview,
                                         procurementOverview, financialReports, activityLogNav})
@@ -237,35 +241,35 @@ Public Class ADMIN_STAFF
             .Left = 0, .Top = y, .Width = 1, .Height = 12, .BackColor = NavBg
         })
 
-        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
-        ' Self-service password change, so a member of staff does not have to ask
-        ' an admin for a reset just to choose a new password. Built in code rather
-        ' than the designer because every dashboard needs the same one, and it
-        ' sits just above Logout where account-level actions belong.
-        Dim btnAccount As New Button With {
-            .Name = "account",
-            .Text = "My Account"
+        ' ── SETTINGS ────────────────────────────────────────────────────────────
+        ' Replaces the old My Account button. Settings holds My Account (with
+        ' Change Password) and My Activity for everyone, plus role-specific tabs
+        ' (see SettingsPanelBuilder). Pinned just above Logout on every dashboard.
+        _btnSettings = New Button With {
+            .Name = "settings",
+            .Text = "Settings"
         }
-        Nav.Controls.Add(btnAccount)
-        StyleButton(btnAccount)
+        Nav.Controls.Add(_btnSettings)
+        StyleButton(_btnSettings)
         ' StyleButton parents nav buttons into the scrolling NavList. This one
         ' is pinned to the rail beside Logout instead, so it goes back to Nav
         ' the same way Logout does - otherwise Nav.Height - 168 would position
         ' it against the wrong container and scroll away with the menu.
-        btnAccount.Parent = Nav
-        btnAccount.Left = 14
-        btnAccount.Width = Nav.Width - 28
-        btnAccount.Height = 48
-        btnAccount.Top = Nav.Height - 168
-        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
-        RoundButton(btnAccount, 12)
-        AddHandler btnAccount.Click,
+        _btnSettings.Parent = Nav
+        _btnSettings.Left = 14
+        _btnSettings.Width = Nav.Width - 28
+        _btnSettings.Height = 48
+        _btnSettings.Top = Nav.Height - 168
+        _btnSettings.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(_btnSettings, 12)
+        AddHandler _btnSettings.Click,
             Sub()
-                ' Deliberately does NOT change the active nav highlight: this
-                ' opens a dialog, it does not navigate away from the panel the
-                ' user is looking at.
-                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
-                                                    Session.CurrentFullName)
+                SetActive(_btnSettings)
+                MainContainer.SuspendLayout()
+                MainContainer.Controls.Clear()
+                SettingsPanelBuilder.LoadSettings(MainContainer)
+                MainContainer.ResumeLayout()
+                MainContainer.Refresh()
             End Sub
 
         StyleButton(logout)
@@ -456,6 +460,7 @@ Public Class ADMIN_STAFF
             Case "financialreports" : iconPath = "coins.png"
             Case "activitylognav" : iconPath = "recent.png"
             Case "account" : iconPath = "user.png"
+            Case "settings" : iconPath = "settings.png"
             Case "logout" : iconPath = "logout.png"
         End Select
 
@@ -497,7 +502,10 @@ Public Class ADMIN_STAFF
     End Sub
 
     Private Sub SetActive(btn As Button)
-        For Each ctrl As Control In NavList.Controls
+        ' Settings is pinned on Nav itself, not in NavList, so it is reset
+        ' alongside the list's buttons.
+        Dim pinned As Control() = If(_btnSettings Is Nothing, New Control() {}, New Control() {_btnSettings})
+        For Each ctrl As Control In NavList.Controls.Cast(Of Control)().Concat(pinned)
             If TypeOf ctrl Is Button AndAlso ctrl IsNot logout Then
                 ctrl.BackColor = NavBg
                 ctrl.ForeColor = Color.FromArgb(90, 105, 102)

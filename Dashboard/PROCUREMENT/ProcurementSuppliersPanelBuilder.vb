@@ -1909,15 +1909,21 @@ Public Class ProcurementSuppliersPanelBuilder
 
                 Dim confirm = AppModal.Show(
                     "Are you sure you want to delete """ & sup.Name & """?" &
-                    Environment.NewLine & "This cannot be undone.",
+                    Environment.NewLine &
+                    If(Archive.HasArchiveTable(), "An admin can restore it from the Recycle Bin.",
+                       "This cannot be undone."),
                     "Delete Supplier", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
                 If confirm = DialogResult.Yes Then
                     Try
                         Using conn = Db.GetConnection()
                             conn.Open()
-                            Using cmd As New MySqlCommand("DELETE FROM suppliers WHERE supplier_id = @id", conn)
-                                cmd.Parameters.AddWithValue("@id", supplierId)
-                                cmd.ExecuteNonQuery()
+                            Using tx = conn.BeginTransaction()
+                                Archive.Capture(conn, tx, "suppliers", "supplier_id", supplierId, sup.Name)
+                                Using cmd As New MySqlCommand("DELETE FROM suppliers WHERE supplier_id = @id", conn, tx)
+                                    cmd.Parameters.AddWithValue("@id", supplierId)
+                                    cmd.ExecuteNonQuery()
+                                End Using
+                                tx.Commit()
                             End Using
                         End Using
                         ' Deleting master data is irreversible, so the name is

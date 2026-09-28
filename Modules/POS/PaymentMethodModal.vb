@@ -7,10 +7,15 @@ Imports System.Windows.Forms
 '
 '  Replaces the single-line name-only prompt. A method affects both the till
 '  and the accountant reports, so the form collects what decides how it
-'  behaves: Name, Type (Cash / Reference), Active, and an optional Note.
+'  behaves: Name, Type (Cash / Reference / Cheque), Active, and an optional Note.
+'  Cheque is offered only once migrations.sql section 17 has run.
 '
 '  Returns a filled Result on OK, or Nothing if cancelled. Name validation
 '  stays with the caller, which owns the DB.
+'
+'  forRequest:=True is the cashier's version (Settings > Payment Methods >
+'  Request New Method): no Active box - the admin decides that by approving -
+'  and a required "why" that the admin reads before approving or rejecting.
 ' =============================================================================
 Public Module PaymentMethodModal
 
@@ -34,9 +39,11 @@ Public Module PaymentMethodModal
         Public Type As String = "Reference"
         Public IsActive As Boolean = True
         Public Note As String = ""
+        Public Reason As String = ""     ' forRequest only
     End Class
 
-    Private Function RoundedPath(rect As Rectangle, radius As Integer) As GraphicsPath
+    ' Friend: ChequePromptModal draws with the same field, button and corners.
+    Friend Function RoundedPath(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim path As New GraphicsPath()
         Dim d As Integer = radius * 2
         path.AddArc(rect.X, rect.Y, d, d, 180, 90)
@@ -50,7 +57,7 @@ Public Module PaymentMethodModal
     ' isEdit changes only the title. showTypeActive is False on an un-migrated
     ' database - then only the name is asked, like the old prompt.
     Public Function Prompt(isEdit As Boolean, showTypeActive As Boolean,
-                           seed As Result) As Result
+                           seed As Result, Optional forRequest As Boolean = False) As Result
 
         If seed Is Nothing Then seed = New Result()
         Dim out As Result = Nothing
@@ -65,7 +72,8 @@ Public Module PaymentMethodModal
         }
 
         Dim lblTitle As New Label With {
-            .Text = If(isEdit, "Edit payment method", "Add payment method"),
+            .Text = If(forRequest, "Request a new payment method",
+                       If(isEdit, "Edit payment method", "Add payment method")),
             .Font = New Font("Segoe UI Semibold", 12.0F),
             .ForeColor = TitleClr,
             .AutoSize = False,
@@ -84,8 +92,11 @@ Public Module PaymentMethodModal
 
         Dim rbCash As RadioButton = Nothing
         Dim rbRef As RadioButton = Nothing
+        Dim rbCheque As RadioButton = Nothing
         Dim chkActive As CheckBox = Nothing
         Dim txtNote As TextBox = Nothing
+        Dim txtReason As TextBox = Nothing
+        Dim lblErr As Label = Nothing
 
         f.Controls.Add(lblName)
 
@@ -106,31 +117,70 @@ Public Module PaymentMethodModal
                 .AutoSize = True, .Location = New Point(PAD + 4, rbCash.Bottom + 4),
                 .BackColor = Color.Transparent
             }
+            Dim lastType As Control = rbRef
+            If PaymentMethods.SupportsCheque() Then
+                rbCheque = New RadioButton With {
+                    .Text = "Cheque  -  asks for account name and check number",
+                    .Font = New Font("Segoe UI", 9.5F), .ForeColor = TitleClr,
+                    .AutoSize = True, .Location = New Point(PAD + 4, rbRef.Bottom + 4),
+                    .BackColor = Color.Transparent
+                }
+                f.Controls.Add(rbCheque)
+                lastType = rbCheque
+            End If
             rbCash.Checked = String.Equals(seed.Type, "Cash", StringComparison.OrdinalIgnoreCase)
-            rbRef.Checked = Not rbCash.Checked
+            If rbCheque IsNot Nothing Then
+                rbCheque.Checked = String.Equals(seed.Type, "Cheque", StringComparison.OrdinalIgnoreCase)
+            End If
+            rbRef.Checked = Not rbCash.Checked AndAlso Not (rbCheque IsNot Nothing AndAlso rbCheque.Checked)
 
-            chkActive = New CheckBox With {
-                .Text = "Active  -  shown to the cashier at checkout",
-                .Font = New Font("Segoe UI", 9.5F), .ForeColor = TitleClr,
-                .AutoSize = True, .Location = New Point(PAD + 4, rbRef.Bottom + 10),
-                .Checked = seed.IsActive, .BackColor = Color.Transparent
-            }
+            Dim noteTop As Integer
+            If forRequest Then
+                noteTop = lastType.Bottom + 12
+            Else
+                chkActive = New CheckBox With {
+                    .Text = "Active  -  shown to the cashier at checkout",
+                    .Font = New Font("Segoe UI", 9.5F), .ForeColor = TitleClr,
+                    .AutoSize = True, .Location = New Point(PAD + 4, lastType.Bottom + 10),
+                    .Checked = seed.IsActive, .BackColor = Color.Transparent
+                }
+                f.Controls.Add(chkActive)
+                noteTop = chkActive.Bottom + 12
+            End If
 
             Dim lblNote As New Label With {
-                .Text = "Note (optional)", .Font = New Font("Segoe UI Semibold", 9.0F), .ForeColor = SubText,
-                .AutoSize = True, .Location = New Point(PAD, chkActive.Bottom + 12), .BackColor = Color.Transparent
+                .Text = If(forRequest, "Note for the till (optional, e.g. the GCash number)", "Note (optional)"),
+                .Font = New Font("Segoe UI Semibold", 9.0F), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(PAD, noteTop), .BackColor = Color.Transparent
             }
             txtNote = MakeField(PAD, lblNote.Bottom + 4, CARD_W - PAD * 2, f, seed.Note)
 
-            f.Controls.AddRange({lblType, rbCash, rbRef, chkActive, lblNote})
+            f.Controls.AddRange({lblType, rbCash, rbRef, lblNote})
             y = txtNote.Parent.Bottom + 12
+        End If
+
+        If forRequest Then
+            Dim lblReason As New Label With {
+                .Text = "Why is it needed? *", .Font = New Font("Segoe UI Semibold", 9.0F), .ForeColor = SubText,
+                .AutoSize = True, .Location = New Point(PAD, y), .BackColor = Color.Transparent
+            }
+            f.Controls.Add(lblReason)
+            txtReason = MakeField(PAD, lblReason.Bottom + 4, CARD_W - PAD * 2, f, seed.Reason)
+            txtReason.MaxLength = 255
+            lblErr = New Label With {
+                .Text = "", .Font = New Font("Segoe UI", 9.0F), .ForeColor = Color.FromArgb(200, 65, 65),
+                .AutoSize = False, .Size = New Size(CARD_W - PAD * 2, 20),
+                .Location = New Point(PAD, txtReason.Parent.Bottom + 6), .BackColor = Color.Transparent
+            }
+            f.Controls.Add(lblErr)
+            y = lblErr.Bottom + 4
         End If
 
         Dim dividerY As Integer = y + 6
         Dim btnY As Integer = dividerY + 16
         Dim cardH As Integer = btnY + 38 + PAD
 
-        Dim btnOk As Button = MakeButton("Save", True,
+        Dim btnOk As Button = MakeButton(If(forRequest, "Send request", "Save"), True,
             New Point(CARD_W - PAD - 110, btnY), New Size(110, 38))
         Dim btnCancel As Button = MakeButton("Cancel", False,
             New Point(CARD_W - PAD - 110 - 8 - 96, btnY), New Size(96, 38))
@@ -139,8 +189,22 @@ Public Module PaymentMethodModal
         AddHandler btnOk.Click,
             Sub()
                 Dim r As New Result With {.Name = txtName.Text.Trim()}
+                If forRequest Then
+                    If r.Name = "" OrElse r.Name.Length > 30 Then
+                        lblErr.Text = "Enter a name of 1 to 30 characters."
+                        txtName.Focus()
+                        Return
+                    End If
+                    If txtReason.Text.Trim() = "" Then
+                        lblErr.Text = "Say why it is needed - the administrator reads this."
+                        txtReason.Focus()
+                        Return
+                    End If
+                    r.Reason = txtReason.Text.Trim()
+                End If
                 If showTypeActive Then
-                    r.Type = If(rbCash IsNot Nothing AndAlso rbCash.Checked, "Cash", "Reference")
+                    r.Type = If(rbCash IsNot Nothing AndAlso rbCash.Checked, "Cash",
+                             If(rbCheque IsNot Nothing AndAlso rbCheque.Checked, "Cheque", "Reference"))
                     r.IsActive = chkActive Is Nothing OrElse chkActive.Checked
                     r.Note = If(txtNote Is Nothing, "", txtNote.Text.Trim())
                 End If
@@ -193,8 +257,8 @@ Public Module PaymentMethodModal
         Return out
     End Function
 
-    Private Function MakeField(x As Integer, y As Integer, w As Integer, host As Form,
-                               seedText As String) As TextBox
+    Friend Function MakeField(x As Integer, y As Integer, w As Integer, host As Form,
+                              seedText As String) As TextBox
         Dim pnl As New Panel With {.Location = New Point(x, y), .Size = New Size(w, FIELD_H), .BackColor = FieldBg}
         Dim txt As New TextBox With {
             .BorderStyle = BorderStyle.None, .Font = New Font("Segoe UI", 10.5F),
@@ -219,7 +283,7 @@ Public Module PaymentMethodModal
         Return txt
     End Function
 
-    Private Function MakeButton(caption As String, isPrimary As Boolean, loc As Point, size As Size) As Button
+    Friend Function MakeButton(caption As String, isPrimary As Boolean, loc As Point, size As Size) As Button
         Dim b As New Button With {
             .Text = caption, .Size = size, .Location = loc, .FlatStyle = FlatStyle.Flat,
             .Font = New Font("Segoe UI Semibold", 9.5F), .Cursor = Cursors.Hand,

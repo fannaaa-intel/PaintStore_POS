@@ -19,7 +19,8 @@ Public Module ConfirmSaleModal
                          grandTotal As Decimal,
                          tendered As Decimal,
                          changeDue As Decimal,
-                         referenceNo As String) As Boolean
+                         referenceNo As String,
+                         Optional chequeAccountName As String = "") As Boolean
 
         Dim normalClr As Color, darkClr As Color, title As String
         Select Case methodName
@@ -76,6 +77,9 @@ Public Module ConfirmSaleModal
         If methodName = "Cash" Then
             rows.Add(("Amount Tendered", "P " & tendered.ToString("N2"), False))
             rows.Add(("Change Due", "P " & changeDue.ToString("N2"), True))
+        ElseIf Not String.IsNullOrEmpty(chequeAccountName) Then
+            rows.Add(("Account Name", chequeAccountName, False))
+            rows.Add(("Check No.", referenceNo, False))
         Else
             rows.Add(("Reference No.", referenceNo, False))
         End If

@@ -921,13 +921,16 @@ Public Class AdminActivityLogPanelBuilder
     ' Every action the system records, in the words a person would use. The
     ' fallback below only catches genuinely new actions; anything listed here
     ' reads properly in both the table and the Action filter.
-    Private Shared Function FriendlyAction(action As String) As String
+    ' Public: Settings > My Activity shows the same wording for a user's own log.
+    Public Shared Function FriendlyAction(action As String) As String
         Select Case action.ToUpper()
             ' ── Access ──────────────────────────────────────────────────
             Case "LOGIN" : Return "Signed in"
             Case "LOGOUT" : Return "Signed out"
             Case "PASSWORD_CHANGE" : Return "Changed own password"
+            Case "PASSWORD_OTP_SENT" : Return "Sent password code"
             Case "ADMIN_REAUTH_FAILED" : Return "Failed admin re-auth"
+            Case "EMAIL_FAILED" : Return "Email not sent"
 
             ' ── Accounts ────────────────────────────────────────────────
             Case "USER_CREATE" : Return "Created user"
@@ -945,6 +948,8 @@ Public Class AdminActivityLogPanelBuilder
             Case "SALE_COMPLETE" : Return "Completed sale"
             Case "SALE_VOID" : Return "Voided sale"
             Case "SALE_REFUND" : Return "Refunded sale"
+            Case "SALE_HOLD" : Return "Held sale"
+            Case "SALE_RETRIEVE" : Return "Retrieved held sale"
 
             ' ── Cash drawer ─────────────────────────────────────────────
             Case "SHIFT_OPEN" : Return "Opened drawer"
@@ -994,6 +999,10 @@ Public Class AdminActivityLogPanelBuilder
             Case "PAYMETHOD_DELETE" : Return "Deleted payment method"
             Case "SETTINGS_UPDATE" : Return "Updated store settings"
             Case "REPORT_EXPORT" : Return "Exported report"
+            Case "BACKUP_CREATE" : Return "Backed up database"
+            Case "BACKUP_RESTORE" : Return "Restored database"
+            Case "ARCHIVE_RESTORE" : Return "Restored from Recycle Bin"
+            Case "ARCHIVE_PURGE" : Return "Deleted forever from Recycle Bin"
 
             Case Else
                 ' Genuinely new action: "SOME_THING" -> "Some thing"

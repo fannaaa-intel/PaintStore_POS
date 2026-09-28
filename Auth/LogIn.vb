@@ -3,8 +3,6 @@ Imports MySql.Data.MySqlClient
 Public Class LogIn
     Inherits System.Windows.Forms.Form
 
-    Private _signUpForm As SignUp
-
     ' ===== COLORS =====
     Private MintDark As Color = Theme.Dark
     Private MintPrimary As Color = Theme.Primary
@@ -66,14 +64,6 @@ Public Class LogIn
             End Sub
 
         BuildLoginCard()
-
-        ' Pre-build SignUp so first navigation is instant.
-        ' CreateControl forces the handle and runs OnLoad -- which is where
-        ' SignUp builds its whole card -- WITHOUT making the window visible.
-        ' Show/Hide did the same warm-up but flashed the sign-up screen on
-        ' screen for a frame every time the app started.
-        _signUpForm = New SignUp(Me)
-        _signUpForm.PreBuild()
     End Sub
 
     ' ===== CARD SHELL (split panel) =====
@@ -376,37 +366,18 @@ Public Class LogIn
         Me.AcceptButton = btnLogin
         curY += 56
 
-        ' ===== SIGN UP LINK =====
-        Dim pnlSignup As New FlowLayoutPanel With {
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .FlowDirection = FlowDirection.LeftToRight
-        }
-        Dim lblNo As New Label With {
-            .Text = "Don't have an account?",
+        ' ===== NO SELF SIGN-UP =====
+        ' Accounts are created only by an administrator, who also records the
+        ' person's email. Say so here, so nobody hunts for a sign-up link.
+        Dim lblNoAccount As New Label With {
+            .Text = "No account? Ask your administrator to create one.",
             .Font = New Font("Segoe UI", 9),
             .ForeColor = SubText,
             .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Margin = New Padding(0, 3, 0, 0)
+            .BackColor = Color.Transparent
         }
-        Dim lnkSignUp As New LinkLabel With {
-            .Text = " Sign up",
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Margin = New Padding(0, 3, 0, 0)
-        }
-        lnkSignUp.LinkColor = MintPrimary
-        lnkSignUp.ActiveLinkColor = MintDark
-        AddHandler lnkSignUp.LinkClicked,
-            Sub()
-                _signUpForm.Show()
-                Me.Hide()
-            End Sub
-        pnlSignup.Controls.AddRange({lblNo, lnkSignUp})
-        loginCard.Controls.Add(pnlSignup)
-        pnlSignup.Location = New Point(padL + (fieldW - pnlSignup.PreferredSize.Width) \ 2, curY)
+        loginCard.Controls.Add(lblNoAccount)
+        lblNoAccount.Location = New Point(padL + (fieldW - lblNoAccount.PreferredWidth) \ 2, curY + 3)
     End Sub
 
     ' ===== FIELD FACTORY =====
@@ -551,20 +522,14 @@ Public Class LogIn
                         Dim isActive = Convert.ToBoolean(rdr("is_active"))
                         Dim storedHash = rdr("password_hash").ToString()
 
-                        ' An account awaiting approval is not the same as a
-                        ' disabled one, and saying so saves a support call.
+                        ' Self sign-up was removed: accounts are made by an admin.
+                        ' Rows left by the old sign-up screen (Pending / Rejected)
+                        ' were never approved accounts, so they are refused with
+                        ' the same wording as a bad password - nobody can tell
+                        ' the username exists.
                         If hasStatus Then
                             Dim status As String = If(IsDBNull(rdr("status")), "Approved", rdr("status").ToString())
-                            If String.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) Then
-                                AppModal.Show("This account is still awaiting administrator approval." & vbCrLf &
-                                            "You will be able to sign in once it has been approved.",
-                                            "Awaiting Approval", MessageBoxButtons.OK, MessageBoxIcon.Information)
-                                Return
-                            End If
-                            If String.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) Then
-                                ' Deliberately the same wording as a bad password:
-                                ' a rejected applicant should not be able to tell
-                                ' that the username exists at all.
+                            If Not String.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase) Then
                                 ShowLoginFailed(username)
                                 Return
                             End If

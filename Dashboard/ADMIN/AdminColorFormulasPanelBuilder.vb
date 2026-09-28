@@ -1348,6 +1348,10 @@ Public Class AdminColorFormulasPanelBuilder
                 conn.Open()
                 Using txn = conn.BeginTransaction()
                     Try
+                        ' Copy to the Recycle Bin (formula + its colorants) first.
+                        Archive.Capture(conn, txn, "color_formulas", "formula_id", r.FormulaId,
+                                        r.Name,
+                                        children:={("formula_components", "formula_id")})
                         ' Children first — this works whether or not the FK
                         ' has ON DELETE CASCADE.
                         Using cmd As New MySqlCommand(

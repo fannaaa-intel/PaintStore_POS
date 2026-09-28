@@ -28,6 +28,13 @@ Public Module PaymentMethods
                 Return String.Equals(Type, "Cash", StringComparison.OrdinalIgnoreCase)
             End Get
         End Property
+
+        ' True for a cheque: checkout asks for the account name and check number.
+        Public ReadOnly Property IsCheque As Boolean
+            Get
+                Return String.Equals(Type, "Cheque", StringComparison.OrdinalIgnoreCase)
+            End Get
+        End Property
     End Class
 
     Private _checked As Boolean = False
@@ -56,7 +63,48 @@ Public Module PaymentMethods
 
     Public Sub ResetSchemaCache()
         _checked = False
+        _chequeChecked = False
     End Sub
+
+    ' -------------------------------------------------------------------------
+    '  CHEQUE SUPPORT (migrations.sql section 17)
+    ' -------------------------------------------------------------------------
+    Private _chequeChecked As Boolean = False
+    Private _chequePresent As Boolean = False
+
+    ' True once payment_methods.type accepts 'Cheque' AND sales has the
+    ' cheque_account_name column. Until then Cheque is not offered anywhere,
+    ' because saving it would be refused by the database.
+    Public Function SupportsCheque() As Boolean
+        If _chequeChecked Then Return _chequePresent
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT " &
+                    " (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() " &
+                    "   AND table_name = 'payment_methods' AND column_name = 'type' " &
+                    "   AND column_type LIKE '%''Cheque''%') + " &
+                    " (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() " &
+                    "   AND table_name = 'sales' AND column_name = 'cheque_account_name')", cn)
+                    _chequePresent = Convert.ToInt32(cmd.ExecuteScalar()) = 2
+                End Using
+            End Using
+            _chequeChecked = True
+        Catch
+            _chequePresent = False
+        End Try
+        Return _chequePresent
+    End Function
+
+    ' How a type reads in lists: what the cashier will be asked for.
+    Public Function TypeDescription(type As String) As String
+        Select Case If(type, "").ToLowerInvariant()
+            Case "cash" : Return "Cash - gives change"
+            Case "cheque" : Return "Cheque - account name + check no."
+            Case Else : Return "Reference - needs a ref. no."
+        End Select
+    End Function
 
     ' The safe fallback used when the columns are absent: the same rule the app
     ' has always used, but with the "gcash" hole closed so an e-wallet whose

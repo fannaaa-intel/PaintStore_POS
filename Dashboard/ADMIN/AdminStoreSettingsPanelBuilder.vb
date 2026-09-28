@@ -549,8 +549,7 @@ Public Class AdminStoreSettingsPanelBuilder
         ' A sub-line under the name showing what the method IS: its type, and
         ' whether it is hidden from the till. Turns the row from a bare name
         ' into something an admin can read at a glance.
-        Dim typeLabel As String = If(String.Equals(m.Type, "Cash", StringComparison.OrdinalIgnoreCase),
-                                     "Cash - gives change", "Reference - needs a ref. no.")
+        Dim typeLabel As String = PaymentMethods.TypeDescription(m.Type)
         Dim subLine As String = typeLabel
         If Not m.IsActive Then subLine &= "   -   HIDDEN"
         If Not String.IsNullOrWhiteSpace(m.Note) Then subLine &= "   -   " & m.Note.Trim()
@@ -785,10 +784,14 @@ Public Class AdminStoreSettingsPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand(
-                    "DELETE FROM payment_methods WHERE method_id = @id", conn)
-                    cmd.Parameters.AddWithValue("@id", m.MethodId)
-                    cmd.ExecuteNonQuery()
+                Using tx = conn.BeginTransaction()
+                    Archive.Capture(conn, tx, "payment_methods", "method_id", m.MethodId, m.Name)
+                    Using cmd As New MySqlCommand(
+                        "DELETE FROM payment_methods WHERE method_id = @id", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", m.MethodId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    tx.Commit()
                 End Using
             End Using
         Catch ex As Exception

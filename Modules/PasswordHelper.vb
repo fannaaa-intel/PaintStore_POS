@@ -6,7 +6,7 @@ Public Module PasswordHelper
     Private Const SaltSize As Integer = 16   ' bytes
     Private Const KeySize As Integer = 32    ' bytes
 
-    ' Create a new hash to store in the database (used later for Sign Up).
+    ' Create a new hash to store in the database.
     ' Returns: "iterations:saltBase64:hashBase64"
     Public Function HashPassword(password As String) As String
         Dim salt(SaltSize - 1) As Byte

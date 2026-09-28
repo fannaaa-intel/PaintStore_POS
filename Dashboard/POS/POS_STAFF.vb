@@ -14,6 +14,7 @@ Public Class POS_STAFF
     Private NavHover As Color = Color.FromArgb(238, 248, 244)
 
     Private MainContainer As Panel
+    Private _btnSettings As Button          ' pinned above Logout
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
     Private Const NAV_OPEN_WIDTH As Integer = 260
@@ -211,30 +212,31 @@ Public Class POS_STAFF
         Next
 
 
-        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
-        ' Self-service password change, so a member of staff does not have to ask
-        ' an admin for a reset just to choose a new password. Built in code rather
-        ' than the designer because every dashboard needs the same one, and it
-        ' sits just above Logout where account-level actions belong.
-        Dim btnAccount As New Button With {
-            .Name = "account",
-            .Text = "My Account"
+        ' ── SETTINGS ────────────────────────────────────────────────────────────
+        ' Replaces the old My Account button. Settings holds My Account (with
+        ' Change Password) and My Activity for everyone, plus role-specific tabs
+        ' (see SettingsPanelBuilder). Pinned just above Logout on every dashboard.
+        _btnSettings = New Button With {
+            .Name = "settings",
+            .Text = "Settings"
         }
-        Nav.Controls.Add(btnAccount)
-        StyleButton(btnAccount)
-        btnAccount.Left = 14
-        btnAccount.Width = Nav.Width - 28
-        btnAccount.Height = 48
-        btnAccount.Top = Nav.Height - 168
-        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
-        RoundButton(btnAccount, 12)
-        AddHandler btnAccount.Click,
+        Nav.Controls.Add(_btnSettings)
+        StyleButton(_btnSettings)
+        _btnSettings.Left = 14
+        _btnSettings.Width = Nav.Width - 28
+        _btnSettings.Height = 48
+        _btnSettings.Top = Nav.Height - 168
+        _btnSettings.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(_btnSettings, 12)
+        AddHandler _btnSettings.Click,
             Sub()
-                ' Deliberately does NOT change the active nav highlight: this
-                ' opens a dialog, it does not navigate away from the panel the
-                ' user is looking at.
-                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
-                                                    Session.CurrentFullName)
+                HomePanelBuilder.StopTimer()
+                SetActive(_btnSettings)
+                MainContainer.SuspendLayout()
+                MainContainer.Controls.Clear()
+                SettingsPanelBuilder.LoadSettings(MainContainer)
+                MainContainer.ResumeLayout()
+                MainContainer.Refresh()
             End Sub
 
         StyleButton(logout)
@@ -284,7 +286,8 @@ Public Class POS_STAFF
 
         For Each ctrl As Control In Nav.Controls
             If ctrl Is btnHamburger Then Continue For
-            Dim isNavBtn As Boolean = (Array.IndexOf(navButtons, ctrl) >= 0) OrElse (ctrl Is logout)
+            Dim isNavBtn As Boolean = (Array.IndexOf(navButtons, ctrl) >= 0) OrElse
+                                      (ctrl Is logout) OrElse (ctrl Is _btnSettings)
             ' Nav buttons survive the collapse; captions/logo do not.
             ctrl.Visible = navIsOpen OrElse isNavBtn
         Next
@@ -292,6 +295,7 @@ Public Class POS_STAFF
         For Each btn In navButtons
             ApplyNavButtonState(btn, width)
         Next
+        ApplyNavButtonState(_btnSettings, width)
         ApplyNavButtonState(logout, width)
 
         btnHamburger.BackColor = If(navIsOpen, Color.White, Color.Transparent)
@@ -443,10 +447,16 @@ Public Class POS_STAFF
                 End Using
 
                 If Session.ShiftId = 0 Then
+                    ' INITIAL CASH: what is physically in the drawer before the
+                    ' first sale. The Cash Drawer adds it to "expected", so a
+                    ' till started with change in it no longer reads over by
+                    ' exactly that amount when counted.
+                    Dim openingCash As Decimal = AskOpeningCash()
                     Using cmd As New MySqlCommand(
                         "INSERT INTO shifts (user_id, register_no, opening_float, started_at, status) " &
-                        "VALUES (@uid, '01', 0, NOW(), 'Open')", conn)
+                        "VALUES (@uid, '01', @float, NOW(), 'Open')", conn)
                         cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
+                        cmd.Parameters.AddWithValue("@float", openingCash)
                         cmd.ExecuteNonQuery()
                     End Using
                     Using cmd As New MySqlCommand("SELECT LAST_INSERT_ID()", conn)
@@ -455,7 +465,8 @@ Public Class POS_STAFF
                     ' Opening a drawer starts a period of cash accountability;
                     ' the close is logged, so the open belongs in the trail too.
                     ActivityLog.Record("SHIFT_OPEN", "shift", Session.ShiftId,
-                                       "Register 01")
+                                       "Register 01, initial cash " & ChrW(8369) &
+                                       openingCash.ToString("N2"))
                 End If
                 ' Load quota for this user
                 Using cmd As New MySqlCommand(
@@ -476,6 +487,27 @@ Public Class POS_STAFF
                           "Shift Not Opened", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
+
+    ' Asks for the initial cash in the drawer. Only a new shift asks: logging
+    ' back in to an open shift keeps the amount entered when it started.
+    ' Cancel means an empty drawer (0) - the shift must still open, or sales
+    ' would have no drawer to belong to.
+    Private Function AskOpeningCash() As Decimal
+        Do
+            Dim entry As String = AppModal.Prompt(
+                "Start of shift. How much cash is in the drawer right now?" &
+                Environment.NewLine & "(Change fund / initial cash. Enter 0 if empty.)",
+                "Initial Cash", "0.00")
+            If entry Is Nothing Then Return 0D
+            Dim amt As Decimal
+            If Decimal.TryParse(entry.Trim().Replace(",", "").Replace(ChrW(8369), ""), amt) AndAlso
+               amt >= 0D AndAlso amt < 10000000D Then
+                Return Math.Round(amt, 2)
+            End If
+            AppModal.Show("Please enter an amount of 0 or more (numbers only).",
+                          "Initial Cash", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Loop
+    End Function
 
     Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)
         shiftStartTime = DateTime.Now

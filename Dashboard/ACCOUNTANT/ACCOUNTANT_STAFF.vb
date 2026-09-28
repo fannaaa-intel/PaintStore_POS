@@ -13,6 +13,7 @@ Public Class ACCOUNTANT_STAFF
     Private NavHover As Color = Color.FromArgb(238, 248, 244)
 
     Private MainContainer As Panel
+    Private _btnSettings As Button          ' pinned above Logout
 
     Private Const NAV_OPEN_WIDTH As Integer = 260
     Private Const NAV_CLOSED_WIDTH As Integer = 56
@@ -168,30 +169,30 @@ Public Class ACCOUNTANT_STAFF
         Next
 
 
-        ' ── ACCOUNT ─────────────────────────────────────────────────────────────
-        ' Self-service password change, so a member of staff does not have to ask
-        ' an admin for a reset just to choose a new password. Built in code rather
-        ' than the designer because every dashboard needs the same one, and it
-        ' sits just above Logout where account-level actions belong.
-        Dim btnAccount As New Button With {
-            .Name = "account",
-            .Text = "My Account"
+        ' ── SETTINGS ────────────────────────────────────────────────────────────
+        ' Replaces the old My Account button. Settings holds My Account (with
+        ' Change Password) and My Activity for everyone, plus role-specific tabs
+        ' (see SettingsPanelBuilder). Pinned just above Logout on every dashboard.
+        _btnSettings = New Button With {
+            .Name = "settings",
+            .Text = "Settings"
         }
-        Nav.Controls.Add(btnAccount)
-        StyleButton(btnAccount)
-        btnAccount.Left = 14
-        btnAccount.Width = Nav.Width - 28
-        btnAccount.Height = 48
-        btnAccount.Top = Nav.Height - 168
-        btnAccount.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
-        RoundButton(btnAccount, 12)
-        AddHandler btnAccount.Click,
+        Nav.Controls.Add(_btnSettings)
+        StyleButton(_btnSettings)
+        _btnSettings.Left = 14
+        _btnSettings.Width = Nav.Width - 28
+        _btnSettings.Height = 48
+        _btnSettings.Top = Nav.Height - 168
+        _btnSettings.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        RoundButton(_btnSettings, 12)
+        AddHandler _btnSettings.Click,
             Sub()
-                ' Deliberately does NOT change the active nav highlight: this
-                ' opens a dialog, it does not navigate away from the panel the
-                ' user is looking at.
-                ChangePasswordModal.PromptVoluntary(Session.CurrentUserId,
-                                                    Session.CurrentFullName)
+                SetActive(_btnSettings)
+                MainContainer.SuspendLayout()
+                MainContainer.Controls.Clear()
+                SettingsPanelBuilder.LoadSettings(MainContainer)
+                MainContainer.ResumeLayout()
+                MainContainer.Refresh()
             End Sub
 
         StyleButton(logout)
@@ -315,6 +316,7 @@ Public Class ACCOUNTANT_STAFF
             Case "reports" : iconPath = "newspaper.png"
             Case "logout" : iconPath = "logout.png"
             Case "account" : iconPath = "user.png"
+            Case "settings" : iconPath = "settings.png"
         End Select
 
         If IO.File.Exists(iconPath) Then

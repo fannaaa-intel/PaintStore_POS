@@ -101,6 +101,7 @@
       <HintPath>packages\System.Threading.Tasks.Extensions.4.5.4\lib\net461\System.Threading.Tasks.Extensions.dll</HintPath>
     </Reference>
     <Reference Include="System.Transactions" />
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
@@ -126,9 +127,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Auth\LogIn.vb">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Auth\SignUp.vb">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Dashboard\ACCOUNTANT\AccountantDashPanelBuilder.Designer.vb">
@@ -274,6 +272,13 @@
     <Compile Include="Modules\ReceiveConfirmModal.vb" />
     <Compile Include="Modules\ActivityLog.vb" />
     <Compile Include="Modules\Db.vb" />
+    <Compile Include="Modules\POS\PaymentRequests.vb" />
+    <Compile Include="Dashboard\SettingsPanelBuilder.vb" />
+    <Compile Include="Modules\Backup.vb" />
+    <Compile Include="Modules\Archive.vb" />
+    <Compile Include="Modules\POS\ChequePromptModal.vb" />
+    <Compile Include="Modules\Mailer.vb" />
+    <Compile Include="Modules\PasswordOtp.vb" />
     <Compile Include="Modules\DocNumber.vb" />
     <Compile Include="Modules\ImageCache.vb" />
     <Compile Include="Modules\SupplierLogo.vb" />
@@ -337,9 +342,6 @@
   <ItemGroup>
     <EmbeddedResource Include="Auth\LogIn.resx">
       <DependentUpon>LogIn.vb</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Auth\SignUp.resx">
-      <DependentUpon>SignUp.vb</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Dashboard\ACCOUNTANT\AccountantDashPanelBuilder.resx">
       <DependentUpon>AccountantDashPanelBuilder.vb</DependentUpon>

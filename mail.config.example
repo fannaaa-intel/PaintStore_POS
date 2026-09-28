@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copy to mail.config (same folder as PaintStore_POS.exe) and fill in.
+  MailAppPassword is a Google App Password (myaccount.google.com/apppasswords),
+  NOT the Gmail login password. 2-Step Verification must be on for the account.
+-->
+<appSettings>
+  <add key="MailFrom" value="your.store@gmail.com" />
+  <add key="MailFromName" value="Paint Store POS" />
+  <add key="MailAppPassword" value="xxxx xxxx xxxx xxxx" />
+</appSettings>

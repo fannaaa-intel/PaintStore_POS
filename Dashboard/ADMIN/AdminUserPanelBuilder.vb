@@ -60,6 +60,7 @@ Public Class AdminUserPanelBuilder
         Public UserId As Integer
         Public FullName As String
         Public Username As String
+        Public Email As String = ""
         Public RoleId As Integer
         Public RoleName As String
         Public IsActive As Boolean
@@ -102,9 +103,7 @@ Public Class AdminUserPanelBuilder
     ' grid with a filter dropdown.
     Private Enum Tab
         AllUsers
-        Pending
         ResetRequests
-        Rejected
         Disabled
     End Enum
 
@@ -120,6 +119,7 @@ Public Class AdminUserPanelBuilder
     Private Class UserFormResult
         Public FullName As String
         Public Username As String
+        Public Email As String = ""
         Public RoleId As Integer
         Public RoleName As String
         Public Password As String
@@ -191,6 +191,7 @@ Public Class AdminUserPanelBuilder
     Private Shared Sub LoadData()
         _allRows.Clear()
         Dim hasApproval As Boolean = AccountRequests.HasApprovalColumns()
+        Dim hasEmail As Boolean = AccountRequests.HasEmailColumn()
 
         Try
             Using conn = Db.GetConnection()
@@ -202,6 +203,7 @@ Public Class AdminUserPanelBuilder
                 Dim sql As String =
                     "SELECT u.user_id, u.full_name, u.username, u.is_active, " &
                     "u.created_at, u.sales_quota, u.role_id, r.role_name" &
+                    If(hasEmail, ", u.email", "") &
                     If(hasApproval,
                        ", u.status, u.requested_role_id, u.reject_reason, " &
                        "u.reviewed_at, rq.role_name AS requested_role_name", "") &
@@ -222,6 +224,9 @@ Public Class AdminUserPanelBuilder
                                 .CreatedAt = If(IsDBNull(rdr("created_at")), DateTime.MinValue, Convert.ToDateTime(rdr("created_at"))),
                                 .Quota = If(IsDBNull(rdr("sales_quota")), 0D, Convert.ToDecimal(rdr("sales_quota")))
                             }
+                            If hasEmail AndAlso Not IsDBNull(rdr("email")) Then
+                                rec.Email = rdr("email").ToString()
+                            End If
                             If hasApproval Then
                                 rec.Status = If(IsDBNull(rdr("status")), "Approved", rdr("status").ToString())
                                 rec.RequestedRoleId = If(IsDBNull(rdr("requested_role_id")), 0, Convert.ToInt32(rdr("requested_role_id")))
@@ -301,26 +306,18 @@ Public Class AdminUserPanelBuilder
     ' filtering by role_id there would compare against a grant that has not
     ' happened yet and hide rows whose visible badge matches the chip.
     Private Shared Function EffectiveRoleId(r As UserRecord) As Integer
-        If r.IsPending AndAlso r.RequestedRoleId > 0 Then Return r.RequestedRoleId
         Return r.RoleId
     End Function
 
+    ' Self sign-up is gone - only an admin creates accounts - so there are no
+    ' applications to review. Rows left over from the old sign-up screen
+    ' (status Pending / Rejected) were never accounts: they stay out of every
+    ' tab and cannot sign in.
     Private Shared Function InCurrentTab(r As UserRecord) As Boolean
         Select Case _tab
-            Case Tab.Pending
-                Return r.IsPending
-            Case Tab.Rejected
-                ' Declined applications, kept so an admin can see who was
-                ' turned away and why. They are not accounts, so they stay
-                ' out of every other tab.
-                Return r.IsRejected
             Case Tab.Disabled
-                ' Rejected applications have their own tab - this one is about
-                ' accounts an admin switched off.
                 Return (Not r.IsActive) AndAlso (Not r.IsPending) AndAlso (Not r.IsRejected)
             Case Tab.AllUsers
-                ' Applications are reviewed on their own tab; showing them here
-                ' too would let an admin "Edit" an account that does not exist yet.
                 Return (Not r.IsPending) AndAlso (Not r.IsRejected)
             Case Else
                 Return True
@@ -340,14 +337,6 @@ Public Class AdminUserPanelBuilder
         Finally
             _tab = saved
         End Try
-        Return n
-    End Function
-
-    Private Shared Function PendingCount() As Integer
-        Dim n As Integer = 0
-        For Each r In _allRows
-            If r.IsPending Then n += 1
-        Next
         Return n
     End Function
 
@@ -534,9 +523,7 @@ Public Class AdminUserPanelBuilder
         Next
         grid.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
-        ' Applications are not accounts: a pending or rejected sign-up has
-        ' nothing to sign in with. Counting them here made Total Users
-        ' larger than Active + Disabled for no visible reason.
+        ' Leftover sign-up rows are not accounts, so Total = Active + Disabled.
         Dim accountTotal As Integer = ActiveCount() + DisabledCount()
 
         Dim defs = {
@@ -544,10 +531,10 @@ Public Class AdminUserPanelBuilder
              MintPrimary, ""),
             ("Active", ActiveCount().ToString("N0"), "able to sign in",
              MintDark, "Live"),
-            ("Awaiting Approval", PendingCount().ToString("N0"), "sign-ups to review",
-             AccentOrange, "Review"),
-            ("Declined", TabCount(Tab.Rejected).ToString("N0"), "sign-ups turned away",
-             AccentBlue, "")
+            ("Disabled", DisabledCount().ToString("N0"), "switched off by an admin",
+             AccentBlue, ""),
+            ("Password Requests", _resetRows.Count.ToString("N0"), "waiting for a reset",
+             AccentOrange, If(_resetRows.Count > 0, "Review", ""))
         }
 
         For i As Integer = 0 To 3
@@ -616,7 +603,7 @@ Public Class AdminUserPanelBuilder
     End Function
 
     ' =========================================================================
-    '  TAB STRIP  —  four queues, each with its own actions
+    '  TAB STRIP  —  All Users, Password Requests, Disabled
     ' =========================================================================
     Private Shared Function BuildTabStrip() As Panel
         Dim strip As New Panel With {
@@ -627,9 +614,7 @@ Public Class AdminUserPanelBuilder
 
         Dim defs = {
             (Tab.AllUsers, "All Users", TabCount(Tab.AllUsers)),
-            (Tab.Pending, "Pending Approval", PendingCount()),
             (Tab.ResetRequests, "Password Requests", _resetRows.Count),
-            (Tab.Rejected, "Rejected", TabCount(Tab.Rejected)),
             (Tab.Disabled, "Disabled", DisabledCount())
         }
 
@@ -656,7 +641,7 @@ Public Class AdminUserPanelBuilder
 
             ' A count that needs attention is amber; the rest stay neutral so
             ' the badge means "there is work here", not merely "there are rows".
-            Dim urgent As Boolean = (tabId = Tab.Pending OrElse tabId = Tab.ResetRequests) AndAlso count > 0
+            Dim urgent As Boolean = (tabId = Tab.ResetRequests) AndAlso count > 0
 
             AddHandler btn.Paint,
                 Sub(sn, e)
@@ -986,17 +971,9 @@ Public Class AdminUserPanelBuilder
         Dim captions As String()
         Dim stops As Double()
         Select Case _tab
-            Case Tab.Pending
-                captions = {"APPLICANT", "USERNAME", "REQUESTED ROLE", "APPLIED", "DECISION"}
-                stops = {0.0, 0.24, 0.4, 0.58, 0.72}
             Case Tab.ResetRequests
                 captions = {"ACCOUNT", "USERNAME TYPED", "ROLE", "REQUESTED", "ACTIONS"}
                 stops = {0.0, 0.24, 0.44, 0.58, 0.72}
-            Case Tab.Rejected
-                ' The reason is the whole point of this tab, so it gets the
-                ' widest column rather than being hidden behind a hover.
-                captions = {"APPLICANT", "USERNAME", "REQUESTED ROLE", "DECLINED", "REASON"}
-                stops = {0.0, 0.20, 0.36, 0.52, 0.66}
             Case Else
                 captions = {"FULL NAME", "USERNAME", "ROLE", "STATUS", "CREATED", "ACTIONS"}
                 stops = {0.0, 0.2, 0.34, 0.45, 0.56, 0.7}
@@ -1097,15 +1074,7 @@ Public Class AdminUserPanelBuilder
         Else
             Dim y As Integer = 4
             For Each r As UserRecord In _visibleRows
-                Dim row As Panel
-                Select Case _tab
-                    Case Tab.Pending
-                        row = BuildPendingRow(r, ROW_H)
-                    Case Tab.Rejected
-                        row = BuildRejectedRow(r, ROW_H)
-                    Case Else
-                        row = BuildDataRow(r, ROW_H)
-                End Select
+                Dim row As Panel = BuildDataRow(r, ROW_H)
                 row.Location = New Point(0, y)
                 row.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
                 _scrollHost.Controls.Add(row)
@@ -1130,213 +1099,11 @@ Public Class AdminUserPanelBuilder
             Return "No results for " & Chr(34) & _searchQuery & Chr(34) & "."
         End If
         Select Case _tab
-            Case Tab.Pending
-                If Not AccountRequests.HasApprovalColumns() Then
-                    Return "Sign-up approval is not set up yet. Run migrations.sql " &
-                           "to enable it."
-                End If
-                Return "No sign-ups are waiting for approval."
-            Case Tab.Rejected
-                If Not AccountRequests.HasApprovalColumns() Then
-                    Return "Sign-up approval is not set up yet. Run migrations.sql " &
-                           "to enable it."
-                End If
-                Return "No sign-ups have been declined."
             Case Tab.Disabled
                 Return "No disabled accounts."
             Case Else
                 Return "No users found."
         End Select
-    End Function
-
-    ' ── PENDING APPLICATION ROW ──────────────────────────────────────────────
-    ' Approve / Reject instead of Edit / Disable: this is an application, not
-    ' an account, and the only two useful verbs are the decision.
-    Private Shared Function BuildPendingRow(r As UserRecord, height As Integer) As Panel
-        Dim p As New BufferedPanel With {
-            .Height = height,
-            .BackColor = Color.Transparent
-        }
-
-        AddHandler p.Paint,
-            Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                If TypeOf p.Tag Is Boolean AndAlso CBool(p.Tag) Then
-                    Dim rect As New Rectangle(8, 3, p.Width - 16, height - 6)
-                    Using path As GraphicsPath = RoundRect(rect, 10)
-                        Using b As New SolidBrush(RowHover)
-                            e.Graphics.FillPath(b, path)
-                        End Using
-                    End Using
-                End If
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
-                End Using
-            End Sub
-
-        Dim lblName As New Label With {
-            .Text = r.FullName,
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = MintDark,
-            .AutoSize = True, .BackColor = Color.Transparent
-        }
-        Dim lblUser As New Label With {
-            .Text = r.Username,
-            .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
-        }
-
-        ' The requested role is shown as a badge: it is a claim by the
-        ' applicant, not an established fact about the account.
-        Dim reqRole As String = If(r.RequestedRoleName <> "", r.RequestedRoleName, r.RoleName)
-        Dim badgeRole As New Label With {
-            .Text = reqRole,
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = Color.FromArgb(170, 105, 15),
-            .BackColor = Color.FromArgb(255, 243, 222),
-            .AutoSize = True,
-            .Padding = New Padding(10, 4, 10, 4)
-        }
-        RoundLabel(badgeRole, 10)
-
-        Dim lblWhen As New Label With {
-            .Text = If(r.CreatedAt = DateTime.MinValue, "-", RelativeTime(r.CreatedAt)),
-            .Font = New Font("Segoe UI", 11),
-            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
-        }
-
-        Dim btnApprove As Button = MakeActionButton("Approve",
-            Color.FromArgb(214, 245, 232), Color.FromArgb(0, 110, 84))
-        Dim btnReject As Button = MakeActionButton("Reject",
-            Color.FromArgb(255, 232, 232), AccentRed)
-
-        AddHandler btnApprove.Click, Sub() ApproveUser(r)
-        AddHandler btnReject.Click, Sub() RejectUser(r)
-
-        p.Controls.AddRange({lblName, lblUser, badgeRole, lblWhen, btnApprove, btnReject})
-
-        AddHandler p.Resize,
-            Sub()
-                Dim w = p.Width
-                lblName.Left = 24 : lblName.Top = (height - lblName.Height) \ 2
-                lblUser.Left = CInt(w * 0.24) : lblUser.Top = (height - lblUser.Height) \ 2
-                badgeRole.Left = CInt(w * 0.4) : badgeRole.Top = (height - badgeRole.Height) \ 2
-                lblWhen.Left = CInt(w * 0.58) : lblWhen.Top = (height - lblWhen.Height) \ 2
-
-                Dim ax As Integer = CInt(w * 0.72)
-                Dim ay As Integer = (height - btnApprove.Height) \ 2
-                btnApprove.Left = ax : btnApprove.Top = ay
-                btnReject.Left = btnApprove.Right + 6 : btnReject.Top = ay
-            End Sub
-
-        PropagateHover(p)
-        Return p
-    End Function
-
-    ' ── REJECTED APPLICATION ROW ─────────────────────────────────────────────
-    '
-    '  Read-only on purpose. The decision has been made, and the useful thing
-    '  now is the record of it - who applied, what they asked for, and the
-    '  reason that was given. Re-admitting someone is a fresh sign-up, not an
-    '  undo, so there is no Approve button here.
-    Private Shared Function BuildRejectedRow(r As UserRecord, height As Integer) As Panel
-        Dim p As New BufferedPanel With {
-            .Height = height,
-            .BackColor = Color.Transparent
-        }
-
-        AddHandler p.Paint,
-            Sub(sn, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                If TypeOf p.Tag Is Boolean AndAlso CBool(p.Tag) Then
-                    Dim rect As New Rectangle(8, 3, p.Width - 16, height - 6)
-                    Using path As GraphicsPath = RoundRect(rect, 10)
-                        Using b As New SolidBrush(RowHover)
-                            e.Graphics.FillPath(b, path)
-                        End Using
-                    End Using
-                End If
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 20, p.Height - 1, p.Width - 20, p.Height - 1)
-                End Using
-            End Sub
-
-        Dim lblName As New Label With {
-            .Text = r.FullName,
-            .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-            .ForeColor = SubText,
-            .AutoSize = True, .BackColor = Color.Transparent
-        }
-        Dim lblUser As New Label With {
-            .Text = r.Username,
-            .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
-        }
-
-        ' Same badge as the pending queue, in grey: it records what was asked
-        ' for, and nothing was granted.
-        Dim reqRole As String = If(r.RequestedRoleName <> "", r.RequestedRoleName, r.RoleName)
-        Dim badgeRole As New Label With {
-            .Text = If(reqRole <> "", reqRole, "-"),
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = BadgeDisabled.fore,
-            .BackColor = BadgeDisabled.back,
-            .AutoSize = True,
-            .Padding = New Padding(10, 4, 10, 4)
-        }
-        RoundLabel(badgeRole, 10)
-
-        ' reviewed_at is when the decision was taken; created_at is when they
-        ' applied. This column is headed DECLINED, so it has to be the former,
-        ' falling back only when an older row never recorded one.
-        Dim whenDecided As DateTime = If(r.ReviewedAt <> DateTime.MinValue, r.ReviewedAt, r.CreatedAt)
-        Dim lblWhen As New Label With {
-            .Text = RelativeTime(whenDecided),
-            .Font = New Font("Segoe UI", 11),
-            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
-        }
-
-        ' A reason can be long, and an admin rejecting in a hurry may have left
-        ' none at all. Ellipsis rather than wrap keeps every row the same
-        ' height; the full text is on the tooltip.
-        Dim reason As String = If(String.IsNullOrWhiteSpace(r.RejectReason),
-                                  "No reason recorded", r.RejectReason.Trim())
-        Dim lblReason As New Label With {
-            .Text = reason,
-            .Font = New Font("Segoe UI", 10.5F,
-                             If(String.IsNullOrWhiteSpace(r.RejectReason),
-                                FontStyle.Italic, FontStyle.Regular)),
-            .ForeColor = If(String.IsNullOrWhiteSpace(r.RejectReason), FaintText, AccentRed),
-            .AutoSize = False,
-            .AutoEllipsis = True,
-            .TextAlign = ContentAlignment.MiddleLeft,
-            .BackColor = Color.Transparent
-        }
-        If Not String.IsNullOrWhiteSpace(r.RejectReason) Then
-            _tips.SetToolTip(lblReason, r.RejectReason.Trim())
-        End If
-
-        p.Controls.AddRange({lblName, lblUser, badgeRole, lblWhen, lblReason})
-
-        AddHandler p.Resize,
-            Sub()
-                Dim w = p.Width
-                lblName.Left = 24 : lblName.Top = (height - lblName.Height) \ 2
-                lblUser.Left = CInt(w * 0.2) : lblUser.Top = (height - lblUser.Height) \ 2
-                badgeRole.Left = CInt(w * 0.36) : badgeRole.Top = (height - badgeRole.Height) \ 2
-                lblWhen.Left = CInt(w * 0.52) : lblWhen.Top = (height - lblWhen.Height) \ 2
-
-                ' Runs to the right edge less the same 24px the first column
-                ' is indented by, so the text block stays visually centred.
-                Dim rx As Integer = CInt(w * 0.66)
-                lblReason.Left = rx
-                lblReason.Width = Math.Max(60, w - rx - 24)
-                lblReason.Height = 22
-                lblReason.Top = (height - lblReason.Height) \ 2
-            End Sub
-
-        PropagateHover(p)
-        Return p
     End Function
 
     ' ── PASSWORD REQUEST ROW ─────────────────────────────────────────────────
@@ -1478,6 +1245,16 @@ Public Class AdminUserPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' Email under the name. A missing one is flagged, because without it
+        ' the person cannot receive the code needed to change their password.
+        Dim noEmail As Boolean = AccountRequests.HasEmailColumn() AndAlso r.Email = ""
+        Dim lblEmail As New Label With {
+            .Text = If(noEmail, "No email - click Edit to add", r.Email),
+            .Font = New Font("Segoe UI", 8.5F),
+            .ForeColor = If(noEmail, Theme.Warning, FaintText),
+            .AutoSize = True, .BackColor = Color.Transparent,
+            .Visible = AccountRequests.HasEmailColumn()
+        }
         Dim lblRole As New Label With {
             .Text = r.RoleName,
             .Font = New Font("Segoe UI", 11),
@@ -1512,13 +1289,19 @@ Public Class AdminUserPanelBuilder
         AddHandler btnToggle.Click, Sub() ToggleActive(r)
         AddHandler btnReset.Click, Sub() ResetPassword(r)
 
-        p.Controls.AddRange({lblName, lblUser, lblRole, badge, lblCreated,
+        p.Controls.AddRange({lblName, lblEmail, lblUser, lblRole, badge, lblCreated,
                              btnEdit, btnToggle, btnReset})
 
         AddHandler p.Resize,
             Sub()
                 Dim w = p.Width
-                lblName.Left = 24 : lblName.Top = (height - lblName.Height) \ 2
+                If lblEmail.Visible Then
+                    Dim blockH As Integer = lblName.Height + lblEmail.Height
+                    lblName.Left = 24 : lblName.Top = (height - blockH) \ 2
+                    lblEmail.Left = 25 : lblEmail.Top = lblName.Bottom
+                Else
+                    lblName.Left = 24 : lblName.Top = (height - lblName.Height) \ 2
+                End If
                 lblUser.Left = CInt(w * 0.2) : lblUser.Top = (height - lblUser.Height) \ 2
                 lblRole.Left = CInt(w * 0.34) : lblRole.Top = (height - lblRole.Height) \ 2
                 badge.Left = CInt(w * 0.45) : badge.Top = (height - badge.Height) \ 2
@@ -1598,14 +1381,17 @@ Public Class AdminUserPanelBuilder
         Dim res As UserFormResult = ShowUserForm("New User", True, Nothing)
         If res Is Nothing Then Return
 
+        Dim hasEmail As Boolean = AccountRequests.HasEmailColumn()
+        Dim newId As Integer
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                Dim newId As Integer
                 Using cmd As New MySqlCommand(
-                    "INSERT INTO users (role_id, full_name, username, password_hash, is_active, sales_quota) " &
-                    "VALUES (@rid, @fn, @un, @pw, 1, @q)", conn)
+                    "INSERT INTO users (role_id, full_name, username, " &
+                    If(hasEmail, "email, ", "") & "password_hash, is_active, sales_quota) " &
+                    "VALUES (@rid, @fn, @un, " & If(hasEmail, "@em, ", "") & "@pw, 1, @q)", conn)
                     cmd.Parameters.AddWithValue("@rid", res.RoleId)
+                    If hasEmail Then cmd.Parameters.AddWithValue("@em", res.Email)
                     cmd.Parameters.AddWithValue("@fn", res.FullName)
                     cmd.Parameters.AddWithValue("@un", res.Username)
                     cmd.Parameters.AddWithValue("@pw", PasswordHelper.HashPassword(res.Password))
@@ -1619,13 +1405,30 @@ Public Class AdminUserPanelBuilder
                 ActivityLog.Record("USER_CREATE", "user", newId,
                                    "Created " & res.Username & " (" & res.RoleName & ")")
             End Using
+        Catch ex As MySqlException When ex.Number = 1062
+            ' Unique username / email index - someone took it since the check.
+            AppModal.Show("That username or email is already used by another account.",
+                          "User Not Created", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
         Catch ex As Exception
             AppModal.Show("Could not create the user: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
 
-        AppModal.Show("User """ & res.Username & """ was created.", "User Created",
+        ' Tell the person their account exists. Sent in the background: the
+        ' account is already created, so a slow or failed email must not hold
+        ' the admin up (a failure is written to the activity log instead).
+        Dim notice As String = ""
+        If hasEmail AndAlso res.Email <> "" Then
+            Mailer.SendInBackground(res.Email,
+                "Your " & StoreSettings.StoreName & " account was created",
+                Mailer.AccountCreatedBody(res.FullName, res.Username, res.RoleName),
+                "user", newId)
+            notice = vbCrLf & vbCrLf & "A notice is being emailed to " & res.Email & "."
+        End If
+
+        AppModal.Show("User """ & res.Username & """ was created." & notice, "User Created",
                       MessageBoxButtons.OK, MessageBoxIcon.Information)
         Refresh()
     End Sub
@@ -1637,12 +1440,17 @@ Public Class AdminUserPanelBuilder
         Dim res As UserFormResult = ShowUserForm("Edit User", False, r)
         If res Is Nothing Then Return
 
+        Dim hasEmail As Boolean = AccountRequests.HasEmailColumn()
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "UPDATE users SET full_name=@fn, role_id=@rid, sales_quota=@q " &
-                    "WHERE user_id=@id", conn)
+                    "UPDATE users SET full_name=@fn, role_id=@rid, sales_quota=@q" &
+                    If(hasEmail, ", email=@em", "") & " WHERE user_id=@id", conn)
+                    If hasEmail Then
+                        cmd.Parameters.AddWithValue("@em",
+                            If(res.Email = "", CObj(DBNull.Value), CObj(res.Email)))
+                    End If
                     cmd.Parameters.AddWithValue("@fn", res.FullName)
                     cmd.Parameters.AddWithValue("@rid", res.RoleId)
                     cmd.Parameters.AddWithValue("@q", res.Quota)
@@ -1650,6 +1458,10 @@ Public Class AdminUserPanelBuilder
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
+        Catch ex As MySqlException When ex.Number = 1062
+            AppModal.Show("That email is already used by another account.",
+                          "User Not Saved", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
         Catch ex As Exception
             AppModal.Show("Could not update the user: " & ex.Message, "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -1713,315 +1525,6 @@ Public Class AdminUserPanelBuilder
 
     ' Number of enabled admin accounts. Returns 2 on error so a database
     ' problem blocks the disable rather than waving through a lockout.
-    ' =========================================================================
-    '  ACTION - APPROVE A SIGN-UP
-    '
-    '  The admin confirms the role rather than rubber-stamping the requested
-    '  one: the applicant chose it themselves, so it is a claim to be checked.
-    ' =========================================================================
-    Private Shared Sub ApproveUser(r As UserRecord)
-        Dim roles As List(Of RoleOption) = LoadRoles()
-        If roles.Count = 0 Then
-            AppModal.Show("No roles are defined, so this account cannot be approved.",
-                          "Approve", MessageBoxButtons.OK, MessageBoxIcon.Error)
-            Return
-        End If
-
-        Dim granted As RoleOption = ShowApproveDialog(r, roles)
-        If granted Is Nothing Then Return
-
-        Try
-            Using conn = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand(
-                    "UPDATE users SET status='Approved', is_active=1, role_id=@rid, " &
-                    "reviewed_by=@by, reviewed_at=NOW(), reject_reason=NULL " &
-                    "WHERE user_id=@id", conn)
-                    cmd.Parameters.AddWithValue("@rid", granted.RoleId)
-                    cmd.Parameters.AddWithValue("@by",
-                        If(Session.CurrentUserId = 0, CObj(DBNull.Value), CObj(Session.CurrentUserId)))
-                    cmd.Parameters.AddWithValue("@id", r.UserId)
-                    cmd.ExecuteNonQuery()
-                End Using
-            End Using
-        Catch ex As Exception
-            AppModal.Show("Could not approve the account: " & ex.Message, "Database Error",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-            Return
-        End Try
-
-        ActivityLog.Record("USER_APPROVE", "user", r.UserId,
-                           r.Username & " approved as " & granted.RoleName)
-        AppModal.Show(r.FullName & " can now sign in as " & granted.RoleName & ".",
-                      "Account Approved", MessageBoxButtons.OK, MessageBoxIcon.Information)
-        Refresh()
-    End Sub
-
-    ' Approve dialog - shows what was asked for and lets the admin change it.
-    Private Shared Function ShowApproveDialog(r As UserRecord,
-                                              roles As List(Of RoleOption)) As RoleOption
-        Const W As Integer = 520
-        Const PAD As Integer = 32
-
-        Dim f As New Form With {
-            .FormBorderStyle = FormBorderStyle.None,
-            .StartPosition = FormStartPosition.CenterParent,
-            .BackColor = CardBg,
-            .ShowInTaskbar = False,
-            .Width = W,
-            .KeyPreview = True
-        }
-
-        Const HEADER_H As Integer = 80
-        Dim header As New BufferedPanel With {
-            .Location = New Point(1, 1),
-            .Size = New Size(W - 2, HEADER_H - 1),
-            .BackColor = Color.Transparent
-        }
-        AddHandler header.Paint,
-            Sub(s, e)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As GraphicsPath = TopRoundedRect(
-                        New Rectangle(0, 0, header.Width, header.Height), 10)
-                    Using br As New SolidBrush(Color.FromArgb(240, 249, 246))
-                        g.FillPath(br, path)
-                    End Using
-                End Using
-                Using pen As New Pen(DividerClr, 1)
-                    g.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1)
-                End Using
-            End Sub
-        header.Controls.Add(New Label With {
-            .Text = "Approve " & r.FullName,
-            .Font = New Font("Segoe UI", 15, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Location = New Point(PAD, 22)
-        })
-        header.Controls.Add(New Label With {
-            .Text = "Confirm the role this account is granted.",
-            .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Location = New Point(PAD, 48)
-        })
-        f.Controls.Add(header)
-
-        Dim y As Integer = HEADER_H + 22
-
-        ' What the applicant asked for, stated plainly before the choice.
-        Dim reqName As String = If(r.RequestedRoleName <> "", r.RequestedRoleName, r.RoleName)
-        f.Controls.Add(New Label With {
-            .Text = "Username",
-            .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .BackColor = Color.Transparent, .Location = New Point(PAD, y)
-        })
-        f.Controls.Add(New Label With {
-            .Text = r.Username,
-            .Font = New Font("Segoe UI", 11), .ForeColor = MintDark,
-            .AutoSize = True, .BackColor = Color.Transparent,
-            .Location = New Point(PAD, y + 17)
-        })
-        f.Controls.Add(New Label With {
-            .Text = "Requested",
-            .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .BackColor = Color.Transparent, .Location = New Point(PAD + 240, y)
-        })
-        f.Controls.Add(New Label With {
-            .Text = reqName,
-            .Font = New Font("Segoe UI", 11), .ForeColor = MintDark,
-            .AutoSize = True, .BackColor = Color.Transparent,
-            .Location = New Point(PAD + 240, y + 17)
-        })
-        y += 54
-
-        Dim cbo As New ComboBox With {
-            .Font = New Font("Segoe UI", 11.0F),
-            .DropDownStyle = ComboBoxStyle.DropDownList,
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = FieldBg,
-            .ForeColor = Color.FromArgb(35, 50, 46)
-        }
-        For Each ro In roles
-            cbo.Items.Add(ro)
-        Next
-        AddField(f, "Grant this role", cbo, PAD, y, W - PAD * 2, 44)
-
-        ' Preselect what they asked for - the common case is that it is right.
-        Dim pre As Integer = 0
-        For i As Integer = 0 To roles.Count - 1
-            If roles(i).RoleId = If(r.RequestedRoleId > 0, r.RequestedRoleId, r.RoleId) Then
-                pre = i
-                Exit For
-            End If
-        Next
-        cbo.SelectedIndex = pre
-        y += 20 + 44 + 24
-
-        Const FOOTER_H As Integer = 76
-        Dim footer As New BufferedPanel With {
-            .Location = New Point(1, y),
-            .Size = New Size(W - 2, FOOTER_H - 1),
-            .BackColor = Color.Transparent
-        }
-        AddHandler footer.Paint,
-            Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Using path As GraphicsPath = BottomRoundedRect(
-                        New Rectangle(0, 0, footer.Width, footer.Height), 10)
-                    Using br As New SolidBrush(Color.FromArgb(249, 252, 251))
-                        e.Graphics.FillPath(br, path)
-                    End Using
-                End Using
-                Using pen As New Pen(DividerClr, 1)
-                    e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0)
-                End Using
-            End Sub
-        f.Controls.Add(footer)
-
-        Dim btnH As Integer = 42, btnW As Integer = 130
-        Dim btnCancel As New Button With {
-            .Text = "Cancel", .Size = New Size(110, btnH),
-            .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 9.5F),
-            .Cursor = Cursors.Hand, .DialogResult = DialogResult.Cancel,
-            .BackColor = Color.FromArgb(243, 246, 244),
-            .ForeColor = Color.FromArgb(70, 86, 80),
-            .Location = New Point(W - PAD - btnW - 120, (FOOTER_H - btnH) \ 2)
-        }
-        btnCancel.FlatAppearance.BorderSize = 0
-        Dim btnOk As New Button With {
-            .Text = "Approve account", .Size = New Size(btnW, btnH),
-            .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 9.5F),
-            .Cursor = Cursors.Hand, .BackColor = MintPrimary, .ForeColor = Color.White,
-            .Location = New Point(W - PAD - btnW, (FOOTER_H - btnH) \ 2)
-        }
-        btnOk.FlatAppearance.BorderSize = 0
-
-        Dim paintPill As Action(Of Object, PaintEventArgs, Boolean) =
-            Sub(sn As Object, e As PaintEventArgs, outlined As Boolean)
-                Dim b = CType(sn, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Using bg As New SolidBrush(Color.FromArgb(249, 252, 251))
-                    g.FillRectangle(bg, b.ClientRectangle)
-                End Using
-                Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
-                Using br As New SolidBrush(b.BackColor)
-                    g.FillRoundedRectangle(br, rect, 8)
-                End Using
-                If outlined Then
-                    Using pn As New Pen(Color.FromArgb(200, 215, 210), 1.0F)
-                        g.DrawRoundedRectangle(pn, rect, 8)
-                    End Using
-                End If
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnOk.Paint, Sub(sn, e) paintPill(sn, e, False)
-        AddHandler btnCancel.Paint, Sub(sn, e) paintPill(sn, e, True)
-        AddHandler btnOk.MouseEnter, Sub()
-                                         btnOk.BackColor = MintDark
-                                         btnOk.Invalidate()
-                                     End Sub
-        AddHandler btnOk.MouseLeave, Sub()
-                                         btnOk.BackColor = MintPrimary
-                                         btnOk.Invalidate()
-                                     End Sub
-        footer.Controls.Add(btnCancel)
-        footer.Controls.Add(btnOk)
-
-        Dim cardH As Integer = y + FOOTER_H
-        f.Height = cardH
-        ApplyRoundedRegion(f, W, cardH)
-
-        AddHandler f.Paint,
-            Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim card As New Rectangle(0, 0, f.Width - 1, f.Height - 1)
-                Using br As New SolidBrush(CardBg)
-                    e.Graphics.FillRectangle(br, card)
-                End Using
-                Using pen As New Pen(BorderClr, 1.2F)
-                    e.Graphics.DrawRoundedRectangle(pen, card, 10)
-                End Using
-            End Sub
-
-        Dim chosen As RoleOption = Nothing
-        AddHandler btnOk.Click,
-            Sub()
-                chosen = TryCast(cbo.SelectedItem, RoleOption)
-                f.DialogResult = DialogResult.OK
-                f.Close()
-            End Sub
-
-        f.AcceptButton = btnOk
-        f.CancelButton = btnCancel
-        AddHandler f.KeyDown,
-            Sub(s, e)
-                If e.KeyCode = Keys.Escape Then
-                    f.DialogResult = DialogResult.Cancel
-                    f.Close()
-                End If
-            End Sub
-
-        Try
-            Dim owner As Form = Form.ActiveForm
-            If owner Is Nothing OrElse owner Is f Then
-                f.StartPosition = FormStartPosition.CenterScreen
-                f.ShowDialog()
-            Else
-                f.ShowDialog(owner)
-            End If
-            Return chosen
-        Finally
-            f.Dispose()
-        End Try
-    End Function
-
-    ' =========================================================================
-    '  ACTION - REJECT A SIGN-UP
-    '
-    '  The row is kept, not deleted: the reason is worth having, and the
-    '  username stays reserved so the same person cannot immediately re-apply
-    '  under it.
-    ' =========================================================================
-    Private Shared Sub RejectUser(r As UserRecord)
-        Dim reason As String = AppModal.Prompt(
-            "Why is this request being declined?" & Environment.NewLine &
-            "This is kept for your records only.",
-            "Reject " & r.FullName, "")
-        If reason Is Nothing Then Return
-
-        Try
-            Using conn = Db.GetConnection()
-                conn.Open()
-                Using cmd As New MySqlCommand(
-                    "UPDATE users SET status='Rejected', is_active=0, " &
-                    "reviewed_by=@by, reviewed_at=NOW(), reject_reason=@why " &
-                    "WHERE user_id=@id", conn)
-                    cmd.Parameters.AddWithValue("@by",
-                        If(Session.CurrentUserId = 0, CObj(DBNull.Value), CObj(Session.CurrentUserId)))
-                    cmd.Parameters.AddWithValue("@why",
-                        If(String.IsNullOrWhiteSpace(reason), CObj(DBNull.Value), CObj(reason.Trim())))
-                    cmd.Parameters.AddWithValue("@id", r.UserId)
-                    cmd.ExecuteNonQuery()
-                End Using
-            End Using
-        Catch ex As Exception
-            AppModal.Show("Could not reject the request: " & ex.Message, "Database Error",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-            Return
-        End Try
-
-        ActivityLog.Record("USER_REJECT", "user", r.UserId,
-                           r.Username & " rejected" &
-                           If(String.IsNullOrWhiteSpace(reason), "", ": " & reason.Trim()))
-        Refresh()
-    End Sub
-
     ' =========================================================================
     '  ACTION - ISSUE A PASSWORD FOR A RESET REQUEST
     '
@@ -2298,6 +1801,30 @@ Public Class AdminUserPanelBuilder
                  txtUser, colRX, y, colW, FIELD_H)
         y += 20 + FIELD_H + 22
 
+        ' Email: where the "account created" notice and password-change codes
+        ' go. Required for new accounts; optional on edit only so an older
+        ' account without one can still be edited - the list flags those.
+        Dim hasEmail As Boolean = AccountRequests.HasEmailColumn()
+        Dim txtEmail As New TextBox With {
+            .Font = New Font("Segoe UI", 11.0F),
+            .BorderStyle = BorderStyle.None,
+            .BackColor = FieldBg,
+            .ForeColor = Color.FromArgb(35, 50, 46),
+            .Text = If(existing IsNot Nothing, existing.Email, "")
+        }
+        If hasEmail Then
+            AddField(f, If(isCreate, "Email *", "Email"), txtEmail, PAD, y, CARD_W - PAD * 2, FIELD_H)
+            f.Controls.Add(New Label With {
+                .Text = "Account notices and password-change codes are sent here.",
+                .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = FaintText,
+                .AutoSize = True,
+                .BackColor = Color.Transparent,
+                .Location = New Point(PAD + 2, y + 20 + FIELD_H + 3)
+            })
+            y += 20 + FIELD_H + 22
+        End If
+
         ' ── SECTION: ACCESS ──────────────────────────────────────────────────
         y = AddFormSection(f, "Access", "What this account may do.", y, PAD, CARD_W)
 
@@ -2553,6 +2080,26 @@ Public Class AdminUserPanelBuilder
                     Return
                 End If
 
+                Dim email As String = txtEmail.Text.Trim()
+                If hasEmail Then
+                    If email = "" AndAlso isCreate Then
+                        lblFormErr.Text = "Email is required."
+                        txtEmail.Focus()
+                        Return
+                    End If
+                    If email <> "" AndAlso Not Mailer.IsValidAddress(email) Then
+                        lblFormErr.Text = "That email address does not look right."
+                        txtEmail.Focus()
+                        Return
+                    End If
+                    If email <> "" AndAlso AccountRequests.EmailTaken(email,
+                            If(existing IsNot Nothing, existing.UserId, 0)) Then
+                        lblFormErr.Text = "That email is already used by another account."
+                        txtEmail.Focus()
+                        Return
+                    End If
+                End If
+
                 Dim password As String = ""
                 If isCreate Then
                     password = txtPass.Text
@@ -2588,6 +2135,7 @@ Public Class AdminUserPanelBuilder
                 result = New UserFormResult With {
                     .FullName = fullName,
                     .Username = username,
+                    .Email = email,
                     .RoleId = sel.RoleId,
                     .RoleName = sel.RoleName,
                     .Password = password,

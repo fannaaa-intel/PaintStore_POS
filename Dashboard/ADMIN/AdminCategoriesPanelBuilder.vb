@@ -729,7 +729,8 @@ Public Class AdminCategoriesPanelBuilder
         If AppModal.Show(
             "Move " & moved.ToString("N0") & If(moved = 1, " product", " products") &
             " from """ & source.Name & """ into """ & targetName & """, then delete """ &
-            source.Name & """?" & vbCrLf & vbCrLf & "This cannot be undone.",
+            source.Name & """?" & vbCrLf & vbCrLf &
+            If(Archive.HasArchiveTable(), "The empty category goes to the Recycle Bin.", "This cannot be undone."),
             "Confirm Merge", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
             Return
         End If
@@ -744,6 +745,8 @@ Public Class AdminCategoriesPanelBuilder
                         cmd.Parameters.AddWithValue("@from", source.CategoryId)
                         cmd.ExecuteNonQuery()
                     End Using
+                    Archive.Capture(conn, tx, "categories", "category_id", source.CategoryId,
+                                    source.Name & " (merged into " & targetName & ")")
                     Using cmd As New MySqlCommand(
                         "DELETE FROM categories WHERE category_id=@id", conn, tx)
                         cmd.Parameters.AddWithValue("@id", source.CategoryId)
@@ -930,10 +933,14 @@ Public Class AdminCategoriesPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                Using cmd As New MySqlCommand(
-                    "DELETE FROM categories WHERE category_id = @id", conn)
-                    cmd.Parameters.AddWithValue("@id", r.CategoryId)
-                    cmd.ExecuteNonQuery()
+                Using tx = conn.BeginTransaction()
+                    Archive.Capture(conn, tx, "categories", "category_id", r.CategoryId, r.Name)
+                    Using cmd As New MySqlCommand(
+                        "DELETE FROM categories WHERE category_id = @id", conn, tx)
+                        cmd.Parameters.AddWithValue("@id", r.CategoryId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                    tx.Commit()
                 End Using
             End Using
         Catch ex As Exception

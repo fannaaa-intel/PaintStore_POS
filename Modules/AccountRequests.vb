@@ -1,11 +1,13 @@
 Imports MySql.Data.MySqlClient
 
 ' =============================================================================
-'  AccountRequests — self-service sign-up, admin approval, password resets.
+'  AccountRequests — account rules shared by the login screen, Settings and
+'  Admin > User Management: username / password / email rules, password-reset
+'  requests, the forced change after an admin reset.
 '
-'  One place that knows how the approval columns work, shared by the sign-up
-'  screen, the login screen and Admin > User Management, so the three can never
-'  disagree about what "Pending" means.
+'  Self sign-up was removed: only an admin creates accounts. The old approval
+'  columns (users.status ...) stay in the database; the login screen refuses
+'  any row that is not 'Approved'.
 '
 '  SCHEMA TOLERANCE
 '  ----------------
@@ -18,7 +20,7 @@ Imports MySql.Data.MySqlClient
 ' =============================================================================
 Public Module AccountRequests
 
-    ' The system's Admin role is never self-assignable from the sign-up screen.
+    ' The system's Admin role id.
     Public Const ADMIN_ROLE_ID As Integer = 1
 
     Private _approvalChecked As Boolean = False
@@ -75,6 +77,7 @@ Public Module AccountRequests
     Public Sub ResetSchemaCache()
         _approvalChecked = False
         _resetChecked = False
+        _emailChecked = False
     End Sub
 
     ' -------------------------------------------------------------------------
@@ -122,7 +125,7 @@ Public Module AccountRequests
         Return ""
     End Function
 
-    ' 0-4, drives the strength meter on the sign-up card.
+    ' 0-4 password strength score.
     Public Function PasswordStrength(pw As String) As Integer
         If String.IsNullOrEmpty(pw) Then Return 0
         Dim score As Integer = 0
@@ -163,66 +166,71 @@ Public Module AccountRequests
     End Function
 
     ' -------------------------------------------------------------------------
-    '  SIGN-UP
+    '  EMAIL (migrations.sql section 15)
+    '
+    '  Self sign-up is gone: an admin creates every account and types the
+    '  person's email. It receives the "account created" notice and the code
+    '  that confirms a password change.
     ' -------------------------------------------------------------------------
 
-    ' Creates the application row. Returns "" on success, else the error to show.
-    '
-    ' role_id is set to the requested role immediately so the row is valid
-    ' against the roles foreign key, but status='Pending' is what actually
-    ' gates login — the admin can still change role_id when approving.
-    Public Function SubmitSignUp(fullName As String,
-                                 username As String,
-                                 password As String,
-                                 requestedRoleId As Integer) As String
+    Private _emailChecked As Boolean = False
+    Private _emailPresent As Boolean = False
 
-        If requestedRoleId = ADMIN_ROLE_ID Then
-            Return "That role cannot be requested here."
-        End If
-
+    Public Function HasEmailColumn() As Boolean
+        If _emailChecked Then Return _emailPresent
         Try
-            Dim hash As String = PasswordHelper.HashPassword(password)
-
             Using cn = Db.GetConnection()
                 cn.Open()
-
-                Dim sql As String
-                If HasApprovalColumns() Then
-                    ' is_active = 0 as well as status='Pending': a database that
-                    ' is later rolled back to the old schema still refuses the
-                    ' login rather than silently letting an unapproved account in.
-                    sql = "INSERT INTO users (role_id, full_name, username, password_hash, " &
-                          "is_active, status, requested_role_id, sales_quota) " &
-                          "VALUES (@r, @f, @u, @h, 0, 'Pending', @rr, 0)"
-                Else
-                    ' No approval columns: keep the account inactive so an admin
-                    ' still has to enable it by hand before it can be used.
-                    sql = "INSERT INTO users (role_id, full_name, username, password_hash, " &
-                          "is_active, sales_quota) VALUES (@r, @f, @u, @h, 0, 0)"
-                End If
-
-                Using cmd As New MySqlCommand(sql, cn)
-                    cmd.Parameters.AddWithValue("@r", requestedRoleId)
-                    cmd.Parameters.AddWithValue("@f", fullName)
-                    cmd.Parameters.AddWithValue("@u", username)
-                    cmd.Parameters.AddWithValue("@h", hash)
-                    If HasApprovalColumns() Then
-                        cmd.Parameters.AddWithValue("@rr", requestedRoleId)
-                    End If
-                    cmd.ExecuteNonQuery()
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM information_schema.columns " &
+                    "WHERE table_schema = DATABASE() AND table_name = 'users' " &
+                    "AND column_name = 'email'", cn)
+                    _emailPresent = Convert.ToInt32(cmd.ExecuteScalar()) = 1
                 End Using
             End Using
+            _emailChecked = True
+        Catch
+            _emailPresent = False
+        End Try
+        Return _emailPresent
+    End Function
 
-            ActivityLog.Record("Sign-up requested", "users", Nothing,
-                               username & " requested access")
+    ' The account's email, or "" when none is on file (or the column is absent).
+    Public Function GetEmail(userId As Integer) As String
+        If Not HasEmailColumn() Then Return ""
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT email FROM users WHERE user_id = @id", cn)
+                    cmd.Parameters.AddWithValue("@id", userId)
+                    Dim res = cmd.ExecuteScalar()
+                    If res Is Nothing OrElse IsDBNull(res) Then Return ""
+                    Return res.ToString().Trim()
+                End Using
+            End Using
+        Catch
             Return ""
+        End Try
+    End Function
 
-        Catch ex As MySqlException When ex.Number = 1062
-            ' Unique index on username — someone claimed it between the
-            ' availability check and this insert.
-            Return "That username was just taken. Please choose another."
-        Catch ex As Exception
-            Return "Could not submit your request: " & ex.Message
+    ' True when another account already uses this address. One mailbox per
+    ' account, or one person could receive another's password codes.
+    Public Function EmailTaken(email As String, exceptUserId As Integer) As Boolean
+        If Not HasEmailColumn() Then Return False
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER(@e) AND user_id <> @id", cn)
+                    cmd.Parameters.AddWithValue("@e", email.Trim())
+                    cmd.Parameters.AddWithValue("@id", exceptUserId)
+                    Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
+                End Using
+            End Using
+        Catch
+            ' Fail closed - never save a possible duplicate on a failed lookup.
+            Return True
         End Try
     End Function
 

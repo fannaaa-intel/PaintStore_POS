@@ -539,3 +539,136 @@ WHERE NOT EXISTS (
 
 SHOW TABLES LIKE 'purchase_request_items';
 SELECT COUNT(*) AS lines_backfilled FROM purchase_request_items;
+
+
+-- -----------------------------------------------------------------------------
+--  15. users.email - where account notices and verification codes are sent
+--
+--     Accounts are now created only by an admin (self sign-up was removed),
+--     and the admin types the staff member's email on the New User form. It is
+--     used for two things:
+--       - the "your account was created" notice sent when the account is made
+--       - the 6-digit code that must be entered before a password can change
+--
+--     UNIQUE so one mailbox can never receive another person's codes. NULL is
+--     allowed (and several NULLs may coexist) so accounts that predate this
+--     column keep working until an admin adds their email.
+-- -----------------------------------------------------------------------------
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email VARCHAR(120) DEFAULT NULL AFTER username;
+
+ALTER TABLE users
+    ADD UNIQUE INDEX IF NOT EXISTS uq_users_email (email);
+
+
+-- -----------------------------------------------------------------------------
+--  16. password_otp - one-time codes for the two-step password change
+--
+--     Changing a password now takes the current password AND a code sent to
+--     the account's email. Only a hash of the code is stored, so reading this
+--     table does not reveal a usable code. A code expires after 10 minutes,
+--     allows 5 wrong guesses, and is marked used the moment it succeeds.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS password_otp (
+    otp_id      INT(11)      NOT NULL AUTO_INCREMENT,
+    user_id     INT(11)      NOT NULL,
+    code_hash   VARCHAR(255) NOT NULL,
+    expires_at  DATETIME     NOT NULL,
+    attempts    INT(11)      NOT NULL DEFAULT 0,
+    used_at     DATETIME     DEFAULT NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (otp_id),
+    KEY idx_otp_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+--  17. Cheque payments
+--
+--     A third payment type beside Cash and Reference. At checkout a Cheque
+--     method asks for the ACCOUNT NAME on the cheque and the CHECK NUMBER.
+--     The check number is stored in sales.reference_no - the column every
+--     report already shows - and the account name in its own column.
+--
+--     A 'Cheque' method is added (active) so the till offers it straight away.
+--     Admin can hide or rename it in Settings > Store & Payments.
+-- -----------------------------------------------------------------------------
+ALTER TABLE payment_methods
+    MODIFY COLUMN type ENUM('Cash','Reference','Cheque') NOT NULL DEFAULT 'Reference';
+
+ALTER TABLE sales
+    ADD COLUMN IF NOT EXISTS cheque_account_name VARCHAR(120) DEFAULT NULL AFTER reference_no;
+
+--  A method already called Cheque/Check becomes the cheque type instead of
+--  a duplicate being added (payment_methods.name is UNIQUE).
+UPDATE payment_methods SET type = 'Cheque'
+    WHERE LOWER(name) IN ('cheque', 'check') AND type <> 'Cash';
+
+INSERT INTO payment_methods (name, type, is_active)
+SELECT 'Cheque', 'Cheque', 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM payment_methods WHERE type = 'Cheque')
+  AND NOT EXISTS (SELECT 1 FROM payment_methods WHERE LOWER(name) = 'cheque');
+
+
+-- -----------------------------------------------------------------------------
+--  18. archive - the Recycle Bin
+--
+--     Nothing is deleted without a copy landing here first. Each row holds the
+--     deleted record (and any child rows deleted with it, e.g. a colour
+--     formula's components) as JSON, plus who deleted it and when.
+--
+--     Admin > Settings > Recycle Bin lists these rows and can Restore one
+--     (puts the record back under its original id) or Delete Forever.
+--
+--     status  'Archived' - in the bin
+--             'Restored' - put back; row kept as history
+--             'Purged'   - admin emptied it; JSON cleared, row kept as history
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS archive (
+    archive_id    INT(11)      NOT NULL AUTO_INCREMENT,
+    source_table  VARCHAR(40)  NOT NULL,
+    record_id     INT(11)      NOT NULL,
+    label         VARCHAR(200) NOT NULL,
+    data_json     LONGTEXT     DEFAULT NULL,
+    deleted_by    INT(11)      DEFAULT NULL,
+    deleted_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status        ENUM('Archived','Restored','Purged') NOT NULL DEFAULT 'Archived',
+    handled_by    INT(11)      DEFAULT NULL,
+    handled_at    DATETIME     DEFAULT NULL,
+    PRIMARY KEY (archive_id),
+    KEY idx_archive_status (status),
+    KEY idx_archive_source (source_table, record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+--  19. payment_method_requests - cashier asks, admin approves or rejects
+--
+--     Cashiers cannot change payment methods directly. From Settings >
+--     Payment Methods they request a new method (Add) or ask for one to go
+--     (Remove), saying why. The admin decides in Settings > Payment Requests:
+--     Approve makes the change; Reject needs a reason, which the cashier sees.
+--
+--     outcome        what approving actually did (e.g. "hidden from the till -
+--                    used by 12 sales" when a removal could not delete it)
+--     reject_reason  required on Rejected
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS payment_method_requests (
+    request_id     INT(11)      NOT NULL AUTO_INCREMENT,
+    action         ENUM('Add','Remove') NOT NULL,
+    method_id      INT(11)      DEFAULT NULL,
+    name           VARCHAR(30)  NOT NULL,
+    type           ENUM('Cash','Reference','Cheque') DEFAULT NULL,
+    note           VARCHAR(255) DEFAULT NULL,
+    reason         VARCHAR(255) NOT NULL,
+    status         ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Pending',
+    requested_by   INT(11)      DEFAULT NULL,
+    requested_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by    INT(11)      DEFAULT NULL,
+    reviewed_at    DATETIME     DEFAULT NULL,
+    reject_reason  VARCHAR(255) DEFAULT NULL,
+    outcome        VARCHAR(255) DEFAULT NULL,
+    PRIMARY KEY (request_id),
+    KEY idx_pmr_status (status),
+    KEY idx_pmr_user (requested_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

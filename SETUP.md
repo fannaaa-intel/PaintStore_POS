@@ -35,7 +35,21 @@ Open <http://localhost/phpmyadmin> → **Import** tab → **Choose File** →
 
 The file creates the database itself, so there is nothing to create first.
 
-## 4. Run it
+## 4. Email sender (mail.config)
+
+Password-change codes and "account created" notices are sent from the store's
+Gmail. The sender lives in `mail.config` next to `PaintStore_POS.exe`. It holds
+a Google App Password, so **git does not carry it**:
+
+1. Copy `mail.config.example` to `mail.config`.
+2. Fill in the Gmail address and its **App Password**
+   (myaccount.google.com/apppasswords, needs 2-Step Verification on). This is not
+   the normal Gmail password.
+
+Without it the app still runs, but password changes that need a code will
+report that email is not set up.
+
+## 5. Run it
 
 Open `PaintStore_POS.sln` in Visual Studio 2022 → press **F5**.
 
@@ -90,6 +104,8 @@ When in doubt, have them run `migrations.sql`. It is harmless.
 | Your code — new screens, fixes, buttons | ✅ yes |
 | Their data — sales, products, stock counts | ❌ no, stays on their machine |
 | Database shape — new columns and tables | ❌ no, that is what `migrations.sql` is for |
+| `mail.config` — the Gmail App Password | ❌ no, copy it by hand (see A.4) |
+| `Backups\` — database backups | ❌ no, copy them to a USB drive yourself |
 
 Their sales staying on their machine is the behaviour you want. Two laptops
 selling at once are two separate shops; for one shared set of live data, point
