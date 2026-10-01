@@ -17,8 +17,10 @@ Imports MySql.Data.MySqlClient
 '    five separate rows with nothing tying them together -- there was no way
 '    to see, or approve, a basket.
 '
-'    Raising requests is the INVENTORY role's job, done from Low Stock Alerts,
-'    so this form opens from there and keeps that flow.
+'    Inventory raises requests from Low Stock Alerts; Procurement raises them
+'    from Procurement > Purchase Requests. Both wait for the admin's approval.
+'    Every request carries a purpose and an estimated unit cost per product
+'    (migration 23), so the approver sees why and roughly how much.
 '
 '  PRODUCT SEARCH
 '    The form searches the whole product catalogue by name or SKU, not only
@@ -68,6 +70,16 @@ Public Module PurchaseRequestModal
         Public StockQty As Integer
         Public ReorderLevel As Integer
         Public UnitPrice As Decimal
+        Public CostPrice As Decimal
+
+        ' What one unit is expected to cost to buy: the product's cost price,
+        ' or its selling price when no cost has been entered. Only a starting
+        ' point -- the requester can change it on the line.
+        Public ReadOnly Property EstCost As Decimal
+            Get
+                Return If(CostPrice > 0D, CostPrice, UnitPrice)
+            End Get
+        End Property
 
         ' Below its reorder level, so the search result can say so without the
         ' requester cross-checking the alerts screen.
@@ -200,8 +212,8 @@ Public Module PurchaseRequestModal
             End If
         End If
 
-        Const CARD_W As Integer = 720
-        Const CARD_H As Integer = 640
+        Const CARD_W As Integer = 760
+        Const CARD_H As Integer = 690
         Const PAD As Integer = 24
         Dim innerW As Integer = CARD_W - PAD * 2
 
@@ -230,8 +242,73 @@ Public Module PurchaseRequestModal
             .Size = New Size(innerW, 20), .BackColor = Color.Transparent
         }
 
+        ' ── Request facts: number, date, who ─────────────────────────────────
+        ' Filled in by the system, so shown as facts rather than fields.
+        Dim facts As New Panel With {
+            .Location = New Point(PAD, lblBody.Bottom + 12), .Size = New Size(innerW, 52),
+            .BackColor = Theme.TileBg
+        }
+        AddHandler facts.Paint,
+            Sub(sender As Object, ev As PaintEventArgs)
+                ev.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using path As GraphicsPath = RoundedPath(New Rectangle(0, 0, facts.Width - 1, facts.Height - 1), 8)
+                    Using b As New SolidBrush(Theme.TileBg)
+                        ev.Graphics.FillPath(b, path)
+                    End Using
+                End Using
+            End Sub
+        Dim factList = {
+            ("REQUEST NO.", If(isEdit, RequestReviewModal.RequestNo(editRequestId), "Assigned when sent")),
+            ("REQUEST DATE", If(isEdit, editing.CreatedAt, DateTime.Now).ToString("MMMM d, yyyy")),
+            ("REQUESTED BY", If(isEdit, editing.RequestedBy, Session.CurrentFullName))
+        }
+        Dim factW As Integer = innerW \ factList.Length
+        For i As Integer = 0 To factList.Length - 1
+            facts.Controls.Add(New Label With {
+                .Text = factList(i).Item1, .Font = New Font("Segoe UI Semibold", 8.0F),
+                .ForeColor = FaintClr, .AutoSize = True,
+                .Location = New Point(14 + i * factW, 8), .BackColor = Color.Transparent
+            })
+            facts.Controls.Add(New Label With {
+                .Text = factList(i).Item2, .Font = New Font("Segoe UI Semibold", 10.0F),
+                .ForeColor = If(i = 0 AndAlso Not isEdit, FaintClr, TitleClr),
+                .AutoSize = False, .AutoEllipsis = True, .Size = New Size(factW - 24, 20),
+                .Location = New Point(14 + i * factW, 25), .BackColor = Color.Transparent
+            })
+        Next
+
+        ' ── Purpose (required) ───────────────────────────────────────────────
+        Const PURPOSE_MAX As Integer = 200
+        Dim purposeY As Integer = facts.Bottom + 12
+        Dim capPurpose As Label = MakeCaption("PURPOSE  *", PAD, purposeY, innerW - 80)
+        Dim lblPurposeCount As New Label With {
+            .Text = "0/" & PURPOSE_MAX, .Font = New Font("Segoe UI", 8.5F), .ForeColor = FaintClr,
+            .AutoSize = False, .Size = New Size(80, 16), .TextAlign = ContentAlignment.MiddleRight,
+            .Location = New Point(PAD + innerW - 80, purposeY), .BackColor = Color.Transparent
+        }
+        Dim txtPurpose As New TextBox With {
+            .Font = New Font("Segoe UI", 10.0F), .BorderStyle = BorderStyle.None,
+            .BackColor = FieldBg, .ForeColor = TitleClr, .Multiline = True,
+            .MaxLength = PURPOSE_MAX, .Location = New Point(12, 8), .Size = New Size(innerW - 24, 40)
+        }
+        Dim fldPurpose As Panel = MakeField(txtPurpose, PAD, purposeY + 18, innerW, 54)
+        Dim lblPurposeHint As New Label With {
+            .Text = "Why is this needed?  e.g. Restock low items, or a customer's repaint order",
+            .Font = New Font("Segoe UI", 10.0F), .ForeColor = FaintClr, .AutoSize = True,
+            .Location = New Point(13, 9), .BackColor = Color.Transparent, .Cursor = Cursors.IBeam
+        }
+        fldPurpose.Controls.Add(lblPurposeHint)
+        lblPurposeHint.BringToFront()
+        AddHandler lblPurposeHint.Click, Sub() txtPurpose.Focus()
+        AddHandler txtPurpose.TextChanged,
+            Sub()
+                lblPurposeHint.Visible = (txtPurpose.TextLength = 0)
+                lblPurposeCount.Text = txtPurpose.TextLength & "/" & PURPOSE_MAX
+                fldPurpose.Invalidate()
+            End Sub
+
         ' ── Search field ─────────────────────────────────────────────────────
-        Dim searchY As Integer = lblBody.Bottom + 14
+        Dim searchY As Integer = fldPurpose.Bottom + 14
         Dim txtSearch As New TextBox With {
             .Font = New Font("Segoe UI", 11.0F), .BorderStyle = BorderStyle.None,
             .BackColor = FieldBg, .ForeColor = TitleClr,
@@ -264,7 +341,7 @@ Public Module PurchaseRequestModal
         ' ── Results list ─────────────────────────────────────────────────────
         Dim resultsY As Integer = searchY + 48
         Dim resultsHost As New Panel With {
-            .Location = New Point(PAD, resultsY), .Size = New Size(innerW, 150),
+            .Location = New Point(PAD, resultsY), .Size = New Size(innerW, 210),
             .BackColor = CardBg, .AutoScroll = True, .Visible = False
         }
         AddHandler resultsHost.Paint,
@@ -279,30 +356,43 @@ Public Module PurchaseRequestModal
             End Sub
 
         ' ── Lines list ───────────────────────────────────────────────────────
-        Dim capLines As Label = MakeCaption("REQUESTED ITEMS", PAD, resultsY, innerW)
+        ' Column captions line up with the row layout in buildLineRow.
+        Dim rowW As Integer = innerW - 20
+        Dim xQty As Integer = rowW - 372
+        Dim xCost As Integer = rowW - 268
+        Dim xTotal As Integer = rowW - 142
+        Dim capLines As Label = MakeCaption("PRODUCTS", PAD + 8, resultsY, xQty - 16)
+        Dim capQty As Label = MakeCaption("QTY", PAD + xQty, resultsY, 90)
+        Dim capCost As Label = MakeCaption("EST. UNIT COST", PAD + xCost, resultsY, 116)
+        Dim capTotal As Label = MakeCaption("TOTAL", PAD + xTotal, resultsY, 104)
+        capQty.TextAlign = ContentAlignment.MiddleCenter
+        capTotal.TextAlign = ContentAlignment.MiddleRight
         Dim linesHost As New Panel With {
             .Location = New Point(PAD, resultsY + 20),
-            .Size = New Size(innerW, 236),
+            .Size = New Size(innerW, 224),
             .BackColor = CardBg, .AutoScroll = True
         }
+        AddHandler linesHost.Paint,
+            Sub(sender As Object, ev As PaintEventArgs)
+                Using pen As New Pen(DividerClr, 1.0F)
+                    ev.Graphics.DrawLine(pen, 0, 0, linesHost.Width, 0)
+                End Using
+            End Sub
 
         Dim lblTotals As New Label With {
-            .Text = "", .Font = New Font("Segoe UI Semibold", 10.0F),
-            .ForeColor = MintDark, .AutoSize = False,
-            .Location = New Point(PAD + 2, linesHost.Bottom + 8),
-            .Size = New Size(innerW - 4, 20),
+            .Text = "", .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = SubClr, .AutoSize = False,
+            .Location = New Point(PAD + 2, linesHost.Bottom + 10),
+            .Size = New Size(innerW - 230, 22),
             .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
-
-        ' ── Note ─────────────────────────────────────────────────────────────
-        Dim noteY As Integer = lblTotals.Bottom + 10
-        Dim capNote As Label = MakeCaption("NOTE FOR THE APPROVER (OPTIONAL)", PAD, noteY, innerW)
-        Dim txtNote As New TextBox With {
-            .Font = New Font("Segoe UI", 10.0F), .BorderStyle = BorderStyle.None,
-            .BackColor = FieldBg, .ForeColor = TitleClr,
-            .Location = New Point(12, 10), .Width = innerW - 24
+        Dim lblGrand As New Label With {
+            .Text = "", .Font = New Font("Segoe UI Semibold", 12.0F),
+            .ForeColor = MintDark, .AutoSize = False,
+            .Location = New Point(PAD + innerW - 228, linesHost.Bottom + 8),
+            .Size = New Size(228, 24),
+            .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
         }
-        Dim fldNote As Panel = MakeField(txtNote, PAD, noteY + 18, innerW, 40)
 
         ' ── Declared ahead of the closures that use them ─────────────────────
         Dim renderLines As Action = Nothing
@@ -313,10 +403,6 @@ Public Module PurchaseRequestModal
         ' how many units, and roughly what it is worth at current prices.
         Dim refreshTotals As Action =
             Sub()
-                If _lines.Count = 0 Then
-                    lblTotals.Text = ""
-                    Return
-                End If
                 Dim units As Integer = 0
                 Dim value As Decimal = 0D
                 For Each ln In _lines
@@ -325,9 +411,8 @@ Public Module PurchaseRequestModal
                 Next
                 lblTotals.Text = _lines.Count & If(_lines.Count = 1, " product", " products") &
                                  "   " & ChrW(8226) & "   " & units.ToString("N0") &
-                                 If(units = 1, " unit", " units") &
-                                 "   " & ChrW(8226) & "   about " & Peso & value.ToString("N2") &
-                                 " at current prices"
+                                 If(units = 1, " unit", " units")
+                lblGrand.Text = "Est. total  " & Peso & value.ToString("N2")
             End Sub
 
         ' ── Build one line row ───────────────────────────────────────────────
@@ -340,8 +425,8 @@ Public Module PurchaseRequestModal
 
                 Dim lblName As New Label With {
                     .Text = ln.Name, .Font = New Font("Segoe UI Semibold", 10.0F),
-                    .ForeColor = MintDark, .AutoSize = False,
-                    .Location = New Point(8, 8), .Size = New Size(280, 20),
+                    .ForeColor = MintDark, .AutoSize = False, .AutoEllipsis = True,
+                    .Location = New Point(8, 8), .Size = New Size(xQty - 16, 20),
                     .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
                 }
 
@@ -356,8 +441,8 @@ Public Module PurchaseRequestModal
                     .Text = stockNote, .Font = New Font("Segoe UI", 8.5F),
                     .ForeColor = If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
                                     WarnClr, FaintClr),
-                    .AutoSize = False, .Location = New Point(8, 28),
-                    .Size = New Size(280, 18),
+                    .AutoSize = False, .AutoEllipsis = True, .Location = New Point(8, 28),
+                    .Size = New Size(xQty - 16, 18),
                     .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
                 }
 
@@ -367,19 +452,36 @@ Public Module PurchaseRequestModal
                     .BackColor = FieldBg, .ForeColor = TitleClr,
                     .Location = New Point(8, 8), .Width = 74, .TextAlign = HorizontalAlignment.Center
                 }
-                Dim fldQty As Panel = MakeField(numQty, row.Width - 230, 9, 90, 38)
+                Dim fldQty As Panel = MakeField(numQty, xQty, 9, 90, 38)
+
+                ' Estimated cost of one unit. Starts from the product's cost
+                ' price; the requester can put in a better figure.
+                Dim numCost As New NumericUpDown With {
+                    .Minimum = 0D, .Maximum = 9999999D, .DecimalPlaces = 2,
+                    .ThousandsSeparator = True, .Value = Math.Min(Math.Max(ln.UnitPrice, 0D), 9999999D),
+                    .Font = New Font("Segoe UI", 10.0F), .BorderStyle = BorderStyle.None,
+                    .BackColor = FieldBg, .ForeColor = TitleClr,
+                    .Location = New Point(8, 8), .Width = 100, .TextAlign = HorizontalAlignment.Right
+                }
+                Dim fldCost As Panel = MakeField(numCost, xCost, 9, 116, 38)
 
                 Dim lblValue As New Label With {
                     .Text = Peso & ln.LineValue.ToString("N2"),
-                    .Font = New Font("Segoe UI Semibold", 10.0F), .ForeColor = SubClr,
-                    .AutoSize = False, .Location = New Point(row.Width - 132, 18),
-                    .Size = New Size(96, 20),
+                    .Font = New Font("Segoe UI Semibold", 10.0F), .ForeColor = MintDark,
+                    .AutoSize = False, .Location = New Point(xTotal, 18),
+                    .Size = New Size(104, 20),
                     .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent
                 }
 
                 AddHandler numQty.ValueChanged,
                     Sub()
                         ln.Qty = CInt(numQty.Value)
+                        lblValue.Text = Peso & ln.LineValue.ToString("N2")
+                        refreshTotals()
+                    End Sub
+                AddHandler numCost.ValueChanged,
+                    Sub()
+                        ln.UnitPrice = numCost.Value
                         lblValue.Text = Peso & ln.LineValue.ToString("N2")
                         refreshTotals()
                     End Sub
@@ -404,7 +506,7 @@ Public Module PurchaseRequestModal
                     .Height = 1, .BackColor = RowDivider, .Dock = DockStyle.Bottom
                 }
 
-                row.Controls.AddRange({lblName, lblSku, fldQty, lblValue, lnkRemove, div})
+                row.Controls.AddRange({lblName, lblSku, fldQty, fldCost, lblValue, lnkRemove, div})
                 Return row
             End Function
 
@@ -452,7 +554,7 @@ Public Module PurchaseRequestModal
                 _lines.Add(New ReqLine With {
                     .ProductId = hit.ProductId, .Name = hit.Name, .Sku = hit.Sku,
                     .StockQty = hit.StockQty, .ReorderLevel = hit.ReorderLevel,
-                    .UnitPrice = hit.UnitPrice, .Qty = Math.Max(qty, 1)
+                    .UnitPrice = hit.EstCost, .Qty = Math.Max(qty, 1)
                 })
                 renderLines()
                 refreshTotals()
@@ -617,11 +719,18 @@ Public Module PurchaseRequestModal
                 If _lines.Count = 0 Then
                     AppModal.Show(If(isEdit,
                                      "A request needs at least one product." & Environment.NewLine &
-                                     "To drop the whole request, use Remove in My Requests.",
+                                     "To drop the whole request, remove it from the request list.",
                                      "Add at least one product before sending the request."),
                                   "Nothing to Request", MessageBoxButtons.OK,
                                   MessageBoxIcon.Warning)
                     txtSearch.Focus()
+                    Return
+                End If
+
+                If txtPurpose.Text.Trim().Length = 0 Then
+                    AppModal.Show("Write the purpose of this request, so the admin knows why it is needed.",
+                                  "Purpose Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    txtPurpose.Focus()
                     Return
                 End If
 
@@ -641,8 +750,8 @@ Public Module PurchaseRequestModal
                 End If
 
                 Dim ok As Boolean = If(isEdit,
-                                       UpdateRequest(editRequestId, _lines, txtNote.Text.Trim()),
-                                       SaveRequest(_lines, txtNote.Text.Trim()))
+                                       UpdateRequest(editRequestId, _lines, txtPurpose.Text.Trim()),
+                                       SaveRequest(_lines, txtPurpose.Text.Trim()))
                 If ok Then
                     submitted = True
                     f.DialogResult = DialogResult.OK
@@ -650,9 +759,9 @@ Public Module PurchaseRequestModal
                 End If
             End Sub
 
-        f.Controls.AddRange({lblTitle, lblBody, fldSearch,
-                             capLines, linesHost, lblTotals,
-                             capNote, fldNote,
+        f.Controls.AddRange({lblTitle, lblBody, facts,
+                             capPurpose, lblPurposeCount, fldPurpose, fldSearch,
+                             capLines, capQty, capCost, capTotal, linesHost, lblTotals, lblGrand,
                              btnCancel, btnSend, resultsHost})
         resultsHost.BringToFront()
 
@@ -691,7 +800,7 @@ Public Module PurchaseRequestModal
                 End If
             End Sub
 
-        ' Editing: the saved basket and note come back exactly as sent.
+        ' Editing: the saved basket and purpose come back exactly as sent.
         If isEdit Then
             For Each ln In editing.Lines
                 _lines.Add(New ReqLine With {
@@ -700,19 +809,25 @@ Public Module PurchaseRequestModal
                     .UnitPrice = ln.UnitPrice, .Qty = Math.Max(ln.Qty, 1)
                 })
             Next
-            txtNote.Text = RequestReviewModal.TypedNote(editing.Note)
+            txtPurpose.Text = If(editing.Purpose <> "", editing.Purpose,
+                                 RequestReviewModal.TypedNote(editing.Note))
         End If
 
         ' Seed the product the requester came in with, if any.
         If seedProductId > 0 Then
             Dim seed As ProductHit = LoadProduct(seedProductId)
             If seed IsNot Nothing Then addLine(seed, Math.Max(seedQty, 1))
+            ' Opened from a low-stock row: the reason is already known.
+            If seed IsNot Nothing AndAlso seed.IsLow Then txtPurpose.Text = "Restock: below the restock level."
         End If
 
         renderLines()
         refreshTotals()
 
-        AddHandler f.Shown, Sub() txtSearch.Focus()
+        AddHandler f.Shown,
+            Sub()
+                If txtPurpose.TextLength = 0 Then txtPurpose.Focus() Else txtSearch.Focus()
+            End Sub
 
         Try
             Dim owner As Form = Form.ActiveForm
@@ -745,7 +860,7 @@ Public Module PurchaseRequestModal
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.name, p.sku, p.stock_qty, " &
                     "COALESCE(p.reorder_level, 0) AS reorder_level, " &
-                    "COALESCE(p.unit_price, 0) AS unit_price " &
+                    "COALESCE(p.unit_price, 0) AS unit_price, COALESCE(p.cost_price, 0) AS cost_price " &
                     "FROM products p " &
                     "WHERE p.is_active = 1 AND (p.name LIKE @q OR p.sku LIKE @q) " &
                     "ORDER BY " &
@@ -775,7 +890,7 @@ Public Module PurchaseRequestModal
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.name, p.sku, p.stock_qty, " &
                     "COALESCE(p.reorder_level, 0) AS reorder_level, " &
-                    "COALESCE(p.unit_price, 0) AS unit_price " &
+                    "COALESCE(p.unit_price, 0) AS unit_price, COALESCE(p.cost_price, 0) AS cost_price " &
                     "FROM products p WHERE p.product_id = @id LIMIT 1", conn)
                     cmd.Parameters.AddWithValue("@id", productId)
                     Using rdr = cmd.ExecuteReader()
@@ -796,7 +911,8 @@ Public Module PurchaseRequestModal
             .Sku = rdr("sku").ToString(),
             .StockQty = Convert.ToInt32(rdr("stock_qty")),
             .ReorderLevel = Convert.ToInt32(rdr("reorder_level")),
-            .UnitPrice = Convert.ToDecimal(rdr("unit_price"))
+            .UnitPrice = Convert.ToDecimal(rdr("unit_price")),
+            .CostPrice = Convert.ToDecimal(rdr("cost_price"))
         }
     End Function
 
@@ -848,21 +964,8 @@ Public Module PurchaseRequestModal
                         requestId = CInt(cmd.LastInsertedId)
                     End Using
 
-                    For Each ln In lines
-                        Using cmd As New MySqlCommand(
-                            "INSERT INTO purchase_request_items " &
-                            "(request_id, product_id, qty_requested, note) " &
-                            "VALUES (@rid, @pid, @qty, @note)", conn, tx)
-                            cmd.Parameters.AddWithValue("@rid", requestId)
-                            cmd.Parameters.AddWithValue("@pid", ln.ProductId)
-                            cmd.Parameters.AddWithValue("@qty", ln.Qty)
-                            cmd.Parameters.AddWithValue("@note",
-                                If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
-                                   "Stock " & ln.StockQty & ", restock level " & ln.ReorderLevel,
-                                   CObj(DBNull.Value)))
-                            cmd.ExecuteNonQuery()
-                        End Using
-                    Next
+                    InsertLines(conn, tx, requestId, lines)
+                    SavePurpose(conn, tx, requestId, note)
 
                     tx.Commit()
 
@@ -893,6 +996,42 @@ Public Module PurchaseRequestModal
             Return False
         End Try
     End Function
+
+    ' One purchase_request_items row per product, with its estimated unit
+    ' cost once migration 23 has added the column.
+    Private Sub InsertLines(conn As MySqlConnection, tx As MySqlTransaction,
+                            requestId As Integer, lines As List(Of ReqLine))
+        Dim hasPrice As Boolean = SupplierPayments.ColumnExists(conn, "purchase_request_items", "unit_price", tx)
+        For Each ln In lines
+            Using cmd As New MySqlCommand(
+                "INSERT INTO purchase_request_items " &
+                "(request_id, product_id, qty_requested, note" & If(hasPrice, ", unit_price", "") & ") " &
+                "VALUES (@rid, @pid, @qty, @note" & If(hasPrice, ", @price", "") & ")", conn, tx)
+                cmd.Parameters.AddWithValue("@rid", requestId)
+                cmd.Parameters.AddWithValue("@pid", ln.ProductId)
+                cmd.Parameters.AddWithValue("@qty", ln.Qty)
+                cmd.Parameters.AddWithValue("@note",
+                    If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
+                       "Stock " & ln.StockQty & ", restock level " & ln.ReorderLevel,
+                       CObj(DBNull.Value)))
+                If hasPrice Then cmd.Parameters.AddWithValue("@price", ln.UnitPrice)
+                cmd.ExecuteNonQuery()
+            End Using
+        Next
+    End Sub
+
+    ' The purpose in full (the note above keeps a 150-character copy, so
+    ' screens that only read the note still show why).
+    Private Sub SavePurpose(conn As MySqlConnection, tx As MySqlTransaction,
+                            requestId As Integer, purpose As String)
+        If Not SupplierPayments.ColumnExists(conn, "purchase_requests", "purpose", tx) Then Return
+        Using cmd As New MySqlCommand(
+            "UPDATE purchase_requests SET purpose = @p WHERE request_id = @id", conn, tx)
+            cmd.Parameters.AddWithValue("@p", If(purpose.Length = 0, CObj(DBNull.Value), purpose))
+            cmd.Parameters.AddWithValue("@id", requestId)
+            cmd.ExecuteNonQuery()
+        End Using
+    End Sub
 
     ' =========================================================================
     '  UPDATE — rewrite a Pending request's basket and note.
@@ -958,21 +1097,8 @@ Public Module PurchaseRequestModal
                         cmd.Parameters.AddWithValue("@id", requestId)
                         cmd.ExecuteNonQuery()
                     End Using
-                    For Each ln In lines
-                        Using cmd As New MySqlCommand(
-                            "INSERT INTO purchase_request_items " &
-                            "(request_id, product_id, qty_requested, note) " &
-                            "VALUES (@rid, @pid, @qty, @note)", conn, tx)
-                            cmd.Parameters.AddWithValue("@rid", requestId)
-                            cmd.Parameters.AddWithValue("@pid", ln.ProductId)
-                            cmd.Parameters.AddWithValue("@qty", ln.Qty)
-                            cmd.Parameters.AddWithValue("@note",
-                                If(ln.ReorderLevel > 0 AndAlso ln.StockQty <= ln.ReorderLevel,
-                                   "Stock " & ln.StockQty & ", restock level " & ln.ReorderLevel,
-                                   CObj(DBNull.Value)))
-                            cmd.ExecuteNonQuery()
-                        End Using
-                    Next
+                    InsertLines(conn, tx, requestId, lines)
+                    SavePurpose(conn, tx, requestId, note)
 
                     tx.Commit()
                 End Using

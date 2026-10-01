@@ -765,3 +765,37 @@ CREATE TABLE IF NOT EXISTS goods_receipt_issues (
 
 SHOW COLUMNS FROM purchase_requests LIKE 're%';
 SHOW COLUMNS FROM goods_receipt_issues;
+
+-- -----------------------------------------------------------------------------
+--  23. Procurement - purchase requests and supplier payment records
+--
+--     a) purchase_requests.purpose
+--        Why the request is being made (required on the form, up to 200
+--        characters). Requests can now be sent by Procurement as well as
+--        Inventory; both still wait for the admin's approval.
+--
+--     b) purchase_request_items.unit_price
+--        The estimated unit cost entered on the request, so the request
+--        shows an estimated total. A new PO made from the request starts
+--        from this price.
+--
+--     c) supplier_payments.invoice_no / invoice_date
+--        The supplier's invoice behind each payment. A PO can now be paid in
+--        parts; its status (Unpaid / Partial / Paid) is worked out from the
+--        payments recorded, so there is no status column to keep in step.
+--        Older payments kept the invoice number in reference_no; they are
+--        left as they are.
+-- -----------------------------------------------------------------------------
+ALTER TABLE purchase_requests
+    ADD COLUMN IF NOT EXISTS purpose VARCHAR(200) DEFAULT NULL AFTER note;
+
+ALTER TABLE purchase_request_items
+    ADD COLUMN IF NOT EXISTS unit_price DECIMAL(10,2) DEFAULT NULL AFTER qty_requested;
+
+ALTER TABLE supplier_payments
+    ADD COLUMN IF NOT EXISTS invoice_no   VARCHAR(60) DEFAULT NULL AFTER reference_no,
+    ADD COLUMN IF NOT EXISTS invoice_date DATE        DEFAULT NULL AFTER invoice_no;
+
+SHOW COLUMNS FROM purchase_requests LIKE 'purpose';
+SHOW COLUMNS FROM purchase_request_items LIKE 'unit_price';
+SHOW COLUMNS FROM supplier_payments LIKE 'invoice%';

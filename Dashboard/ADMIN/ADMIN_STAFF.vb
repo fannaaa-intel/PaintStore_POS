@@ -266,7 +266,7 @@ Public Class ADMIN_STAFF
             Sub()
                 SetActive(_btnSettings)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 SettingsPanelBuilder.LoadSettings(MainContainer)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -295,7 +295,7 @@ Public Class ADMIN_STAFF
                         ' Straight to the purchase requests waiting for approval.
                         SetActive(procurementOverview)
                         MainContainer.SuspendLayout()
-                        MainContainer.Controls.Clear()
+                        ScreenHost.Clear(MainContainer)
                         AdminProcurementOverviewPanelBuilder.LoadProcurementOverview(MainContainer, 1, "Pending")
                         MainContainer.ResumeLayout()
                         MainContainer.Refresh()
@@ -307,7 +307,7 @@ Public Class ADMIN_STAFF
             Sub(roleId As Integer)
                 SetActive(userMgmt)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 AdminUserPanelBuilder.LoadUsersForRole(MainContainer, roleId)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -623,7 +623,7 @@ Public Class ADMIN_STAFF
     Private Sub dashHome_Click(sender As Object, e As EventArgs) Handles dashHome.Click
         SetActive(dashHome)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminDashPanelBuilder.LoadDashboard(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -632,7 +632,7 @@ Public Class ADMIN_STAFF
     Private Sub userMgmt_Click(sender As Object, e As EventArgs) Handles userMgmt.Click
         SetActive(userMgmt)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminUserPanelBuilder.LoadUsers(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -641,7 +641,7 @@ Public Class ADMIN_STAFF
     Private Sub roles_Click(sender As Object, e As EventArgs) Handles roles.Click
         SetActive(roles)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminRolesPanelBuilder.LoadRoles(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -650,7 +650,7 @@ Public Class ADMIN_STAFF
     Private Sub storeSettings_Click(sender As Object, e As EventArgs) Handles storeSettings.Click
         SetActive(storeSettings)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminStoreSettingsPanelBuilder.LoadStoreSettings(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -659,7 +659,7 @@ Public Class ADMIN_STAFF
     Private Sub products_Click(sender As Object, e As EventArgs) Handles products.Click
         SetActive(products)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminCategoriesPanelBuilder.LoadCategories(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -668,7 +668,7 @@ Public Class ADMIN_STAFF
     Private Sub suppliers_Click(sender As Object, e As EventArgs) Handles suppliers.Click
         SetActive(suppliers)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminSuppliersPanelBuilder.LoadSuppliers(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -677,7 +677,7 @@ Public Class ADMIN_STAFF
     Private Sub colorFormulas_Click(sender As Object, e As EventArgs) Handles colorFormulas.Click
         SetActive(colorFormulas)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminColorFormulasPanelBuilder.LoadColorFormulas(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -686,7 +686,7 @@ Public Class ADMIN_STAFF
     Private Sub salesOverview_Click(sender As Object, e As EventArgs) Handles salesOverview.Click
         SetActive(salesOverview)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminSalesOverviewPanelBuilder.LoadSalesOverview(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -695,7 +695,7 @@ Public Class ADMIN_STAFF
     Private Sub inventoryOverview_Click(sender As Object, e As EventArgs) Handles inventoryOverview.Click
         SetActive(inventoryOverview)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminInventoryOverviewPanelBuilder.LoadInventoryOverview(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -704,7 +704,7 @@ Public Class ADMIN_STAFF
     Private Sub procurementOverview_Click(sender As Object, e As EventArgs) Handles procurementOverview.Click
         SetActive(procurementOverview)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminProcurementOverviewPanelBuilder.LoadProcurementOverview(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -713,7 +713,7 @@ Public Class ADMIN_STAFF
     Private Sub financialReports_Click(sender As Object, e As EventArgs) Handles financialReports.Click
         SetActive(financialReports)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminFinancialReportsPanelBuilder.LoadFinancialReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -722,7 +722,7 @@ Public Class ADMIN_STAFF
     Private Sub activityLogNav_Click(sender As Object, e As EventArgs) Handles activityLogNav.Click
         SetActive(activityLogNav)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AdminActivityLogPanelBuilder.LoadActivityLog(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()

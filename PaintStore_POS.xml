@@ -265,6 +265,16 @@ PaintStore_POS
 <member name="M:PaintStore_POS.RequestReviewModal.HasReviewNote(MySql.Data.MySqlClient.MySqlConnection,MySql.Data.MySqlClient.MySqlTransaction)">
  <summary>True when migration 22 added purchase_requests.review_note.</summary>
 </member>
+<member name="M:PaintStore_POS.RequestReviewModal.EstPriceSql(System.Boolean)">
+ <summary>
+ SQL for a request line's estimated unit cost (aliases pri, p): what the
+ requester entered, else the product's cost price, else its selling price.
+ The same rule the request form uses to suggest a price.
+ </summary>
+</member>
+<member name="M:PaintStore_POS.RequestReviewModal.PurposeText(PaintStore_POS.RequestReviewModal.RequestInfo)">
+ <summary>The reason shown for a request: its purpose, or the typed part of the older note.</summary>
+</member>
 <member name="M:PaintStore_POS.RequestReviewModal.LoadRequest(System.Int32)">
  <summary>Loads a request and its product lines. Nothing when not found.</summary>
 </member>
@@ -280,6 +290,15 @@ PaintStore_POS
  Draws a Code39-style barcode pseudo-graphic derived from the receipt number.
  Not a standards-compliant barcode — purely decorative / scannable aesthetic.
  </summary>
+</member>
+<member name="M:PaintStore_POS.SupplierPayments.PaymentNo(System.Int32)">
+ <summary>"PAY-0007" — the one way a payment number is written.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierPayments.StatusColors(System.String)">
+ <summary>Badge colours for a payment status, matching the Paid / Unpaid pills in Payables.</summary>
+</member>
+<member name="M:PaintStore_POS.SupplierPayments.LoadOpenPos">
+ <summary>Orders that can still take a payment: placed, not cancelled, not yet fully paid.</summary>
 </member>
 <member name="M:PaintStore_POS.PanelRenderer.Draw(System.Windows.Forms.Panel,System.Windows.Forms.PaintEventArgs,System.Boolean,System.Boolean)">
  <summary>

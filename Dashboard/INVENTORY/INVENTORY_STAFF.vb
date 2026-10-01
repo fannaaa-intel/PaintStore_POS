@@ -19,7 +19,9 @@ Public Class INVENTORY_STAFF
     Private _lowStockCount As Integer = -1  ' red badge on Low Stock Alerts
 
     ' ── Hamburger toggle state ──────────────────────────────────────────────────
-    Private Const NAV_OPEN_WIDTH As Integer = 260
+    ' 20px wider than the other modules: "Transaction History" and "Low Stock
+    ' Alerts" plus its red count badge do not fit on one line at 260.
+    Private Const NAV_OPEN_WIDTH As Integer = 280
     Private Const NAV_CLOSED_WIDTH As Integer = 56
     Private navIsOpen As Boolean = True
     Private btnHamburger As Button          ' always-visible toggle button
@@ -220,7 +222,7 @@ Public Class INVENTORY_STAFF
                 InventoryHomePanelBuilder.StopTimer()
                 SetActive(_btnSettings)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 SettingsPanelBuilder.LoadSettings(MainContainer)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -240,7 +242,7 @@ Public Class INVENTORY_STAFF
         ' ── LOAD HOME ───────────────────────────────────────────────────────────
         shiftStartTime = DateTime.Now
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryHomePanelBuilder.LoadHome(MainContainer, shiftStartTime)
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
@@ -535,7 +537,7 @@ Public Class INVENTORY_STAFF
         SetActive(home)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()   ' safe — burger is on Form, not MainContainer
+        ScreenHost.Clear(MainContainer)   ' safe — burger is on Form, not MainContainer
         InventoryHomePanelBuilder.LoadHome(MainContainer, shiftStartTime)
         MainContainer.ResumeLayout()
     End Sub
@@ -544,7 +546,7 @@ Public Class INVENTORY_STAFF
         SetActive(itemList)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryItemListPanelBuilder.LoadItemList(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -557,7 +559,7 @@ Public Class INVENTORY_STAFF
         SetActive(itemList)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryItemListPanelBuilder.LoadItemList(MainContainer, category, status)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -567,7 +569,7 @@ Public Class INVENTORY_STAFF
         SetActive(stockLevels)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryStockLevelPanelBuilder.LoadStockLevels(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -577,7 +579,7 @@ Public Class INVENTORY_STAFF
         SetActive(stockAdjustment)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryStockAdjustmentPanelBuilder.LoadStockAdjustment(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -589,7 +591,7 @@ Public Class INVENTORY_STAFF
         SetActive(stockAdjustment)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryStockAdjustmentPanelBuilder.LoadStockAdjustment(MainContainer, productId)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -599,7 +601,7 @@ Public Class INVENTORY_STAFF
         SetActive(putAway)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryPutAwayPanelBuilder.LoadPutAway(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -610,7 +612,7 @@ Public Class INVENTORY_STAFF
         SetActive(putAway)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryPutAwayPanelBuilder.LoadPutAway(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -620,7 +622,7 @@ Public Class INVENTORY_STAFF
         SetActive(lowStock)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryLowStockPanelBuilder.LoadLowStock(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -630,7 +632,7 @@ Public Class INVENTORY_STAFF
         SetActive(_btnHistory)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryHistoryPanelBuilder.LoadHistory(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -640,7 +642,7 @@ Public Class INVENTORY_STAFF
         SetActive(_btnReports)
         InventoryHomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryReportsPanelBuilder.LoadReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()

@@ -376,13 +376,13 @@ Public Class ProcurementQuotationsPanelBuilder
             .Text = reqText,
             .Font = New Font("Segoe UI", 9),
             .ForeColor = If(r.BidCount > 1, MintPrimary, FaintText),
-            .AutoSize = False, .Height = 18,
+            .AutoSize = False, .AutoEllipsis = True, .Height = 18,
             .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
 
         Dim lblSup As New Label With {
             .Text = r.SupplierName, .Font = New Font("Segoe UI", 10),
-            .ForeColor = MintDark, .AutoSize = False, .Height = 20,
+            .ForeColor = MintDark, .AutoSize = False, .AutoEllipsis = True, .Height = 20,
             .TextAlign = ContentAlignment.MiddleLeft, .BackColor = Color.Transparent
         }
         Dim lblBy As New Label With {

@@ -78,7 +78,7 @@ Public Class ProcurementDeliveryPanelBuilder
     Private Shared itemsCache As New Dictionary(Of Integer, List(Of DeliveryItem))
     Private Shared receiptsCache As New Dictionary(Of Integer, List(Of ReceiptEvent))
 
-    Private Shared ReadOnly GroupOrder() As String = {"Overdue", "Due Today", "Due This Week", "Upcoming"}
+    Private Shared ReadOnly GroupOrder() As String = {"Overdue", "Due Today", "Due This Week", "Upcoming", "Delivered"}
 
     ' =========================================================================
     '  ENTRY POINT
@@ -126,12 +126,16 @@ Public Class ProcurementDeliveryPanelBuilder
             .Text = "Delivery Tracking", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
+        ' Fully received orders are listed under Delivered but are no longer
+        ' "active", so this count matches the Purchase Orders screen.
         Dim overdue As Integer = 0
+        Dim active As Integer = 0
         For Each po In allPos
             If GroupOf(po) = "Overdue" Then overdue += 1
+            If po.Status <> "Received" Then active += 1
         Next
         Dim lblSub As New Label With {
-            .Text = allPos.Count & If(allPos.Count = 1, " active order", " active orders") &
+            .Text = active & If(active = 1, " active order", " active orders") &
                     If(overdue > 0, "   " & ChrW(8226) & "   " & overdue & " overdue", ""),
             .Font = New Font("Segoe UI", 11), .ForeColor = If(overdue > 0, NegativeClr, SubText),
             .AutoSize = True, .Location = New Point(30, 58)
@@ -652,7 +656,7 @@ Public Class ProcurementDeliveryPanelBuilder
     '  GROUPING
     ' =========================================================================
     Private Shared Function GroupOf(po As DeliveryPO) As String
-        If po.Status = "Received" Then Return "Upcoming"
+        If po.Status = "Received" Then Return "Delivered"
         If Not po.HasExpected Then Return "Upcoming"
         Dim days As Integer = CInt((po.ExpectedDate.Date - DateTime.Today).TotalDays)
         If days < 0 Then Return "Overdue"

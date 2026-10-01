@@ -261,11 +261,12 @@ Public Class AdminProcurementOverviewPanelBuilder
                 conn.Open()
 
                 ' Summary over the filtered set — same joins + WHERE as the list.
+                ' Cancelled POs stay in the count but not in the ordered value.
                 Using cmd As New MySqlCommand(
                     "SELECT COUNT(*) AS n, " &
                     "SUM(CASE WHEN " & PENDING_PO_SQL & " THEN 1 ELSE 0 END) AS pending_n, " &
                     "SUM(CASE WHEN po.status = 'Received' THEN 1 ELSE 0 END) AS recv_n, " &
-                    "COALESCE(SUM(po.total_cost),0) AS total_cost " &
+                    "COALESCE(SUM(CASE WHEN po.status <> 'Cancelled' THEN po.total_cost ELSE 0 END),0) AS total_cost " &
                     PoJoins() & PoWhere(), conn)
                     AddPoParams(cmd)
                     Using rdr = cmd.ExecuteReader()
@@ -1134,6 +1135,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                 Dim t2 As Integer = (height \ 2) + 2
                 lblNo.Left = 24 : lblNo.Top = t1
                 lblBy.Left = 24 : lblBy.Top = t2
+                TextFit.Clamp(lblSupplier, CInt(w * 0.2) - 12)
                 lblSupplier.Left = CInt(w * 0.22) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 lblOrdered.Left = CInt(w * 0.42) : lblOrdered.Top = t1
                 lblExpected.Left = CInt(w * 0.42) : lblExpected.Top = t2
@@ -1161,17 +1163,17 @@ Public Class AdminProcurementOverviewPanelBuilder
 
         ' The line that carried the note now carries the basket contents when
         ' there is a basket: what is being approved outranks the note about it.
-        Dim subText As String
+        Dim noteText As String
         If r.IsMultiLine AndAlso r.ItemSummary <> "" Then
-            subText = r.ItemSummary
+            noteText = r.ItemSummary
         ElseIf r.Note = "" Then
-            subText = "no note"
+            noteText = "no note"
         Else
-            subText = r.Note
+            noteText = r.Note
         End If
 
         Dim lblNote As New Label With {
-            .Text = subText,
+            .Text = noteText,
             .Font = New Font("Segoe UI", 9),
             .ForeColor = If(r.IsMultiLine, SubText, FaintText),
             .AutoSize = False,
@@ -1272,6 +1274,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                 Dim t2 As Integer = (height \ 2) + 2
                 lblNo.Left = 24 : lblNo.Top = t1
                 lblBy.Left = 24 : lblBy.Top = t2
+                TextFit.Clamp(lblSupplier, CInt(w * 0.2) - 12)
                 lblSupplier.Left = CInt(w * 0.22) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 lblCreated.Left = CInt(w * 0.42) : lblCreated.Top = t1
                 lblValid.Left = CInt(w * 0.42) : lblValid.Top = t2

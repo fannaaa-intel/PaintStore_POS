@@ -824,8 +824,10 @@ Public Class AdminInventoryOverviewPanelBuilder
                 lblSku.Left = 24 : lblSku.Top = top2
 
                 Dim cx As Integer = CInt(w * 0.28)
+                TextFit.Clamp(lblName, cx - 24 - 12)
                 lblCat.Left = cx : lblCat.Top = top1
                 lblSup.Left = cx : lblSup.Top = top2
+                TextFit.Clamp(lblSup, CInt(w * 0.5) - cx - 12)
 
                 lblPrice.Left = CInt(w * 0.5)
                 lblPrice.Top = (height - lblPrice.Height) \ 2

@@ -277,7 +277,7 @@ Public Class AccountantIncomePanelBuilder
             .BackColor = Color.Transparent
         }
         Dim lblTitle As New Label With {
-            .Text = "Income && Expenses",
+            .Text = "Income & Expenses",
             .Font = New Font("Segoe UI", 28, FontStyle.Bold),
             .ForeColor = MintDark,
             .AutoSize = True,

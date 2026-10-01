@@ -297,8 +297,13 @@ Public Module MyRequestsModal
     ' Removes a still-Pending request. Re-checked under a row lock, and copied
     ' to the Recycle Bin inside the same transaction as the delete.
     Private Function RemoveRequest(r As MyRow) As Boolean
-        If AppModal.Show("Remove " & RequestReviewModal.RequestNo(r.RequestId) & "?" & Environment.NewLine &
-                         r.ItemCount & If(r.ItemCount = 1, " product", " products") &
+        Return RemoveRequest(r.RequestId, r.ItemCount)
+    End Function
+
+    ' Also used by Procurement > Purchase Requests for the user's own requests.
+    Public Function RemoveRequest(requestId As Integer, itemCount As Integer) As Boolean
+        If AppModal.Show("Remove " & RequestReviewModal.RequestNo(requestId) & "?" & Environment.NewLine &
+                         itemCount & If(itemCount = 1, " product", " products") &
                          " will no longer be requested." & Environment.NewLine &
                          "The admin can still restore it from the Recycle Bin.",
                          "Remove Request", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
@@ -312,7 +317,7 @@ Public Module MyRequestsModal
                     Dim owner As Integer = 0
                     Using cmd As New MySqlCommand(
                         "SELECT status, requested_by FROM purchase_requests WHERE request_id = @id FOR UPDATE", conn, tx)
-                        cmd.Parameters.AddWithValue("@id", r.RequestId)
+                        cmd.Parameters.AddWithValue("@id", requestId)
                         Using rdr = cmd.ExecuteReader()
                             If rdr.Read() Then
                                 status = rdr("status").ToString()
@@ -328,21 +333,21 @@ Public Module MyRequestsModal
                         Return True    ' the list is stale either way; reload it
                     End If
 
-                    Archive.Capture(conn, tx, "purchase_requests", "request_id", r.RequestId,
-                                    RequestReviewModal.RequestNo(r.RequestId) & " (" & r.ItemCount &
-                                    If(r.ItemCount = 1, " product)", " products)"),
+                    Archive.Capture(conn, tx, "purchase_requests", "request_id", requestId,
+                                    RequestReviewModal.RequestNo(requestId) & " (" & itemCount &
+                                    If(itemCount = 1, " product)", " products)"),
                                     children:={("purchase_request_items", "request_id")})
                     Using cmd As New MySqlCommand(
                         "DELETE FROM purchase_requests WHERE request_id = @id AND status = 'Pending'", conn, tx)
-                        cmd.Parameters.AddWithValue("@id", r.RequestId)
+                        cmd.Parameters.AddWithValue("@id", requestId)
                         cmd.ExecuteNonQuery()
                     End Using
                     tx.Commit()
                 End Using
             End Using
-            ActivityLog.Record("REQUEST_REMOVE", "purchase_request", r.RequestId,
-                               RequestReviewModal.RequestNo(r.RequestId) & ", " & r.ItemCount &
-                               If(r.ItemCount = 1, " product", " products"))
+            ActivityLog.Record("REQUEST_REMOVE", "purchase_request", requestId,
+                               RequestReviewModal.RequestNo(requestId) & ", " & itemCount &
+                               If(itemCount = 1, " product", " products"))
             Return True
         Catch ex As Exception
             AppModal.Show("Could not remove the request:" & Environment.NewLine & ex.Message,

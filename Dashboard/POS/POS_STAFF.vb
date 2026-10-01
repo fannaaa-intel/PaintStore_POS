@@ -233,7 +233,7 @@ Public Class POS_STAFF
                 HomePanelBuilder.StopTimer()
                 SetActive(_btnSettings)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 SettingsPanelBuilder.LoadSettings(MainContainer)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -258,9 +258,9 @@ Public Class POS_STAFF
         EnsureShiftOpen()
 
         ' ── LOAD HOME ───────────────────────────────────────────────────────────
-        shiftStartTime = DateTime.Now
+        shiftStartTime = ShiftStartedAt()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         HomePanelBuilder.LoadHome(MainContainer, shiftStartTime)
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
@@ -562,16 +562,35 @@ Public Class POS_STAFF
         End Try
     End Function
 
+    ' When the cashier signs back in to a shift that is still open, the shift
+    ' began earlier than this login. The dashboard's Shift Start and Shift Hours
+    ' use the real start, matching the Cash Drawer's "Opened" time.
+    Private Function ShiftStartedAt() As DateTime
+        If Session.ShiftId = 0 Then Return DateTime.Now
+        Try
+            Using conn = Db.GetConnection()
+                conn.Open()
+                Using cmd As New MySqlCommand("SELECT started_at FROM shifts WHERE shift_id=@id", conn)
+                    cmd.Parameters.AddWithValue("@id", Session.ShiftId)
+                    Dim v = cmd.ExecuteScalar()
+                    If v IsNot Nothing AndAlso Not IsDBNull(v) Then Return Convert.ToDateTime(v)
+                End Using
+            End Using
+        Catch
+        End Try
+        Return DateTime.Now
+    End Function
+
     Private Sub CloseShiftOverlay(sender As Object, e As EventArgs)
-        shiftStartTime = DateTime.Now
         If ShiftTimer IsNot Nothing Then ShiftTimer.Stop() : ShiftTimer.Dispose()
 
         EnsureShiftOpen()
+        shiftStartTime = ShiftStartedAt()
 
         ShiftOverlay.Dispose()
         SetActive(home)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         HomePanelBuilder.LoadHome(MainContainer, shiftStartTime)
         MainContainer.ResumeLayout()
         btnHamburger.BringToFront()
@@ -822,7 +841,7 @@ Public Class POS_STAFF
         SetActive(home)
         HomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()   ' safe — burger is on Form, not MainContainer
+        ScreenHost.Clear(MainContainer)   ' safe — burger is on Form, not MainContainer
         HomePanelBuilder.LoadHome(MainContainer, shiftStartTime)
         MainContainer.ResumeLayout()
     End Sub
@@ -831,7 +850,7 @@ Public Class POS_STAFF
         SetActive(transaction)
         HomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         TransactionPanelBuilder.LoadTransaction(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -841,7 +860,7 @@ Public Class POS_STAFF
         SetActive(sales)
         HomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         SalesPanelBuilder.LoadSales(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -851,7 +870,7 @@ Public Class POS_STAFF
         SetActive(returns)
         HomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ReturnsPanelBuilder.LoadReturns(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -861,7 +880,7 @@ Public Class POS_STAFF
         SetActive(Reports)
         HomePanelBuilder.StopTimer()
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         CashPanelBuilder.LoadCash(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()

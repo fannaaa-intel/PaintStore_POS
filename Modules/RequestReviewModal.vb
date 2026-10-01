@@ -39,6 +39,7 @@ Public Module RequestReviewModal
         Public CreatedAt As DateTime
         Public Status As String = ""
         Public Note As String = ""
+        Public Purpose As String = ""
         Public ReviewNote As String = ""
         Public ReviewedBy As String = ""
         Public ReviewedAt As DateTime?
@@ -85,15 +86,33 @@ Public Module RequestReviewModal
         End Try
     End Function
 
+    ''' <summary>
+    ''' SQL for a request line's estimated unit cost (aliases pri, p): what the
+    ''' requester entered, else the product's cost price, else its selling price.
+    ''' The same rule the request form uses to suggest a price.
+    ''' </summary>
+    Public Function EstPriceSql(hasLinePrice As Boolean) As String
+        Dim fallback As String = "IF(COALESCE(p.cost_price,0) > 0, p.cost_price, COALESCE(p.unit_price,0))"
+        Return If(hasLinePrice, "COALESCE(pri.unit_price, " & fallback & ")", fallback)
+    End Function
+
+    ''' <summary>The reason shown for a request: its purpose, or the typed part of the older note.</summary>
+    Public Function PurposeText(info As RequestInfo) As String
+        Return If(info.Purpose <> "", info.Purpose, TypedNote(info.Note))
+    End Function
+
     ''' <summary>Loads a request and its product lines. Nothing when not found.</summary>
     Public Function LoadRequest(requestId As Integer) As RequestInfo
         Using conn = Db.GetConnection()
             conn.Open()
             Dim withNote As Boolean = HasReviewNote(conn)
+            Dim withPurpose As Boolean = SupplierPayments.ColumnExists(conn, "purchase_requests", "purpose")
+            Dim withPrice As Boolean = SupplierPayments.ColumnExists(conn, "purchase_request_items", "unit_price")
             Dim info As RequestInfo = Nothing
             Using cmd As New MySqlCommand(
                 "SELECT pr.request_id, pr.requested_by, COALESCE(u.full_name,'Unknown') AS reqby, " &
                 "pr.created_at, pr.status, COALESCE(pr.note,'') AS note, pr.reviewed_at, " &
+                If(withPurpose, "COALESCE(pr.purpose,'')", "''") & " AS purpose, " &
                 "COALESCE(v.full_name,'') AS revby, " &
                 If(withNote, "COALESCE(pr.review_note,'')", "''") & " AS review_note " &
                 "FROM purchase_requests pr " &
@@ -110,6 +129,7 @@ Public Module RequestReviewModal
                             .CreatedAt = Convert.ToDateTime(rdr("created_at")),
                             .Status = rdr("status").ToString(),
                             .Note = rdr("note").ToString(),
+                            .Purpose = rdr("purpose").ToString(),
                             .ReviewedBy = rdr("revby").ToString(),
                             .ReviewedAt = If(IsDBNull(rdr("reviewed_at")), CType(Nothing, DateTime?),
                                              Convert.ToDateTime(rdr("reviewed_at"))),
@@ -122,7 +142,7 @@ Public Module RequestReviewModal
 
             Using cmd As New MySqlCommand(
                 "SELECT pri.product_id, p.name, p.sku, pri.qty_requested, p.stock_qty, " &
-                "COALESCE(p.reorder_level,0) AS reorder_level, COALESCE(p.unit_price,0) AS unit_price " &
+                "COALESCE(p.reorder_level,0) AS reorder_level, " & EstPriceSql(withPrice) & " AS unit_price " &
                 "FROM purchase_request_items pri JOIN products p ON p.product_id = pri.product_id " &
                 "WHERE pri.request_id = @id ORDER BY pri.pr_item_id", conn)
                 cmd.Parameters.AddWithValue("@id", requestId)
@@ -207,15 +227,20 @@ Public Module RequestReviewModal
 
         Dim y As Integer = lblSub.Bottom + 16
 
-        ' Requester's note, when there is one.
-        Dim typed As String = TypedNote(info.Note)
+        ' Why it is needed: the purpose (or, on older requests, the note).
+        Dim typed As String = PurposeText(info)
         If typed <> "" Then
+            Dim capPurpose As New Label With {
+                .Text = "PURPOSE", .Font = New Font("Segoe UI Semibold", 8.5F), .ForeColor = Theme.FaintText,
+                .AutoSize = True, .Location = New Point(PAD, y), .BackColor = Color.Transparent
+            }
+            f.Controls.Add(capPurpose)
             Dim noteBox As New Label With {
-                .Text = ChrW(8220) & typed & ChrW(8221), .Font = New Font("Segoe UI", 10.0F, FontStyle.Italic),
-                .ForeColor = Theme.SubText, .BackColor = Theme.TileBg, .AutoSize = False,
-                .Size = New Size(innerW, 34), .Padding = New Padding(12, 0, 12, 0),
+                .Text = typed, .Font = New Font("Segoe UI", 10.0F),
+                .ForeColor = Theme.TextDark, .BackColor = Theme.TileBg, .AutoSize = False,
+                .Size = New Size(innerW, 46), .Padding = New Padding(12, 4, 12, 4),
                 .TextAlign = ContentAlignment.MiddleLeft, .AutoEllipsis = True,
-                .Location = New Point(PAD, y), .UseMnemonic = False
+                .Location = New Point(PAD, capPurpose.Bottom + 4), .UseMnemonic = False
             }
             f.Controls.Add(noteBox)
             y = noteBox.Bottom + 12
@@ -238,15 +263,15 @@ Public Module RequestReviewModal
             Sub(text As String, x As Integer, rightAlign As Boolean)
                 head.Controls.Add(New Label With {
                     .Text = text, .Font = New Font("Segoe UI Semibold", 8.5F), .ForeColor = Theme.FaintText,
-                    .AutoSize = False, .Size = New Size(If(rightAlign, NUM_W, 300), 18),
+                    .AutoSize = False, .Size = New Size(If(rightAlign, NUM_W + 40, 300), 18),
                     .TextAlign = If(rightAlign, ContentAlignment.MiddleRight, ContentAlignment.MiddleLeft),
-                    .Location = New Point(If(rightAlign, x - NUM_W, x), 6), .BackColor = Color.Transparent
+                    .Location = New Point(If(rightAlign, x - NUM_W - 40, x), 6), .BackColor = Color.Transparent
                 })
             End Sub
         addHead("PRODUCT  (" & info.Lines.Count & ")", 12, False)
         addHead("STOCK / RESTOCK", xStock + NUM_W \ 2, True)
         addHead("QTY REQUESTED", xQty + NUM_W \ 2, True)
-        addHead("EST. VALUE", xVal, True)
+        addHead("EST. TOTAL", xVal, True)
         f.Controls.Add(head)
 
         Dim body As New Panel With {.Location = New Point(PAD, head.Bottom), .Width = innerW, .BackColor = CardBg, .AutoScroll = True}
@@ -291,7 +316,7 @@ Public Module RequestReviewModal
 
         Dim lblTotals As New Label With {
             .Text = info.Lines.Count & If(info.Lines.Count = 1, " product", " products") & "   " & ChrW(8226) & "   " &
-                    info.TotalUnits.ToString("N0") & " units   " & ChrW(8226) & "   about " & Peso & info.EstValue.ToString("N2"),
+                    info.TotalUnits.ToString("N0") & If(info.TotalUnits = 1, " unit   ", " units   ") & ChrW(8226) & "   est. total " & Peso & info.EstValue.ToString("N2"),
             .Font = New Font("Segoe UI Semibold", 10.0F), .ForeColor = Theme.Dark,
             .AutoSize = False, .Size = New Size(innerW, 22), .TextAlign = ContentAlignment.MiddleRight,
             .Location = New Point(PAD, body.Bottom + 8), .BackColor = Color.Transparent

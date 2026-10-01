@@ -1725,7 +1725,8 @@ Public Class ProcurementPOPanelBuilder
                 ' products from the quote picker.
                 Using cmd As New MySqlCommand(
                     "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, " &
-                    "pri.qty_requested, p.unit_price " &
+                    "pri.qty_requested, " & RequestReviewModal.EstPriceSql(
+                        SupplierPayments.ColumnExists(conn, "purchase_request_items", "unit_price")) & " AS unit_price " &
                     "FROM purchase_requests pr " &
                     "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &
                     "JOIN products p ON pri.product_id = p.product_id " &
@@ -3236,7 +3237,9 @@ Public Class ProcurementPOPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 Using cmd As New MySqlCommand(
-                    "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, p.unit_price, " &
+                    "SELECT pr.request_id, pri.product_id, p.name AS pname, p.sku, " &
+                    RequestReviewModal.EstPriceSql(
+                        SupplierPayments.ColumnExists(conn, "purchase_request_items", "unit_price")) & " AS unit_price, " &
                     "p.image_path, p.color_hex, pri.qty_requested, u.full_name AS reqby " &
                     "FROM purchase_requests pr " &
                     "JOIN purchase_request_items pri ON pri.request_id = pr.request_id " &

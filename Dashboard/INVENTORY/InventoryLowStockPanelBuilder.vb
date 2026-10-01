@@ -715,6 +715,7 @@ Public Class InventoryLowStockPanelBuilder
         Dim SnapCols As Action =
             Sub()
                 Dim c = ColX(row.Width)
+                TextFit.Clamp(lblName, c.cat - textX - 16)
 
                 ' Vertically centre the name/SKU pair as one block.
                 Dim nameBlockH As Integer = lblName.Height + 2 + lblSku.Height

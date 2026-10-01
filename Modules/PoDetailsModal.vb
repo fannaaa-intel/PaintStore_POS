@@ -124,13 +124,16 @@ Public Module PoDetailsModal
 
         Dim payText As String
         Dim payClr As Color
+        Dim paidSum As Decimal = If(hdr.AmountPaid, 0D)
+        Dim payStatus As String = SupplierPayments.StatusOf(hdr.PaidAt.HasValue, paidSum)
+        payClr = SupplierPayments.StatusColors(payStatus).fore
         If hdr.PaidAt.HasValue Then
             payText = "Paid " & hdr.PaidAt.Value.ToString("MMM d, yyyy")
-            If hdr.AmountPaid.HasValue Then payText &= "  (" & Peso & hdr.AmountPaid.Value.ToString("N2") & ")"
-            payClr = Theme.Deep
+            If hdr.AmountPaid.HasValue Then payText &= "  (" & Peso & paidSum.ToString("N2") & ")"
+        ElseIf payStatus = SupplierPayments.STATUS_PARTIAL Then
+            payText = "Partial: " & Peso & paidSum.ToString("N2") & " paid"
         Else
             payText = "Unpaid"
-            payClr = Theme.Danger
         End If
 
         Dim factList As New List(Of (cap As String, val As String, clr As Color)) From {
@@ -390,11 +393,12 @@ Public Module PoDetailsModal
 
             If hasPayments Then
                 Using cmd As New MySqlCommand(
-                    "SELECT amount_paid, method FROM supplier_payments WHERE po_id = @id " &
-                    "ORDER BY payment_id DESC LIMIT 1", conn)
+                    "SELECT SUM(amount_paid) AS amount_paid, " &
+                    "(SELECT method FROM supplier_payments WHERE po_id = @id ORDER BY payment_id DESC LIMIT 1) AS method " &
+                    "FROM supplier_payments WHERE po_id = @id", conn)
                     cmd.Parameters.AddWithValue("@id", poId)
                     Using rdr = cmd.ExecuteReader()
-                        If rdr.Read() Then
+                        If rdr.Read() AndAlso Not IsDBNull(rdr("amount_paid")) Then
                             hdr.AmountPaid = Convert.ToDecimal(rdr("amount_paid"))
                             hdr.PayMethod = rdr("method").ToString()
                         End If

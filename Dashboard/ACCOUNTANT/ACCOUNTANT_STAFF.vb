@@ -189,7 +189,7 @@ Public Class ACCOUNTANT_STAFF
             Sub()
                 SetActive(_btnSettings)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 SettingsPanelBuilder.LoadSettings(MainContainer)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -208,7 +208,7 @@ Public Class ACCOUNTANT_STAFF
 
         ' ── LOAD HOME ───────────────────────────────────────────────────────────
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantDashPanelBuilder.LoadDash(MainContainer)
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
@@ -445,7 +445,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub home_Click(sender As Object, e As EventArgs) Handles home.Click
         SetActive(home)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantDashPanelBuilder.LoadDash(MainContainer)
         MainContainer.ResumeLayout()
     End Sub
@@ -453,7 +453,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub incomeExpenses_Click(sender As Object, e As EventArgs) Handles incomeExpenses.Click
         SetActive(incomeExpenses)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantIncomePanelBuilder.LoadIncome(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -462,7 +462,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub payables_Click(sender As Object, e As EventArgs) Handles payables.Click
         SetActive(payables)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantPayablesPanelBuilder.LoadPayables(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -471,7 +471,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub salesHistory_Click(sender As Object, e As EventArgs) Handles salesHistory.Click
         SetActive(salesHistory)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantSalesHistoryPanelBuilder.LoadSalesHistory(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -480,7 +480,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub ledger_Click(sender As Object, e As EventArgs) Handles ledger.Click
         SetActive(ledger)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantLedgerPanelBuilder.LoadLedger(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -489,7 +489,7 @@ Public Class ACCOUNTANT_STAFF
     Private Sub reports_Click(sender As Object, e As EventArgs) Handles reports.Click
         SetActive(reports)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         AccountantReportsPanelBuilder.LoadReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()

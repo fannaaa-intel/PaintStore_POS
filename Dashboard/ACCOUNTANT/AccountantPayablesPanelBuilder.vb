@@ -9,7 +9,7 @@ Imports MySql.Data.MySqlClient
 '
 '  What the store owes its suppliers, in plain words:
 '
-'    STATUS    Paid / Unpaid        -- has the supplier been paid?
+'    STATUS    Paid / Partial / Unpaid  -- has the supplier been paid? (SupplierPayments)
 '    DELIVERY  Ordered / Partially Received / Received
 '                                    -- where the goods are (the PO stage)
 '
@@ -187,7 +187,9 @@ Public Class AccountantPayablesPanelBuilder
                 ' Owed in total, whatever the period -- so an old unpaid order
                 ' outside the chosen dates is never silently out of sight.
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(po.total_cost),0) FROM purchase_orders po " &
+                    "SELECT COALESCE(SUM(po.total_cost" &
+                    If(_hasPayments, " - COALESCE((SELECT SUM(sp.amount_paid) FROM supplier_payments sp " &
+                                     "WHERE sp.po_id = po.po_id), 0)", "") & "),0) FROM purchase_orders po " &
                     "WHERE po.status IN ('Ordered','Partially Received','Received') " &
                     "AND NOT (" & paidExpr & ")", conn)
                     _unpaidAllDates = Convert.ToDecimal(cmd.ExecuteScalar())
@@ -391,7 +393,8 @@ Public Class AccountantPayablesPanelBuilder
 
         Dim unpaid = _allRows.Where(Function(r) Not r.IsPaid).ToList()
         Dim paid = _allRows.Where(Function(r) r.IsPaid).ToList()
-        Dim unpaidTotal As Decimal = unpaid.Sum(Function(r) r.TotalCost)
+        ' What is still owed: part payments already made are taken off.
+        Dim unpaidTotal As Decimal = unpaid.Sum(Function(r) Math.Max(0D, r.TotalCost - If(r.AmountPaid, 0D)))
         Dim paidTotal As Decimal = paid.Sum(Function(r) If(r.AmountPaid, r.TotalCost))
         Dim allTotal As Decimal = _allRows.Sum(Function(r) r.TotalCost)
         Dim overdue As Integer = unpaid.Where(Function(r) r.IsOverdue).Count()
@@ -729,11 +732,13 @@ Public Class AccountantPayablesPanelBuilder
         }
         RoundLabel(delivery, 10)
 
+        ' Paid / Partial / Unpaid -- the same rule as Procurement's Payment Records.
+        Dim payStatus As String = SupplierPayments.StatusOf(row.IsPaid, If(row.AmountPaid, 0D))
+        Dim payClr = SupplierPayments.StatusColors(payStatus)
         Dim status As New Label With {
-            .Text = If(row.IsPaid, TAB_PAID, TAB_UNPAID),
+            .Text = payStatus,
             .Font = New Font("Segoe UI", 9.5F, FontStyle.Bold),
-            .ForeColor = If(row.IsPaid, MintDeep, AccentRed),
-            .BackColor = If(row.IsPaid, Color.FromArgb(214, 242, 234), Color.FromArgb(253, 232, 232)),
+            .ForeColor = payClr.fore, .BackColor = payClr.back,
             .AutoSize = True, .Padding = New Padding(12, 4, 12, 4)
         }
         RoundLabel(status, 10)
@@ -764,12 +769,14 @@ Public Class AccountantPayablesPanelBuilder
         ' the supplier's receipt, straight from the same window.
         Dim openDetail As Action =
             Sub()
-                Dim canSettle As Boolean = _hasPaidAt AndAlso Not row.IsPaid AndAlso row.Delivery = "Received"
+                ' Any unpaid order can take a payment (part payments too); the
+                ' payment form shows the balance and blocks overpaying.
+                Dim canSettle As Boolean = _hasPaidAt AndAlso Not row.IsPaid
                 Dim note As String = Nothing
                 If canSettle Then
-                    note = "The goods have been received, so this amount is owed to the supplier."
-                ElseIf Not row.IsPaid AndAlso _hasPaidAt Then
-                    note = "Payment is recorded once the goods are fully received."
+                    Dim owed As Decimal = row.TotalCost - If(row.AmountPaid, 0D)
+                    note = Peso & owed.ToString("N2") & " is still owed to the supplier" &
+                           If(row.Delivery = "Received", ".", " (goods not fully received yet).")
                 End If
                 If row.IsOverdue Then
                     note = ChrW(9888) & " The delivery is OVERDUE." & If(note Is Nothing, "", "  " & note)

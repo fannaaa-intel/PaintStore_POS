@@ -353,6 +353,7 @@ Public Class ProcurementDashPanelBuilder
         chQty.Left = 220
         chBy.Left = 310
         chWhen.Left = 490
+        chWhen.Visible = (w >= PENDING_WHEN_MIN_W)
         chAction.Left = w - chAction.Width - 18
     End Sub
 
@@ -443,12 +444,16 @@ Public Class ProcurementDashPanelBuilder
         AddHandler row.Resize,
     Sub()
         Dim w As Integer = row.Width
-        lblName.Left = 18 : lblName.Top = (height - lblName.Height) \ 2
-        qtyPill.Left = 220 : qtyPill.Top = (height - qtyPill.Height) \ 2
-        lblBy.Left = 310 : lblBy.Top = (height - lblBy.Height) \ 2
-        lblWhen.Left = 490 : lblWhen.Top = (height - lblWhen.Height) \ 2
+        Dim showWhen As Boolean = (w >= PENDING_WHEN_MIN_W)
         btnReview.Left = w - btnReview.Width - 18
         btnReview.Top = (height - btnReview.Height) \ 2
+        TextFit.Clamp(lblName, 220 - 18 - 12)
+        lblName.Left = 18 : lblName.Top = (height - lblName.Height) \ 2
+        qtyPill.Left = 220 : qtyPill.Top = (height - qtyPill.Height) \ 2
+        TextFit.Clamp(lblBy, If(showWhen, 490, btnReview.Left) - 310 - 12)
+        lblBy.Left = 310 : lblBy.Top = (height - lblBy.Height) \ 2
+        lblWhen.Left = 490 : lblWhen.Top = (height - lblWhen.Height) \ 2
+        lblWhen.Visible = showWhen
     End Sub
         PropagateHover(row)
         Return row
@@ -457,6 +462,15 @@ Public Class ProcurementDashPanelBuilder
     ' =========================================================================
     '  RIGHT CARD — POs DUE SOON
     ' =========================================================================
+    ' On a narrow card (smaller screens) the least important column is dropped
+    ' so the names keep enough room; they end in "..." when still too long.
+    Private Const PENDING_WHEN_MIN_W As Integer = 640
+    Private Const DUE_ITEMS_MIN_W As Integer = 620
+
+    Private Shared Function DueSupplierLeft(w As Integer) As Integer
+        Return If(w >= DUE_ITEMS_MIN_W, 200, 160)
+    End Function
+
     Private Shared Function BuildDueSoonCard() As Panel
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
@@ -498,8 +512,9 @@ Public Class ProcurementDashPanelBuilder
     Sub()
         Dim w As Integer = colHeader.Width
         chPo.Left = 18
-        chSupplier.Left = 200
+        chSupplier.Left = DueSupplierLeft(w)
         chItems.Left = w - 290
+        chItems.Visible = (w >= DUE_ITEMS_MIN_W)
         chCost.Left = w - 190
         chStatus.Left = w - 95
     End Sub
@@ -591,8 +606,12 @@ Public Class ProcurementDashPanelBuilder
     Sub()
         Dim w As Integer = row.Width
         lblPo.Left = 18 : lblPo.Top = (height - lblPo.Height) \ 2
-        lblSupplier.Left = 200 : lblSupplier.Top = (height - lblSupplier.Height) \ 2
+        Dim showItems As Boolean = (w >= DUE_ITEMS_MIN_W)
+        Dim supLeft As Integer = DueSupplierLeft(w)
+        TextFit.Clamp(lblSupplier, If(showItems, w - 290, w - 200) - supLeft - 12)
+        lblSupplier.Left = supLeft : lblSupplier.Top = (height - lblSupplier.Height) \ 2
         lblItems.Left = w - 290 : lblItems.Top = (height - lblItems.Height) \ 2
+        lblItems.Visible = showItems
         lblCost.Left = w - 200 : lblCost.Top = (height - lblCost.Height) \ 2
         badge.Left = w - 95 : badge.Top = (height - badge.Height) \ 2
     End Sub

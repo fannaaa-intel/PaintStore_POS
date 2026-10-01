@@ -23,6 +23,7 @@ Public Class LogIn
     Private _btnLogin As Button
 
     Private Sub LogIn_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+        LiteralAmpersands.Install()
         Me.FormBorderStyle = FormBorderStyle.None
         Me.WindowState = FormWindowState.Maximized
         Me.DoubleBuffered = True

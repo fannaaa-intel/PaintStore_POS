@@ -229,11 +229,8 @@ Public Class AdminStoreSettingsPanelBuilder
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
-        ' "&&" renders as one ampersand. WinForms treats a lone & in a Label as a
-        ' mnemonic prefix: it swallows the & and underlines the next character,
-        ' so this title read "Store Information Tax" on screen.
         card.Controls.Add(New Label With {
-            .Text = "Store Information && Tax",
+            .Text = "Store Information & Tax",
             .Font = New Font("Segoe UI Semibold", 13),
             .ForeColor = MintDark,
             .AutoSize = True,

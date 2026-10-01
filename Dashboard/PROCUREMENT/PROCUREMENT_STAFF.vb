@@ -15,6 +15,8 @@ Public Class PROCUREMENT_STAFF
     Private _btnSettings As Button          ' pinned above Logout
     Private _btnStockLevel As Button        ' built in code, like Settings
     Private _btnReports As Button
+    Private _btnRequests As Button
+    Private _btnPayments As Button
     Private _navButtons As Button()         ' the MENU list, top to bottom
     Private _lowStockCount As Integer = -1  ' red badge on Stock Level
 
@@ -174,14 +176,19 @@ Public Class PROCUREMENT_STAFF
         }
         Nav.Controls.Add(lblMenu)
 
-        ' Stock Level and Reports are built in code rather than in the designer.
+        ' Stock Level, Purchase Requests, Payment Records and Reports are built in
+        ' code rather than in the designer.
         _btnStockLevel = New Button With {.Name = "stocklevel", .Text = "Stock Level"}
+        _btnRequests = New Button With {.Name = "requests", .Text = "Purchase Requests"}
+        _btnPayments = New Button With {.Name = "payments", .Text = "Payment Records"}
         _btnReports = New Button With {.Name = "reports", .Text = "Reports"}
         AddHandler _btnStockLevel.Click, AddressOf stockLevel_Click
+        AddHandler _btnRequests.Click, AddressOf requests_Click
+        AddHandler _btnPayments.Click, AddressOf payments_Click
         AddHandler _btnReports.Click, AddressOf reports_Click
 
-        _navButtons = {dashboard, _btnStockLevel, purchaseOrders, suppliers, quotations,
-                       receiveGoods, deliveryTracking, _btnReports}
+        _navButtons = {dashboard, _btnStockLevel, _btnRequests, purchaseOrders, suppliers, quotations,
+                       receiveGoods, deliveryTracking, _btnPayments, _btnReports}
         For Each btn In _navButtons
             StyleButton(btn)
             btn.Left = 14
@@ -220,7 +227,7 @@ Public Class PROCUREMENT_STAFF
                 If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
                 SetActive(_btnSettings)
                 MainContainer.SuspendLayout()
-                MainContainer.Controls.Clear()
+                ScreenHost.Clear(MainContainer)
                 SettingsPanelBuilder.LoadSettings(MainContainer)
                 MainContainer.ResumeLayout()
                 MainContainer.Refresh()
@@ -239,7 +246,7 @@ Public Class PROCUREMENT_STAFF
 
         ' ── LOAD DASHBOARD ──────────────────────────────────────────────────────
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementDashPanelBuilder.LoadDash(MainContainer)
         MainContainer.ResumeLayout()
         btnHamburger.Location = New Point(NAV_OPEN_WIDTH - 46, 18)
@@ -377,6 +384,8 @@ Public Class PROCUREMENT_STAFF
             Case "quotations" : iconPath = "quotation.png"
             Case "stocklevel" : iconPath = "bar-chart.png"
             Case "reports" : iconPath = "newspaper.png"
+            Case "requests" : iconPath = "clipboard.png"
+            Case "payments" : iconPath = "wallet-income.png"
             Case "receivegoods" : iconPath = "received.png"
             Case "deliverytracking" : iconPath = "express-delivery.png"
             Case "logout" : iconPath = "logout.png"
@@ -530,7 +539,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(dashboard)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()   ' safe — burger is on Form, not MainContainer
+        ScreenHost.Clear(MainContainer)   ' safe — burger is on Form, not MainContainer
         ProcurementDashPanelBuilder.LoadDash(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -540,8 +549,28 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(_btnStockLevel)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         InventoryStockLevelPanelBuilder.LoadStockLevels(MainContainer, forProcurement:=True)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub requests_Click(sender As Object, e As EventArgs)
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
+        SetActive(_btnRequests)
+        MainContainer.SuspendLayout()
+        ScreenHost.Clear(MainContainer)
+        ProcurementRequestsPanelBuilder.LoadRequests(MainContainer)
+        MainContainer.ResumeLayout()
+        MainContainer.Refresh()
+    End Sub
+
+    Private Sub payments_Click(sender As Object, e As EventArgs)
+        If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
+        SetActive(_btnPayments)
+        MainContainer.SuspendLayout()
+        ScreenHost.Clear(MainContainer)
+        ProcurementPaymentsPanelBuilder.LoadPayments(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
     End Sub
@@ -550,7 +579,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(_btnReports)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementReportsPanelBuilder.LoadReports(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -560,7 +589,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(purchaseOrders)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementPOPanelBuilder.LoadPO(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -571,7 +600,7 @@ Public Class PROCUREMENT_STAFF
     Public Sub OpenPOWithRequest(requestId As Integer)
         SetActive(purchaseOrders)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementPOPanelBuilder.LoadPOWithRequest(MainContainer, requestId)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -581,7 +610,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(suppliers)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementSuppliersPanelBuilder.LoadSuppliers(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -591,7 +620,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(quotations)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementQuotationsPanelBuilder.LoadQuotations(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -602,7 +631,7 @@ Public Class PROCUREMENT_STAFF
     Public Sub OpenPOFromQuotation(quotationId As Integer)
         SetActive(purchaseOrders)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementPOPanelBuilder.LoadPOFromQuotation(MainContainer, quotationId)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -612,7 +641,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(receiveGoods)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementReceivePanelBuilder.LoadReceive(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -623,7 +652,7 @@ Public Class PROCUREMENT_STAFF
     Public Sub OpenReceiveForPO(poId As Integer)
         SetActive(receiveGoods)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementReceivePanelBuilder.LoadReceiveForPO(MainContainer, poId)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()
@@ -633,7 +662,7 @@ Public Class PROCUREMENT_STAFF
         If Not ProcurementPOPanelBuilder.ConfirmLeaveNewPO() Then Return
         SetActive(deliveryTracking)
         MainContainer.SuspendLayout()
-        MainContainer.Controls.Clear()
+        ScreenHost.Clear(MainContainer)
         ProcurementDeliveryPanelBuilder.LoadDelivery(MainContainer)
         MainContainer.ResumeLayout()
         MainContainer.Refresh()

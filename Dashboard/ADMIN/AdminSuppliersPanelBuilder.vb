@@ -672,10 +672,12 @@ Public Class AdminSuppliersPanelBuilder
                 avatar.Top = (height - avSize) \ 2
 
                 Dim nameX As Integer = 24 + avSize + 14
+                Dim badgeRoom As Integer = If(badge Is Nothing, 0, badge.Width + 8)
+                TextFit.Clamp(lblName, Math.Min(lblName.PreferredWidth, contactX - nameX - 12 - badgeRoom))
                 lblName.Left = nameX
                 lblName.Top = (height - lblName.Height) \ 2
                 If badge IsNot Nothing Then
-                    badge.Left = nameX + lblName.PreferredWidth + 8
+                    badge.Left = nameX + lblName.Width + 8
                     badge.Top = (height - badge.Height) \ 2
                 End If
 

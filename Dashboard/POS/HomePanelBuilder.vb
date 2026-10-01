@@ -256,7 +256,7 @@ Public Class HomePanelBuilder
         AddHandler wrap.Resize, Sub() statRow.Width = wrap.Width
 
         Dim statData() As (title As String, value As String, subtitle As String, badge As String) = {
-            ("Sales Today", "₱ 0.00", "Loading...", "Today"),
+            ("Sales Today", "₱ 0.00", "Completed sales", "Today"),
             ("Transactions", "—", "This shift", "Shift"),
             ("Items Sold", "—", "Units today", "Units"),
             ("Shift Hours", "0:00", "Since clock-in", "")

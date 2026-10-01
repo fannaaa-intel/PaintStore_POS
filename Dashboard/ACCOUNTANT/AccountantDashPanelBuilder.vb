@@ -678,6 +678,7 @@ Public Class AccountantDashPanelBuilder
                 Dim w As Integer = row.Width
                 lblPo.Left = 14 : lblPo.Top = 10
                 lblDate.Left = 14 : lblDate.Top = 32
+                TextFit.Clamp(lblSupplier, w - badge.Width - 14 - CInt(w * 0.42) - 12)
                 lblSupplier.Left = CInt(w * 0.42) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 badge.Left = w - badge.Width - 14 : badge.Top = (height - badge.Height) \ 2
             End Sub

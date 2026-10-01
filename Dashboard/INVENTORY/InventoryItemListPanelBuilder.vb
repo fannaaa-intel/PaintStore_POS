@@ -827,6 +827,7 @@ Public Class InventoryItemListPanelBuilder
             .ForeColor = SubText, .AutoSize = True, .Location = New Point(52, 34), .BackColor = Color.Transparent
         }
         cProduct.Controls.AddRange({thumb, lblName, lblSku})
+        AddHandler cProduct.Resize, Sub() TextFit.Clamp(lblName, cProduct.Width - lblName.Left - 10)
 
         ' Col 1 — type / size
         Dim cTypeSize As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
