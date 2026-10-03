@@ -156,7 +156,7 @@ Public Class AdminRolesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load roles: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load roles: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

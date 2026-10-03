@@ -306,6 +306,11 @@
     <Compile Include="Modules\ReportExport.vb" />
     <Compile Include="Modules\ReportSignatories.vb" />
     <Compile Include="Modules\Session.vb" />
+    <Compile Include="Modules\Permissions.vb" />
+    <Compile Include="Modules\Credentials.vb" />
+    <Compile Include="Modules\ErrorLog.vb" />
+    <Compile Include="Modules\AdminApprovalModal.vb" />
+    <Compile Include="Modules\IdleLock.vb" />
     <Compile Include="Modules\StoreSettings.vb" />
     <Compile Include="Modules\Theme.vb" />
     <Compile Include="Modules\TextFit.vb" />

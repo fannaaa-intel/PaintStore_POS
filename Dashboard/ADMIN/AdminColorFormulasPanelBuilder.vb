@@ -155,7 +155,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load color formulas: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load color formulas: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         ApplySearch()
@@ -197,7 +197,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the formula: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the formula: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return d
@@ -225,7 +225,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the formula components: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the formula components: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return list
@@ -250,7 +250,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load base products: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load base products: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return list
@@ -274,7 +274,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            System.Diagnostics.Debug.WriteLine("LoadPaintTypes: " & ex.Message)
+            ErrorLog.Write("LoadPaintTypes", ex)
         End Try
         Return list
     End Function
@@ -1130,6 +1130,7 @@ Public Class AdminColorFormulasPanelBuilder
     '  SAVE  —  parent + children in one transaction
     ' =========================================================================
     Private Shared Sub SaveFormula()
+        If Not Permissions.Require(Permissions.ManageSettings, "save color formulas") Then Return
         Dim name As String = _txtName.Text.Trim()
         If name = "" Then
             AppModal.Show("The formula name is required.", "Missing Information",
@@ -1252,7 +1253,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not save the formula: " & ex.Message &
+            AppModal.Show("Could not save the formula: " & ErrorLog.ForUser(ex) &
                           vbCrLf & vbCrLf & "No changes were made.",
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
@@ -1314,7 +1315,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not check whether the formula is in use: " & ex.Message,
+            AppModal.Show("Could not check whether the formula is in use: " & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1328,6 +1329,7 @@ Public Class AdminColorFormulasPanelBuilder
             Return
         End If
 
+        If Not Permissions.Require(Permissions.ManageSettings, "delete color formulas") Then Return
         If AppModal.Show("Delete the formula """ & r.Name & """ and its " &
                          r.ComponentCount.ToString("N0") &
                          If(r.ComponentCount = 1, " colorant?", " colorants?"),
@@ -1365,7 +1367,7 @@ Public Class AdminColorFormulasPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not delete the formula: " & ex.Message &
+            AppModal.Show("Could not delete the formula: " & ErrorLog.ForUser(ex) &
                           vbCrLf & vbCrLf & "No changes were made.",
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return

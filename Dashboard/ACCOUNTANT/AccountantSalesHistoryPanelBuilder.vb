@@ -131,7 +131,7 @@ Public Class AccountantSalesHistoryPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("AccountantSalesHistory LoadData error: " & ex.Message)
+            ErrorLog.Write("AccountantSalesHistory LoadData error", ex)
         End Try
 
         ApplySearch()

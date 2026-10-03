@@ -133,7 +133,7 @@ Public Class SalesPanelBuilder
             ' a failed read rendered as a real, confident "P 0.00 sold today"
             ' rather than as an error. Flag it so the cashier knows the summary
             ' is unavailable instead of believing they have sold nothing.
-            System.Diagnostics.Debug.WriteLine("Sales summary load error: " & ex.Message)
+            ErrorLog.Write("Sales summary load error", ex)
             summaryFailed = True
         End Try
 
@@ -767,8 +767,7 @@ Public Class SalesPanelBuilder
                     System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo(sfd.FileName) With {.UseShellExecute = True})
                 End If
             Catch ex As Exception
-                AppModal.Show("Could not export the file:" & Environment.NewLine &
-                                ex.Message, "Export Error",
+                AppModal.Show("Could not export the file:" & Environment.NewLine & ErrorLog.ForUser(ex), "Export Error",
                                 MessageBoxButtons.OK, MessageBoxIcon.Error)
             End Try
         End Using
@@ -949,7 +948,8 @@ Public Class SalesPanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("SalesPanelBuilder.BuildTopProductsCard", swallowed)
         End Try
 
         If bars.Count = 0 Then
@@ -1048,7 +1048,8 @@ Public Class SalesPanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("SalesPanelBuilder.BuildCategoryCard", swallowed)
         End Try
 
         If cats.Count = 0 Then

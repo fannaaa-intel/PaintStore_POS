@@ -60,6 +60,10 @@ Public Module Backup
     Public Function Create(folder As String, ByRef errorMessage As String,
                            Optional tag As String = "") As String
         errorMessage = ""
+        If Not Permissions.Can(Permissions.BackupData) Then
+            errorMessage = Permissions.DeniedMessage("make a backup")
+            Return ""
+        End If
         Dim dump As String = FindTool("mysqldump.exe")
         If dump = "" Then
             errorMessage = "mysqldump.exe was not found in C:\xampp\mysql\bin. Is XAMPP installed?"
@@ -70,7 +74,7 @@ Public Module Backup
         Try
             Directory.CreateDirectory(folder)
         Catch ex As Exception
-            errorMessage = "Cannot use that folder: " & ex.Message
+            errorMessage = "Cannot use that folder: " & ErrorLog.ForUser(ex)
             Return ""
         End Try
 
@@ -106,6 +110,7 @@ Public Module Backup
     ' Returns "" on success, else what went wrong; safetyPath is set to the
     ' safety backup's location either way (when one was made).
     Public Function RestoreFrom(sqlFile As String, ByRef safetyPath As String) As String
+        If Not Permissions.Can(Permissions.RestoreData) Then Return Permissions.DeniedMessage("restore a backup")
         safetyPath = ""
         ' Backing up is open to Inventory staff; replacing every record is not.
         If Not String.Equals(Session.CurrentRole, "Admin", StringComparison.OrdinalIgnoreCase) Then
@@ -175,6 +180,61 @@ Public Module Backup
             Return ex.Message
         End Try
     End Function
+
+    ' Days since the last backup made from ANY computer (read from the
+    ' activity log, so a backup saved to a USB folder still counts).
+    ' -1 = never backed up; Nothing = could not tell (database unreachable).
+    Public Function DaysSinceLastBackup() As Integer?
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT DATEDIFF(NOW(), MAX(created_at)) FROM activity_logs " &
+                    "WHERE action = 'BACKUP_CREATE'", cn)
+                    Dim o = cmd.ExecuteScalar()
+                    If o Is Nothing OrElse IsDBNull(o) Then Return -1
+                    Return Convert.ToInt32(o)
+                End Using
+            End Using
+        Catch ex As Exception
+            ErrorLog.Write("Backup.DaysSinceLastBackup", ex)
+            Return Nothing
+        End Try
+    End Function
+
+    ' Shown to the Admin after sign-in when the newest backup is more than a
+    ' day old (or there is none). Offers to make one on the spot into the
+    ' default folder; the Settings screen is still the place to pick another.
+    Public Sub RemindIfStale()
+        If Not Permissions.Can(Permissions.BackupData) Then Return
+        Dim days As Integer? = DaysSinceLastBackup()
+        If Not days.HasValue OrElse (days.Value >= 0 AndAlso days.Value < 1) Then Return
+
+        Dim msg As String = If(days.Value < 0,
+            "This database has never been backed up.",
+            "The last backup was " & days.Value & If(days.Value = 1, " day", " days") & " ago.") &
+            Environment.NewLine & Environment.NewLine &
+            "If this computer breaks or is stolen, every sale and stock record since then is lost." &
+            Environment.NewLine & Environment.NewLine &
+            "Back up now? (Takes a few seconds. Copy the file to a USB drive afterwards.)"
+        If AppModal.Show(msg, "Backup Reminder", MessageBoxButtons.YesNo,
+                         MessageBoxIcon.Warning) <> DialogResult.Yes Then Return
+
+        Dim err As String = ""
+        Dim path As String
+        Cursor.Current = Cursors.WaitCursor
+        Try
+            path = Create(DefaultFolder, err)
+        Finally
+            Cursor.Current = Cursors.Default
+        End Try
+        If err <> "" Then
+            AppModal.Show(err, "Backup", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Else
+            AppModal.Show("Backup saved:" & Environment.NewLine & path, "Backup Complete",
+                          MessageBoxButtons.OK, MessageBoxIcon.Information)
+        End If
+    End Sub
 
     Private Function Quote(s As String) As String
         Return """" & If(s, "").Replace("""", "") & """"

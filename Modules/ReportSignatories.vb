@@ -41,7 +41,8 @@ Public Module ReportSignatories
                     _hasColumns = Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ReportSignatories.HasColumns", swallowed)
             Return False    ' not cached: the database may simply be down
         End Try
         Return _hasColumns.Value
@@ -67,7 +68,8 @@ Public Module ReportSignatories
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ReportSignatories.Load", swallowed)
             ' Fall back to blank lines rather than blocking the report.
         End Try
         Return s
@@ -75,6 +77,7 @@ Public Module ReportSignatories
 
     ' Returns "" on success, otherwise the reason it could not be saved.
     Public Function Save(s As Settings) As String
+        If Not Permissions.Can(Permissions.EditSignatories) Then Return Permissions.DeniedMessage("change report signatories")
         If Not HasColumns() Then
             Return "Report signatories are not set up in the database yet. " &
                    "Run migrations.sql section 20 in phpMyAdmin first."
@@ -96,7 +99,7 @@ Public Module ReportSignatories
                                "Checked by: " & s.CheckedName & "; Approved by: " & s.ApprovedName)
             Return ""
         Catch ex As Exception
-            Return "Could not save the signatories: " & ex.Message
+            Return "Could not save the signatories: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 

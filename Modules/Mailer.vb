@@ -96,9 +96,9 @@ Public Module Mailer
             Return ""
         Catch ex As SmtpException
             Return "The email could not be sent. Check the internet connection and try again." &
-                   " (" & ex.Message & ")"
+                   " (" & ErrorLog.ForUser(ex) & ")"
         Catch ex As Exception
-            Return "The email could not be sent: " & ex.Message
+            Return "The email could not be sent: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 

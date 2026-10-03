@@ -507,9 +507,8 @@ Public Class POS_STAFF
             ' Without a shift, sales and drawer counts have nothing to attach to
             ' and are silently dropped. That is exactly the failure this whole
             ' fix is about, so it must not be swallowed again.
-            System.Diagnostics.Debug.WriteLine("EnsureShiftOpen DB error: " & ex.Message)
-            AppModal.Show("Could not open a cash shift:" & Environment.NewLine & Environment.NewLine &
-                          ex.Message & Environment.NewLine & Environment.NewLine &
+            ErrorLog.Write("EnsureShiftOpen DB error", ex)
+            AppModal.Show("Could not open a cash shift:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex) & Environment.NewLine & Environment.NewLine &
                           "Sales and drawer counts cannot be recorded until this is fixed.",
                           "Shift Not Opened", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
@@ -557,7 +556,8 @@ Public Class POS_STAFF
                 "AND table_name = 'shifts' AND column_name = 'opening_variance'", conn)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("POS_STAFF.HasOpeningCheckColumns", swallowed)
             Return False
         End Try
     End Function
@@ -576,7 +576,8 @@ Public Class POS_STAFF
                     If v IsNot Nothing AndAlso Not IsDBNull(v) Then Return Convert.ToDateTime(v)
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("POS_STAFF.ShiftStartedAt", swallowed)
         End Try
         Return DateTime.Now
     End Function
@@ -898,7 +899,8 @@ Public Class POS_STAFF
                     Return o IsNot Nothing AndAlso Not IsDBNull(o)
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("POS_STAFF.ShiftHasBeenCounted", swallowed)
             ' Unreachable database: don't add a scary warning on top of it.
             Return True
         End Try
@@ -948,7 +950,7 @@ Public Class POS_STAFF
             ActivityLog.Record("SHIFT_CLOSED_ON_EXIT")
         Catch ex As Exception
             ' Nothing useful can be shown while the form is tearing down.
-            System.Diagnostics.Debug.WriteLine("exit shift close error: " & ex.Message)
+            ErrorLog.Write("exit shift close error", ex)
         End Try
 
         Session.ShiftId = 0
@@ -977,7 +979,7 @@ Public Class POS_STAFF
                     End Using
                 End Using
             Catch ex As Exception
-                System.Diagnostics.Debug.WriteLine("logout shift close error: " & ex.Message)
+                ErrorLog.Write("logout shift close error", ex)
             End Try
             Session.ShiftId = 0
         End If
@@ -999,6 +1001,17 @@ Public Class POS_STAFF
         Dim loginForm As New LogIn()
         loginForm.Show()
         Me.Close()
+    End Sub
+
+    ' Locks the screen after a few idle minutes (see IdleLock.vb).
+    Private Sub AttachIdleLock(sender As Object, e As EventArgs) Handles MyBase.Shown
+        IdleLock.Attach(Me, AddressOf SignOutFromLock)
+    End Sub
+
+    ' An Admin signed this user out from the lock screen: no "are you sure".
+    Private Sub SignOutFromLock()
+        ActivityLog.Record("LOGOUT")
+        EndSessionAndShowLogin()
     End Sub
 
 End Class

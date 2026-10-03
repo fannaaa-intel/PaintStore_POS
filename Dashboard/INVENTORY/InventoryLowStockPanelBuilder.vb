@@ -232,7 +232,7 @@ Public Class InventoryLowStockPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load low-stock items:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load low-stock items:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -763,7 +763,7 @@ Public Class InventoryLowStockPanelBuilder
             If frm Is Nothing Then Return
             frm.OpenStockAdjustmentFor(productId)
         Catch ex As Exception
-            AppModal.Show("Could not open Stock Adjustment:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Stock Adjustment:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -795,7 +795,8 @@ Public Class InventoryLowStockPanelBuilder
                     Return Math.Max(0, Convert.ToInt32(cmd.ExecuteScalar()))
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("InventoryLowStockPanelBuilder.PendingReceiptQty", swallowed)
             Return 0
         End Try
     End Function
@@ -820,7 +821,8 @@ Public Class InventoryLowStockPanelBuilder
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("InventoryLowStockPanelBuilder.HasPendingRequest", swallowed)
             Return False
         End Try
     End Function
@@ -889,7 +891,7 @@ Public Class InventoryLowStockPanelBuilder
                           "Paste it into an email or message to your supplier.",
                           "Copied", MessageBoxButtons.OK, MessageBoxIcon.Information)
         Catch ex As Exception
-            AppModal.Show("Could not access the clipboard:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not access the clipboard:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Copy Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
     End Sub

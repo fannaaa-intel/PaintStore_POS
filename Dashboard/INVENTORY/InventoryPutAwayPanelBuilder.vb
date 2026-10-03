@@ -582,7 +582,7 @@ Public Class InventoryPutAwayPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1029,6 +1029,7 @@ Public Class InventoryPutAwayPanelBuilder
     '    UPDATE po_items.shelved_qty += shelved_now
     ' =========================================================================
     Private Shared Sub CommitPutAway()
+        If Not Permissions.Require(Permissions.ReceiveGoods, "put away stock") Then Return
         Dim toShelve As New List(Of PutAwayLine)
         For Each ln In putAwayLines
             If ln.ShelveNow < 0 Then
@@ -1195,7 +1196,7 @@ Public Class InventoryPutAwayPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not reach the database:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not reach the database:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1269,7 +1270,7 @@ Public Class InventoryPutAwayPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load pending put-aways:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load pending put-aways:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1331,7 +1332,7 @@ Public Class InventoryPutAwayPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("InventoryPutAway LoadPutAwayHistory error: " & ex.Message)
+            ErrorLog.Write("InventoryPutAway LoadPutAwayHistory error", ex)
             result.Clear()
         End Try
         Return result
@@ -1383,7 +1384,7 @@ Public Class InventoryPutAwayPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load put-away lines:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load put-away lines:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result

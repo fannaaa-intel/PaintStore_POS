@@ -334,7 +334,7 @@ Public Class ProcurementReportsPanelBuilder
             _poCount = 0 : _poAmount = 0 : _payCount = 0 : _payAmount = 0
             _deliveryCount = 0 : _deliveryBad = 0
             If Not _loadFailed Then
-                AppModal.Show("Could not load the procurement report:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not load the procurement report:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             _loadFailed = True
@@ -956,7 +956,7 @@ Public Class ProcurementReportsPanelBuilder
         Try
             rows = LoadAllForExport()
         Catch ex As Exception
-            AppModal.Show("Could not build the report:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not build the report:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return Nothing
         End Try

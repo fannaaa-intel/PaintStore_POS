@@ -144,7 +144,7 @@ Public Class AccountantReportsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Failed to load report data." & vbCrLf & ex.Message,
+            AppModal.Show("Failed to load report data." & vbCrLf & ErrorLog.ForUser(ex),
                           "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 

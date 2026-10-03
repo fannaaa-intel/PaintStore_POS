@@ -111,7 +111,7 @@ Public Class AdminStoreSettingsPanelBuilder
             End Using
         Catch ex As Exception
             _settingsFailed = True
-            AppModal.Show("Could not load store settings: " & ex.Message &
+            AppModal.Show("Could not load store settings: " & ErrorLog.ForUser(ex) &
                           vbCrLf & vbCrLf &
                           "The POS is still running on its built-in defaults " &
                           "(12% VAT-inclusive), so sales are unaffected.",
@@ -327,6 +327,7 @@ Public Class AdminStoreSettingsPanelBuilder
     End Function
 
     Private Shared Sub SaveSettings()
+        If Not Permissions.Require(Permissions.ManageSettings, "change store settings") Then Return
         Dim storeName As String = _txtName.Text.Trim()
         Dim tagline As String = _txtTagline.Text.Trim()
 
@@ -382,7 +383,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not save settings: " & ex.Message, "Database Error",
+            AppModal.Show("Could not save settings: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -559,6 +560,7 @@ Public Class AdminStoreSettingsPanelBuilder
 
     ' ── CRUD ─────────────────────────────────────────────────────────────────
     Private Shared Sub AddMethod()
+        If Not Permissions.Require(Permissions.ManageSettings, "add payment methods") Then Return
         ' Full form: name, type, active, note. On an un-migrated database only
         ' the name is asked (showTypeActive:=False) and the extra columns are
         ' not written, so the old behaviour is preserved.
@@ -606,7 +608,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not add the payment method: " & ex.Message, "Database Error",
+            AppModal.Show("Could not add the payment method: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -619,6 +621,7 @@ Public Class AdminStoreSettingsPanelBuilder
     ' Kept the name RenameMethod so the row wiring is unchanged, but it now opens
     ' the full editor rather than a name-only prompt.
     Private Shared Sub RenameMethod(m As PayMethod)
+        If Not Permissions.Require(Permissions.ManageSettings, "rename payment methods") Then Return
         Dim hasCols As Boolean = PaymentMethods.HasBehaviourColumns()
         Dim seed As New PaymentMethodModal.Result With {
             .Name = m.Name, .Type = m.Type, .IsActive = m.IsActive, .Note = m.Note
@@ -665,7 +668,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not save the payment method: " & ex.Message, "Database Error",
+            AppModal.Show("Could not save the payment method: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -688,6 +691,7 @@ Public Class AdminStoreSettingsPanelBuilder
     End Function
 
     Private Shared Sub RemoveMethod(m As PayMethod)
+        If Not Permissions.Require(Permissions.ManageSettings, "remove payment methods") Then Return
         ' A method referenced by sales cannot be deleted — removing it would
         ' orphan historical rows and break every sales report that joins on it.
         Dim inUse As Integer = 0
@@ -701,7 +705,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not check whether the method is in use: " & ex.Message,
+            AppModal.Show("Could not check whether the method is in use: " & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -767,7 +771,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not remove the payment method: " & ex.Message, "Database Error",
+            AppModal.Show("Could not remove the payment method: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try

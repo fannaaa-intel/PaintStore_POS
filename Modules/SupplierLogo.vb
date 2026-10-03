@@ -108,7 +108,8 @@ Public Module SupplierLogo
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("SupplierLogo.Probe", swallowed)
             ' No access to information_schema, or no database at all: stay on
             ' the pre-migration behaviour.
             _present.Clear()
@@ -188,7 +189,7 @@ Public Module SupplierLogo
             File.Copy(sourcePath, dest, True)
             Return ImageCache.ToStoredPath(dest)
         Catch ex As Exception
-            AppModal.Show("Could not import the image:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not import the image:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Image Error", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return ""
         End Try

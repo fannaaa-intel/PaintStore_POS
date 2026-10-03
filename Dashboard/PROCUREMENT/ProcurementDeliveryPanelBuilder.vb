@@ -647,7 +647,7 @@ Public Class ProcurementDeliveryPanelBuilder
             If frm Is Nothing Then Return
             frm.OpenReceiveForPO(poId)
         Catch ex As Exception
-            AppModal.Show("Could not open Receive Goods:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Receive Goods:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -721,7 +721,7 @@ Public Class ProcurementDeliveryPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load deliveries:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load deliveries:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 
@@ -761,7 +761,7 @@ Public Class ProcurementDeliveryPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("ProcurementDelivery GetItems error (PO " & poId & "): " & ex.Message)
+            ErrorLog.Write("ProcurementDelivery.GetItems (PO " & poId & ")", ex)
         End Try
         If result.Count > 0 Then
             Dim issues As List(Of DeliveryIssues.Issue) = DeliveryIssues.ForPo(poId)
@@ -820,7 +820,7 @@ Public Class ProcurementDeliveryPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("ProcurementDelivery GetReceipts error (PO " & poId & "): " & ex.Message)
+            ErrorLog.Write("ProcurementDelivery.GetReceipts (PO " & poId & ")", ex)
             result.Clear()
         End Try
         receiptsCache(poId) = result

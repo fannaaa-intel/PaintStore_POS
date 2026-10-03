@@ -560,7 +560,7 @@ Public Class LogIn
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not reach the database: " & ex.Message, "Login Error",
+            AppModal.Show("Could not reach the database: " & ErrorLog.ForUser(ex), "Login Error",
                         MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         Finally

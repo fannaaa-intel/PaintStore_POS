@@ -317,7 +317,7 @@ Public Class SettingsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            loadErr = "Could not load your activity: " & ex.Message
+            loadErr = "Could not load your activity: " & ErrorLog.ForUser(ex)
         End Try
 
         Dim card As Panel = NewCard("My Activity", 0)
@@ -519,7 +519,7 @@ Public Class SettingsPanelBuilder
             pending = PaymentRequests.ListPending()
             decided = PaymentRequests.ListDecided()
         Catch ex As Exception
-            AppModal.Show("Could not load payment requests: " & ex.Message, "Payment Requests",
+            AppModal.Show("Could not load payment requests: " & ErrorLog.ForUser(ex), "Payment Requests",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -671,7 +671,7 @@ Public Class SettingsPanelBuilder
                     Directory.CreateDirectory(_backupFolder)
                     Process.Start("explorer.exe", """" & _backupFolder & """")
                 Catch ex As Exception
-                    AppModal.Show("Could not open the folder: " & ex.Message, "Backup",
+                    AppModal.Show("Could not open the folder: " & ErrorLog.ForUser(ex), "Backup",
                                   MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Try
             End Sub
@@ -768,7 +768,7 @@ Public Class SettingsPanelBuilder
         Try
             items = Archive.ListArchived()
         Catch ex As Exception
-            list.Controls.Add(EmptyRow("Could not load the Recycle Bin: " & ex.Message))
+            list.Controls.Add(EmptyRow("Could not load the Recycle Bin: " & ErrorLog.ForUser(ex)))
             _host.Controls.Add(wrap)
             Return
         End Try

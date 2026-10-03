@@ -199,7 +199,7 @@ Public Class AdminSalesOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the filter options: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the filter options: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -295,7 +295,7 @@ Public Class AdminSalesOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load sales: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load sales: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

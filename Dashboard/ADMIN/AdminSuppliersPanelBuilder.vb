@@ -141,7 +141,7 @@ Public Class AdminSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load suppliers: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load suppliers: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 

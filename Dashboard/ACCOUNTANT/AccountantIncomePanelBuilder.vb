@@ -178,8 +178,8 @@ Public Class AccountantIncomePanelBuilder
             End Using
         Catch ex As Exception
             ' FIX 2: store error for visible display
-            _loadError = "Could not load data: " & ex.Message
-            Debug.WriteLine("AccountantIncome LoadData error: " & ex.Message)
+            _loadError = "Could not load data: " & ErrorLog.ForUser(ex)
+            ErrorLog.Write("AccountantIncome LoadData error", ex)
         End Try
     End Sub
 

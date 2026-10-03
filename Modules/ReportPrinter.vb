@@ -642,7 +642,7 @@ Public Class ReportPrinter
                             Try
                                 doc.Print()
                             Catch ex As Exception
-                                MessageBox.Show("Failed to print: " & ex.Message, "Print Error",
+                                MessageBox.Show("Failed to print: " & ErrorLog.ForUser(ex), "Print Error",
                                                  MessageBoxButtons.OK, MessageBoxIcon.Error)
                             End Try
                         End If

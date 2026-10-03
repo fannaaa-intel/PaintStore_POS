@@ -164,7 +164,7 @@ Public Class AdminDashPanelBuilder
             End Using
         Catch ex As Exception
             _kpiFailed = True
-            Debug.WriteLine("AdminDash LoadKpis error: " & ex.Message)
+            ErrorLog.Write("AdminDash LoadKpis error", ex)
         End Try
     End Sub
 
@@ -200,7 +200,7 @@ Public Class AdminDashPanelBuilder
             End Using
         Catch ex As Exception
             _trendFailed = True
-            Debug.WriteLine("AdminDash LoadTrend error: " & ex.Message)
+            ErrorLog.Write("AdminDash LoadTrend error", ex)
         End Try
 
         For i As Integer = 0 To TREND_DAYS - 1
@@ -243,7 +243,7 @@ Public Class AdminDashPanelBuilder
             End Using
         Catch ex As Exception
             _healthFailed = True
-            Debug.WriteLine("AdminDash LoadHealth error: " & ex.Message)
+            ErrorLog.Write("AdminDash LoadHealth error", ex)
         End Try
     End Sub
 
@@ -277,7 +277,7 @@ Public Class AdminDashPanelBuilder
             End Using
         Catch ex As Exception
             _activityFailed = True
-            Debug.WriteLine("AdminDash LoadActivity error: " & ex.Message)
+            ErrorLog.Write("AdminDash LoadActivity error", ex)
         End Try
     End Sub
 
@@ -805,7 +805,7 @@ Public Class AdminDashPanelBuilder
                     Try
                         nav(navKey)
                     Catch ex As Exception
-                        Debug.WriteLine("AdminDash navigate error: " & ex.Message)
+                        ErrorLog.Write("AdminDash navigate error", ex)
                     End Try
                 End Sub
             AddHandler tile.Click, Sub() go()

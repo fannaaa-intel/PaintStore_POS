@@ -307,7 +307,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load purchase orders: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load purchase orders: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -408,7 +408,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                 Next
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load purchase requests: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load purchase requests: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -434,7 +434,8 @@ Public Class AdminProcurementOverviewPanelBuilder
                     End While
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("AdminProcurementOverviewPanelBuilder.LoadRequestItemSummary", swallowed)
             ' Non-fatal: the row still renders with its count and unit total.
             Return ""
         End Try
@@ -516,7 +517,7 @@ Public Class AdminProcurementOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load quotations: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load quotations: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

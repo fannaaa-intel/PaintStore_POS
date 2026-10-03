@@ -67,7 +67,7 @@ Public Module PoDetailsModal
             hdr = LoadHeader(poId)
             If hdr IsNot Nothing Then lines = LoadLines(poId)
         Catch ex As Exception
-            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
@@ -448,7 +448,8 @@ Public Module PoDetailsModal
                 cmd.Parameters.AddWithValue("@c", column)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PoDetailsModal.ColumnExists", swallowed)
             Return False
         End Try
     End Function
@@ -461,7 +462,8 @@ Public Module PoDetailsModal
                 cmd.Parameters.AddWithValue("@t", table)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PoDetailsModal.TableExists", swallowed)
             Return False
         End Try
     End Function

@@ -228,7 +228,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the quotation:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the quotation:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1570,6 +1570,7 @@ Public Class ProcurementPOPanelBuilder
 
                 Dim total As Decimal = Math.Round(price * req.QtyRequested, 2)
                 Dim notes As String = txtNotes.Text.Trim()
+                If Not Permissions.Require(Permissions.ManagePo, "create price quotations") Then Return
                 Dim quotNo As String = DocNumber.Generate("QT-")
 
                 Dim quotId As Integer = 0
@@ -1649,7 +1650,7 @@ Public Class ProcurementPOPanelBuilder
                     updateTotal()
 
                 Catch ex As Exception
-                    AppModal.Show("Could not save quote:" & Environment.NewLine & ex.Message,
+                    AppModal.Show("Could not save quote:" & Environment.NewLine & ErrorLog.ForUser(ex),
                                   "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Try
             End Sub
@@ -1748,7 +1749,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -2152,13 +2153,14 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not reach the database:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not reach the database:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
     ' ---- Save (single transaction) ----
     Private Shared Sub CommitNewPO()
+        If Not Permissions.Require(Permissions.ManagePo, "create purchase orders") Then Return
         If btnSaveRef IsNot Nothing AndAlso CStr(If(btnSaveRef.Tag, "")) = "done" Then Return
 
         ' Validate
@@ -2269,7 +2271,7 @@ Public Class ProcurementPOPanelBuilder
             End Using
         Catch ex As Exception
             If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
-            AppModal.Show("Could not reach the database:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not reach the database:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -2346,7 +2348,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ErrorLog.ForUser(ex),
                       "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -2985,6 +2987,7 @@ Public Class ProcurementPOPanelBuilder
     End Sub
 
     Private Shared Sub MarkOrdered(poId As Integer, btn As Button)
+        If Not Permissions.Require(Permissions.ManagePo, "mark purchase orders as ordered") Then Return
         If AppModal.Show("Mark this purchase order as Ordered?" & Environment.NewLine &
                          "It will then be available to receive.", "Mark as Ordered",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
@@ -3018,7 +3021,7 @@ Public Class ProcurementPOPanelBuilder
             ActivityLog.Record("PO_ORDERED", "purchase_order", poId, "Marked as Ordered")
         Catch ex As Exception
             btn.Tag = ""
-            AppModal.Show("Could not update the purchase order:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not update the purchase order:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -3034,6 +3037,7 @@ Public Class ProcurementPOPanelBuilder
     ' Anything already received is refused outright -- stock has physically moved
     ' and stock_movements rows exist, so the order is part of the audit trail.
     Private Shared Sub CancelPo(poId As Integer, poNo As String, btn As Button)
+        If Not Permissions.Require(Permissions.ManagePo, "cancel purchase orders") Then Return
         If AppModal.Show(
             "Cancel purchase order " & poNo & "?" & Environment.NewLine & Environment.NewLine &
             "It stops counting towards expenses and payables, and any purchase " &
@@ -3107,7 +3111,7 @@ Public Class ProcurementPOPanelBuilder
         Catch ex As Exception
             btn.Tag = ""
             AppModal.Show("Could not cancel the purchase order:" & Environment.NewLine &
-                          Environment.NewLine & ex.Message,
+                          Environment.NewLine & ErrorLog.ForUser(ex),
                           "Cancel Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
     End Sub
@@ -3120,7 +3124,7 @@ Public Class ProcurementPOPanelBuilder
             If frm Is Nothing Then Return
             frm.OpenReceiveForPO(poId)
         Catch ex As Exception
-            AppModal.Show("Could not open Receive Goods:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Receive Goods:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -3170,7 +3174,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load purchase orders:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load purchase orders:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -3190,7 +3194,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load suppliers:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load suppliers:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -3217,7 +3221,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load products:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load products:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -3265,7 +3269,7 @@ Public Class ProcurementPOPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load approved requests:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result

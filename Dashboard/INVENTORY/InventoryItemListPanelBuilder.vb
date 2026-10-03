@@ -286,7 +286,7 @@ Public Class InventoryItemListPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load products:" & Environment.NewLine & ex.Message &
+            AppModal.Show("Could not load products:" & Environment.NewLine & ErrorLog.ForUser(ex) &
                           Environment.NewLine & Environment.NewLine &
                           "If the error mentions 'image_path', run:" & Environment.NewLine &
                           "ALTER TABLE products ADD COLUMN image_path VARCHAR(255) DEFAULT NULL AFTER color_hex;",
@@ -1400,6 +1400,7 @@ Public Class InventoryItemListPanelBuilder
                                      cboCat As ComboBox, paintType As String, txtSize As TextBox,
                                      hex As String, imagePath As String, txtPrice As TextBox, txtCost As TextBox,
                                      numStock As NumericUpDown, numReorder As NumericUpDown) As Boolean
+        If Not Permissions.Require(Permissions.EditProduct, "add or edit products") Then Return False
         Dim name = txtName.Text.Trim()
         Dim sku = txtSku.Text.Trim()
         If name = "" Then
@@ -1515,11 +1516,11 @@ Public Class InventoryItemListPanelBuilder
             If ex.Number = 1062 Then
                 AppModal.Show("That SKU already exists. Please use a unique SKU.", "Duplicate SKU", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Else
-                AppModal.Show("Could not save the product:" & Environment.NewLine & ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                AppModal.Show("Could not save the product:" & Environment.NewLine & ErrorLog.ForUser(ex), "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             Return False
         Catch ex As Exception
-            AppModal.Show("Could not save the product:" & Environment.NewLine & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not save the product:" & Environment.NewLine & ErrorLog.ForUser(ex), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
     End Function
@@ -1528,6 +1529,7 @@ Public Class InventoryItemListPanelBuilder
     '  DELETE (soft delete / archive)
     ' =========================================================================
     Private Shared Function DeleteItem(productId As Integer, productName As String) As Boolean
+        If Not Permissions.Require(Permissions.EditProduct, "delete products") Then Return False
         If productId <= 0 Then Return False
 
         Dim shownName As String = If(String.IsNullOrEmpty(productName), "this product", """" & productName & """")
@@ -1558,7 +1560,7 @@ Public Class InventoryItemListPanelBuilder
             ActivityLog.Record("PRODUCT_DELETE", "product", productId, productName)
             Return True
         Catch ex As Exception
-            AppModal.Show("Could not delete the product:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not delete the product:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Delete Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
@@ -1579,7 +1581,7 @@ Public Class InventoryItemListPanelBuilder
             ' image resolved to nothing on any other machine or install path.
             Return ImageCache.ToStoredPath(dest)
         Catch ex As Exception
-            AppModal.Show("Could not import the image:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not import the image:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Image Error", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return ""
         End Try
@@ -1722,7 +1724,8 @@ Public Class InventoryItemListPanelBuilder
                     End If
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("InventoryItemListPanelBuilder.NextSku", swallowed)
             ' Unreachable database: fall back to the loaded list. Worst case the
             ' insert reports a duplicate SKU, which is already handled.
             For Each it In items

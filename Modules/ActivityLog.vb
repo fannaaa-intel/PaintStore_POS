@@ -35,7 +35,8 @@ Public Module ActivityLog
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ActivityLog.RecordAs", swallowed)
         End Try
     End Sub
 End Module

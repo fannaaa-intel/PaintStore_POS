@@ -147,7 +147,8 @@ Public Class HomePanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("HomePanelBuilder.LoadHome", swallowed)
             ' Show zeros on DB error
         End Try
 
@@ -672,7 +673,8 @@ Public Class HomePanelBuilder
                     heldCount = CInt(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("HomePanelBuilder.LoadHome", swallowed)
         End Try
 
         If heldCount > 0 Then
@@ -806,7 +808,8 @@ Public Class HomePanelBuilder
                 thisNotifTimer.Stop()
                 thisNotifTimer.Dispose()
             End If
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("HomePanelBuilder.LoadHome", swallowed)
         End Try
     End Sub
         thisNotifTimer.Start()
@@ -948,7 +951,8 @@ Public Class HomePanelBuilder
             sw.Stop()
             dbOnline = True
             dbLatencyMs = sw.ElapsedMilliseconds
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("HomePanelBuilder.LoadHome", swallowed)
             dbOnline = False
         End Try
 
@@ -1060,7 +1064,8 @@ Public Class HomePanelBuilder
             pingDot.BackColor = MintGreen
             pingLbl.Text = $"DB connected  ·  {sw2.ElapsedMilliseconds} ms"
             pingLbl.ForeColor = MintDark
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("HomePanelBuilder.LoadHome", swallowed)
             pingDot.BackColor = AccentRed
             pingLbl.Text = "DB unreachable"
             pingLbl.ForeColor = AccentRed
@@ -1155,8 +1160,7 @@ Public Class HomePanelBuilder
             End Using
         Catch ex As Exception
             ' Keep graceful defaults on the cards, and report via the themed modal.
-            AppModal.Show("Could not load dashboard figures:" & Environment.NewLine &
-                          ex.Message, "Dashboard", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            AppModal.Show("Could not load dashboard figures:" & Environment.NewLine & ErrorLog.ForUser(ex), "Dashboard", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
     End Sub
 
@@ -1178,7 +1182,7 @@ Public Class HomePanelBuilder
                                   section, MessageBoxButtons.OK, MessageBoxIcon.Information)
             End Select
         Catch ex As Exception
-            AppModal.Show("Could not open " & section & ":" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open " & section & ":" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

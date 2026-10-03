@@ -63,7 +63,8 @@ Public Module PaymentRequests
                 End Using
             End Using
             _checked = True
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentRequests.HasTable", swallowed)
             _present = False
         End Try
         Return _present
@@ -73,6 +74,7 @@ Public Module PaymentRequests
     '  CASHIER SIDE
     ' -------------------------------------------------------------------------
     Public Function SubmitAdd(name As String, type As String, note As String, reason As String) As String
+        If Not Permissions.Can(Permissions.RequestPaymentMethod) Then Return Permissions.DeniedMessage("request payment methods")
         If Not HasTable() Then Return NotSetUp()
         name = If(name, "").Trim()
         Try
@@ -107,11 +109,12 @@ Public Module PaymentRequests
             ActivityLog.Record("PAYREQ_ADD", "payment_method", Nothing, name & " - " & Left(reason, 150))
             Return ""
         Catch ex As Exception
-            Return "Could not send the request: " & ex.Message
+            Return "Could not send the request: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 
     Public Function SubmitRemove(methodId As Integer, name As String, reason As String) As String
+        If Not Permissions.Can(Permissions.RequestPaymentMethod) Then Return Permissions.DeniedMessage("request payment methods")
         If Not HasTable() Then Return NotSetUp()
         Try
             Using cn = Db.GetConnection()
@@ -137,7 +140,7 @@ Public Module PaymentRequests
             ActivityLog.Record("PAYREQ_REMOVE", "payment_method", methodId, name & " - " & Left(reason, 150))
             Return ""
         Catch ex As Exception
-            Return "Could not send the request: " & ex.Message
+            Return "Could not send the request: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 
@@ -158,7 +161,8 @@ Public Module PaymentRequests
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentRequests.PendingRemovalIds", swallowed)
         End Try
         Return ids
     End Function
@@ -189,7 +193,8 @@ Public Module PaymentRequests
                     Return Convert.ToInt32(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentRequests.PendingCount", swallowed)
             Return 0
         End Try
     End Function
@@ -238,6 +243,7 @@ Public Module PaymentRequests
     ' Makes the change and marks the request approved, in one transaction.
     ' Returns "" on success (outcome says what was done), else why not.
     Public Function Approve(req As Request, ByRef outcome As String) As String
+        If Not Permissions.Can(Permissions.ManageSettings) Then Return Permissions.DeniedMessage("approve payment method requests")
         outcome = ""
         Try
             Using cn = Db.GetConnection()
@@ -330,7 +336,7 @@ Public Module PaymentRequests
                 End Using
             End Using
         Catch ex As Exception
-            Return "Could not approve: " & ex.Message
+            Return "Could not approve: " & ErrorLog.ForUser(ex)
         End Try
 
         PaymentMethods.ResetSchemaCache()
@@ -341,6 +347,7 @@ Public Module PaymentRequests
     End Function
 
     Public Function Reject(req As Request, reason As String) As String
+        If Not Permissions.Can(Permissions.ManageSettings) Then Return Permissions.DeniedMessage("reject payment method requests")
         If String.IsNullOrWhiteSpace(reason) Then Return "A reason is required so the cashier knows why."
         Try
             Using cn = Db.GetConnection()
@@ -355,7 +362,7 @@ Public Module PaymentRequests
                 End Using
             End Using
         Catch ex As Exception
-            Return "Could not reject: " & ex.Message
+            Return "Could not reject: " & ErrorLog.ForUser(ex)
         End Try
         ActivityLog.Record("PAYREQ_REJECT", "payment_method", If(req.MethodId = 0, CType(Nothing, Integer?), req.MethodId),
                            req.Headline & " - " & Left(reason, 150))

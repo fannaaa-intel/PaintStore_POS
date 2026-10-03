@@ -237,7 +237,8 @@ Public NotInheritable Class InventoryMovements
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("InventoryMovements.LoadCategories", swallowed)
             ' The filter still works with just "All categories".
         End Try
         Return list

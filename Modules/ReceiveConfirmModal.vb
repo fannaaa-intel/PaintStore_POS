@@ -514,7 +514,8 @@ Public Module ReceiveConfirmModal
                 "  AND column_name = 'phase'", conn, txn)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ReceiveConfirmModal.HasPhaseColumn", swallowed)
             ' Unreadable schema means write the pre-phase shape: a saved receipt
             ' without a phase beats a receipt that would not save at all.
             Return False
@@ -537,7 +538,8 @@ Public Module ReceiveConfirmModal
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ReceiveConfirmModal.HasTable", swallowed)
             ' No access, no table as far as the caller is concerned: it falls
             ' back to receiving without a stored attestation, exactly as before.
             Return False

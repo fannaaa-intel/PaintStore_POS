@@ -118,7 +118,8 @@ Public Class AccountantPayablesPanelBuilder
             Using cmd As New MySqlCommand(sql, conn)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountantPayablesPanelBuilder.SchemaHas", swallowed)
             ' No access to information_schema: behave as un-migrated.
             Return False
         End Try
@@ -196,8 +197,8 @@ Public Class AccountantPayablesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            _loadError = "Could not load payables: " & ex.Message
-            Debug.WriteLine("AccountantPayables LoadData error: " & ex.Message)
+            _loadError = "Could not load payables: " & ErrorLog.ForUser(ex)
+            ErrorLog.Write("AccountantPayables LoadData error", ex)
         End Try
 
         Select Case _filter

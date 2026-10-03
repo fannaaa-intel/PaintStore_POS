@@ -100,6 +100,7 @@ Public Class AdminActivityLogPanelBuilder
     '  ENTRY POINT
     ' =========================================================================
     Public Shared Sub LoadActivityLog(container As Panel)
+        If Not Permissions.Require(Permissions.ViewActivityLog, "view the activity log") Then Return
         _container = container
         _searchQuery = ""
         _actionFilter = ALL_ACTIONS
@@ -158,7 +159,7 @@ Public Class AdminActivityLogPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the action list: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the action list: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -243,7 +244,7 @@ Public Class AdminActivityLogPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the activity log: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the activity log: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

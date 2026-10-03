@@ -388,7 +388,7 @@ Public Class ProcurementReceivePanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the purchase order:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -847,6 +847,7 @@ Public Class ProcurementReceivePanelBuilder
     '  SAVE — single transaction, mirrors CommitAdjustment()
     ' =========================================================================
     Private Shared Sub CommitReceive()
+        If Not Permissions.Require(Permissions.ReceiveGoods, "receive deliveries") Then Return
         If btnSaveRef IsNot Nothing AndAlso CStr(If(btnSaveRef.Tag, "")) = "done" Then Return
 
         ' Collect lines actually being received, and lines with a problem.
@@ -914,7 +915,7 @@ Public Class ProcurementReceivePanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not verify the expected date:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not verify the expected date:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1060,7 +1061,7 @@ Public Class ProcurementReceivePanelBuilder
             End Using
         Catch ex As Exception
             If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
-            AppModal.Show("Could not reach the database:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not reach the database:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1101,7 +1102,7 @@ Public Class ProcurementReceivePanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load receivable purchase orders:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load receivable purchase orders:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1223,7 +1224,7 @@ Public Class ProcurementReceivePanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the purchase order lines:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the purchase order lines:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result

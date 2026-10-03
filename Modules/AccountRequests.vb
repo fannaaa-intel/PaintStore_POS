@@ -47,7 +47,8 @@ Public Module AccountRequests
                     _approvalPresent = Convert.ToInt32(cmd.ExecuteScalar()) = 6
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.HasApprovalColumns", swallowed)
             _approvalPresent = False
         End Try
         Return _approvalPresent
@@ -67,7 +68,8 @@ Public Module AccountRequests
                     _resetPresent = Convert.ToInt32(cmd.ExecuteScalar()) = 1
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.HasResetTable", swallowed)
             _resetPresent = False
         End Try
         Return _resetPresent
@@ -97,7 +99,8 @@ Public Module AccountRequests
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.UsernameTaken", swallowed)
             ' Fail closed — never insert a duplicate on the strength of a
             ' failed lookup.
             Return True
@@ -189,7 +192,8 @@ Public Module AccountRequests
                 End Using
             End Using
             _emailChecked = True
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.HasEmailColumn", swallowed)
             _emailPresent = False
         End Try
         Return _emailPresent
@@ -209,7 +213,8 @@ Public Module AccountRequests
                     Return res.ToString().Trim()
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.GetEmail", swallowed)
             Return ""
         End Try
     End Function
@@ -228,7 +233,8 @@ Public Module AccountRequests
                     Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.EmailTaken", swallowed)
             ' Fail closed - never save a possible duplicate on a failed lookup.
             Return True
         End Try
@@ -273,7 +279,8 @@ Public Module AccountRequests
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.FileResetRequest", swallowed)
             ' Silent: the user is told "if the account exists we have notified
             ' your administrator" regardless, so surfacing an error here would
             ' only leak that something went wrong for this particular name.
@@ -320,7 +327,8 @@ Public Module AccountRequests
                     Return Convert.ToInt32(res) = 1
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.MustChangePassword", swallowed)
             ' Fail open on a read error: a database hiccup must not lock a user
             ' out of an account whose password is perfectly valid. The flag is
             ' still set, so the prompt returns on the next sign-in.
@@ -359,7 +367,7 @@ Public Module AccountRequests
             Return ""
 
         Catch ex As Exception
-            Return "Could not save the new password: " & ex.Message
+            Return "Could not save the new password: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 
@@ -382,7 +390,8 @@ Public Module AccountRequests
                     Return PasswordHelper.VerifyPassword(password, res.ToString())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AccountRequests.VerifyCurrentPassword", swallowed)
             ' Fail CLOSED, unlike MustChangePassword: a read error here must not
             ' be a way past the current-password check.
             Return False

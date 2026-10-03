@@ -38,7 +38,8 @@ Public Module PasswordOtp
                 End Using
             End Using
             _checked = True
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PasswordOtp.HasOtpTable", swallowed)
             _present = False
         End Try
         Return _present
@@ -86,7 +87,7 @@ Public Module PasswordOtp
                 End Using
             End Using
         Catch ex As Exception
-            Return "Could not create a verification code: " & ex.Message
+            Return "Could not create a verification code: " & ErrorLog.ForUser(ex)
         End Try
 
         Dim mailErr As String = Mailer.Send(email,
@@ -164,7 +165,7 @@ Public Module PasswordOtp
             End Using
             Return ""
         Catch ex As Exception
-            Return "Could not check the code: " & ex.Message
+            Return "Could not check the code: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 

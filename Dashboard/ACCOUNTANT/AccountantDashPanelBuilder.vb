@@ -185,7 +185,7 @@ Public Class AccountantDashPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("AccountantDash LoadData error: " & ex.Message)
+            ErrorLog.Write("AccountantDash LoadData error", ex)
             AppModal.Show("Dashboard data could not be loaded. Check your database connection and try again.", "Load Error")
         End Try
     End Sub

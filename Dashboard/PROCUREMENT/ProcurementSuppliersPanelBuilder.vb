@@ -1126,6 +1126,7 @@ Public Class ProcurementSuppliersPanelBuilder
     End Function
 
     Private Shared Sub CommitSupplier()
+        If Not Permissions.Require(Permissions.ManageSuppliers, "add or edit suppliers") Then Return
         If btnSaveRef IsNot Nothing AndAlso CStr(If(btnSaveRef.Tag, "")) = "done" Then Return
 
         Dim name As String = txtName.Text.Trim()
@@ -1294,7 +1295,7 @@ Public Class ProcurementSuppliersPanelBuilder
             End Using
         Catch ex As Exception
             If btnSaveRef IsNot Nothing Then btnSaveRef.Tag = ""
-            AppModal.Show("Could not save the supplier:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not save the supplier:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1852,7 +1853,7 @@ Public Class ProcurementSuppliersPanelBuilder
                     End Using
                 Catch ex As Exception
                     AppModal.Show("Could not check whether the supplier is in use:" &
-                                  Environment.NewLine & ex.Message,
+                                  Environment.NewLine & ErrorLog.ForUser(ex),
                                   "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                     Return
                 End Try
@@ -1867,6 +1868,7 @@ Public Class ProcurementSuppliersPanelBuilder
                     Return
                 End If
 
+                If Not Permissions.Require(Permissions.ManageSuppliers, "delete suppliers") Then Return
                 Dim confirm = AppModal.Show(
                     "Are you sure you want to delete """ & sup.Name & """?" &
                     Environment.NewLine &
@@ -1894,7 +1896,7 @@ Public Class ProcurementSuppliersPanelBuilder
                             MessageBoxButtons.OK, MessageBoxIcon.Information)
                         RenderList()
                     Catch ex As Exception
-                        AppModal.Show("Could not delete supplier:" & Environment.NewLine & ex.Message,
+                        AppModal.Show("Could not delete supplier:" & Environment.NewLine & ErrorLog.ForUser(ex),
                             "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                     End Try
                 End If
@@ -2062,7 +2064,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load suppliers:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load suppliers:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -2086,7 +2088,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the supplier:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the supplier:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return sup
@@ -2129,7 +2131,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load supplier products:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load supplier products:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -2160,7 +2162,7 @@ Public Class ProcurementSuppliersPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load supplier purchase orders:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load supplier purchase orders:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result

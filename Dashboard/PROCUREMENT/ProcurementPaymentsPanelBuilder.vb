@@ -239,7 +239,7 @@ Public Class ProcurementPaymentsPanelBuilder
         Catch ex As Exception
             _totalRows = 0 : _sumPaid = 0D : _owed = 0D : _owedCount = 0 : _partialCount = 0
             If Not _loadFailed Then
-                AppModal.Show("Could not load payment records:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not load payment records:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             _loadFailed = True
@@ -809,7 +809,7 @@ Public Class ProcurementPaymentsPanelBuilder
         Try
             rows = LoadAllForExport()
         Catch ex As Exception
-            AppModal.Show("Could not build the report:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not build the report:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return Nothing
         End Try

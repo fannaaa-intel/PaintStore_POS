@@ -231,7 +231,7 @@ Public Class ProcurementRequestsPanelBuilder
             _totalRows = 0
             _nPending = 0 : _nApproved = 0 : _nRejected = 0 : _estOpen = 0D
             If Not _loadFailed Then
-                AppModal.Show("Could not load purchase requests:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not load purchase requests:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             _loadFailed = True

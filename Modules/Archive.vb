@@ -49,7 +49,8 @@ Public Module Archive
                 End Using
             End Using
             _checked = True
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("Archive.HasArchiveTable", swallowed)
             _present = False
         End Try
         Return _present
@@ -179,6 +180,7 @@ Public Module Archive
 
     ' Puts the record back. Returns "" on success, else why it could not.
     Public Function Restore(archiveId As Integer) As String
+        If Not Permissions.Can(Permissions.RestoreData) Then Return Permissions.DeniedMessage("restore from the Recycle Bin")
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -249,13 +251,14 @@ Public Module Archive
             Return "It refers to something that has since been deleted (for example its " &
                    "product or supplier), so it cannot be put back."
         Catch ex As Exception
-            Return "Could not restore: " & ex.Message
+            Return "Could not restore: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 
     ' Drops the copy for good. The row stays (Purged) so the bin's history
     ' still shows that something was deleted and by whom.
     Public Function Purge(archiveId As Integer) As String
+        If Not Permissions.Can(Permissions.RestoreData) Then Return Permissions.DeniedMessage("delete from the Recycle Bin")
         Try
             Dim label As String = ""
             Dim table As String = ""
@@ -283,7 +286,7 @@ Public Module Archive
             ActivityLog.Record("ARCHIVE_PURGE", table, Nothing, KindName(table) & ": " & label)
             Return ""
         Catch ex As Exception
-            Return "Could not delete it: " & ex.Message
+            Return "Could not delete it: " & ErrorLog.ForUser(ex)
         End Try
     End Function
 

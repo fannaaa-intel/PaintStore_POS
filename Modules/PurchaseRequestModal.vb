@@ -200,7 +200,7 @@ Public Module PurchaseRequestModal
             Try
                 editing = RequestReviewModal.LoadRequest(editRequestId)
             Catch ex As Exception
-                AppModal.Show("Could not load the request:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not load the request:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 Return False
             End Try
@@ -877,7 +877,7 @@ Public Module PurchaseRequestModal
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not search products:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not search products:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -898,7 +898,8 @@ Public Module PurchaseRequestModal
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PurchaseRequestModal.LoadProduct", swallowed)
             ' Seeding is a convenience; the form still opens empty.
         End Try
         Return Nothing
@@ -929,6 +930,7 @@ Public Module PurchaseRequestModal
     '  line and new queries the whole list.
     ' =========================================================================
     Private Function SaveRequest(lines As List(Of ReqLine), note As String) As Boolean
+        If Not Permissions.Require(Permissions.RequestPurchase, "file purchase requests") Then Return False
         If lines.Count = 0 Then Return False
 
         Try
@@ -991,7 +993,7 @@ Public Module PurchaseRequestModal
             End Using
 
         Catch ex As Exception
-            AppModal.Show("Could not send the request:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not send the request:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
@@ -1114,7 +1116,7 @@ Public Module PurchaseRequestModal
                           "Changes Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return True
         Catch ex As Exception
-            AppModal.Show("Could not save the changes:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not save the changes:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try

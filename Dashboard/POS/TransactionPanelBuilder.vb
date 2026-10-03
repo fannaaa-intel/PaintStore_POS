@@ -282,7 +282,7 @@ Public Class TransactionPanelBuilder
             End Using
         Catch ex As Exception
             ' image_path may be missing on older databases.
-            AppModal.Show("Could not load products:" & Environment.NewLine & ex.Message &
+            AppModal.Show("Could not load products:" & Environment.NewLine & ErrorLog.ForUser(ex) &
                           Environment.NewLine & Environment.NewLine &
                           "If the error mentions 'image_path', run:" & Environment.NewLine &
                           "ALTER TABLE products ADD COLUMN image_path VARCHAR(255) DEFAULT NULL AFTER color_hex;",
@@ -422,7 +422,7 @@ Public Class TransactionPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            System.Diagnostics.Debug.WriteLine("UpdateQuotaBadge error: " & ex.Message)
+            ErrorLog.Write("UpdateQuotaBadge error", ex)
             Return
         End Try
 
@@ -1337,6 +1337,8 @@ Public Class TransactionPanelBuilder
     End Function
 
     Private Shared Function MakePayBtn(text As String, dbName As String, normalClr As Color, hoverClr As Color, leftMargin As Integer) As Button
+        ' F9 takes payment with the first method, so that button carries the hint.
+        If _payButtons.Count = 0 Then text &= "  (F9)"
         Dim btn As New Button With {.Text = text, .Font = New Font("Segoe UI Semibold", 11), .FlatStyle = FlatStyle.Flat,
             .BackColor = normalClr, .ForeColor = Color.White, .Cursor = Cursors.Hand, .Margin = New Padding(leftMargin, 0, 0, 0), .Dock = DockStyle.Fill}
         btn.FlatAppearance.BorderSize = 0
@@ -1482,7 +1484,7 @@ Public Class TransactionPanelBuilder
         Dim btnDiscount = MakeActionBtn("DISCOUNT  (F2)", Color.FromArgb(232, 238, 237), SubText, 6)
         Dim btnHold = MakeActionBtn("HOLD  (F4)", Color.FromArgb(232, 238, 237), SubText, 6)
         Dim btnRetrieve = MakeActionBtn("RETRIEVE  (F5)", Color.FromArgb(232, 238, 237), SubText, 6)
-        Dim btnPrint = MakePrimaryBtn("REPRINT", 6)
+        Dim btnPrint = MakePrimaryBtn("REPRINT  (F7)", 6)
         _btnDiscount = btnDiscount
         _btnHold = btnHold
         AddHandler btnVoid.Click, Sub() VoidSale()
@@ -1632,7 +1634,8 @@ Public Class TransactionPanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("TransactionPanelBuilder.LoadCategoryNames", swallowed)
             ' Without the list the dropdown still offers "All categories", so
             ' the till keeps selling.
         End Try
@@ -1658,6 +1661,7 @@ Public Class TransactionPanelBuilder
                                     amountTendered As Decimal,
                                     changeDue As Decimal,
                                     referenceNo As String)
+        If Not Permissions.Require(Permissions.SellItems, "complete a sale") Then Return
         Dim items As New List(Of (pid As Integer, pname As String, qty As Integer, price As Decimal, lineTotal As Decimal))
         For Each kv In _cart
             If kv.Value.Qty > 0 Then
@@ -1838,7 +1842,7 @@ Public Class TransactionPanelBuilder
             LoadTransaction(_mainContainer)
 
         Catch ex As Exception
-            AppModal.Show("The sale could not be completed:" & Environment.NewLine & Environment.NewLine & ex.Message,
+            AppModal.Show("The sale could not be completed:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex),
                 "Sale Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -1919,6 +1923,7 @@ Public Class TransactionPanelBuilder
     '  DISCOUNT
     ' =========================================================================
     Private Shared Sub ApplyDiscount()
+        If Not Permissions.Require(Permissions.ApplyDiscount, "apply a discount") Then Return
         Dim subtotal As Decimal = CartSubtotal()
         If subtotal <= 0 Then
             AppModal.Show("Add items to the cart before applying a discount.", "Nothing to Discount", MessageBoxButtons.OK, MessageBoxIcon.Information)
@@ -2124,7 +2129,7 @@ Public Class TransactionPanelBuilder
             _discountType = "None"
             LoadTransaction(_mainContainer)
         Catch ex As Exception
-            AppModal.Show("Could not hold the sale:" & Environment.NewLine & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not hold the sale:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex),
                 "Hold Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -2144,7 +2149,7 @@ Public Class TransactionPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load held sales:" & Environment.NewLine & ex.Message, "Retrieve Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not load held sales:" & Environment.NewLine & ErrorLog.ForUser(ex), "Retrieve Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
         If held.Count = 0 Then
@@ -2216,7 +2221,7 @@ Public Class TransactionPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the held sale:" & Environment.NewLine & ex.Message, "Retrieve Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not load the held sale:" & Environment.NewLine & ErrorLog.ForUser(ex), "Retrieve Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
 
@@ -2262,6 +2267,7 @@ Public Class TransactionPanelBuilder
     End Sub
 
     Private Shared Sub VoidSale()
+        If Not Permissions.Require(Permissions.VoidSale, "void a sale") Then Return
         Dim candidates As New List(Of (id As Long, no As String, total As Decimal, status As String, dt As DateTime))
         Try
             Using conn As MySqlConnection = Db.GetConnection()
@@ -2276,7 +2282,7 @@ Public Class TransactionPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load sales:" & Environment.NewLine & ex.Message, "Void Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not load sales:" & Environment.NewLine & ErrorLog.ForUser(ex), "Void Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
         If candidates.Count = 0 Then
@@ -2287,9 +2293,22 @@ Public Class TransactionPanelBuilder
             candidates.Select(Function(c) (c.id, c.no & "   [" & c.status & "]   P " & c.total.ToString("N2") & "   " & c.dt.ToString("MMM d, h:mm tt"))).ToList())
         If chosenId <= 0 Then Return
         Dim chosen = candidates.First(Function(c) c.id = chosenId)
-        If AppModal.Show("Void sale " & chosen.no & " (" & chosen.status & ")?" & Environment.NewLine &
-                If(chosen.status = "Completed", "Stock from this sale will be restored.", "") & Environment.NewLine & "This cannot be undone.",
-                "Confirm Void", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then Return
+        ' A held sale never took money or stock, so dropping it only needs a
+        ' confirmation. A completed one did: it needs a reason and an Admin.
+        Dim approval As AdminApprovalModal.Result = Nothing
+        If chosen.status = "Completed" Then
+            approval = AdminApprovalModal.Show("Void Sale " & chosen.no,
+                "P " & chosen.total.ToString("N2") & " will be reversed and the stock restored. " &
+                "An Admin must approve this. It cannot be undone.", "Approve void")
+            If approval Is Nothing Then Return
+        ElseIf AppModal.Show("Void held sale " & chosen.no & "?" & Environment.NewLine & "This cannot be undone.",
+                "Confirm Void", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) <> DialogResult.Yes Then
+            Return
+        End If
+        Dim voidNote As String = If(approval Is Nothing, "Void of held sale",
+            "Void: " & approval.Reason & " (approved by " & approval.AdminName & ")")
+        ' stock_movements.note is VARCHAR(150).
+        If voidNote.Length > 150 Then voidNote = voidNote.Substring(0, 150)
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
@@ -2333,7 +2352,8 @@ Public Class TransactionPanelBuilder
                                 End Using
                                 Using cmd As New MySqlCommand(
                                     "INSERT INTO stock_movements (product_id, user_id, movement_type, qty_change, reference_type, reference_id, note, created_at) " &
-                                    "VALUES (@pid, @uid, 'Adjustment', @qc, 'void', @sid, 'Void of sale', NOW())", conn, txn)
+                                    "VALUES (@pid, @uid, 'Adjustment', @qc, 'void', @sid, @note, NOW())", conn, txn)
+                                    cmd.Parameters.AddWithValue("@note", voidNote)
                                     cmd.Parameters.AddWithValue("@pid", ln.pid)
                                     cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                                     cmd.Parameters.AddWithValue("@qc", ln.qty)
@@ -2355,14 +2375,18 @@ Public Class TransactionPanelBuilder
             End Using
             ' A void reverses a completed sale and restores stock, so it is the
             ' action an audit is most likely to be looking for.
-            ActivityLog.Record("SALE_VOID", "sale", CInt(chosenId),
-                chosen.no & " — " & ChrW(8369) & chosen.total.ToString("N2") &
-                " (was " & chosen.status & ")")
+            Dim logLine As String = chosen.no & " — " & ChrW(8369) & chosen.total.ToString("N2") &
+                " (was " & chosen.status & ")"
+            If approval IsNot Nothing Then
+                logLine &= " | Reason: " & approval.Reason & " | Approved by: " & approval.AdminName
+            End If
+            If logLine.Length > 255 Then logLine = logLine.Substring(0, 255)
+            ActivityLog.Record("SALE_VOID", "sale", CInt(chosenId), logLine)
 
             AppModal.Show("Sale " & chosen.no & " was voided.", "Voided", MessageBoxButtons.OK, MessageBoxIcon.Information)
             LoadTransaction(_mainContainer)
         Catch ex As Exception
-            AppModal.Show("Could not void the sale:" & Environment.NewLine & Environment.NewLine & ex.Message, "Void Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not void the sale:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex), "Void Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 

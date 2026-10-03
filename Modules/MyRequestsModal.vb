@@ -92,7 +92,7 @@ Public Module MyRequestsModal
                     rows = LoadMine()
                 Catch ex As Exception
                     host.Controls.Add(New Label With {
-                        .Text = "Could not load your requests: " & ex.Message,
+                        .Text = "Could not load your requests: " & ErrorLog.ForUser(ex),
                         .Font = New Font("Segoe UI", 10.0F), .ForeColor = Theme.Danger,
                         .AutoSize = True, .Location = New Point(8, 16)
                     })
@@ -350,7 +350,7 @@ Public Module MyRequestsModal
                                If(itemCount = 1, " product", " products"))
             Return True
         Catch ex As Exception
-            AppModal.Show("Could not remove the request:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not remove the request:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try

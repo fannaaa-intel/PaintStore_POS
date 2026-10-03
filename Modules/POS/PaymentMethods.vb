@@ -55,7 +55,8 @@ Public Module PaymentMethods
                     _present = Convert.ToInt32(cmd.ExecuteScalar()) = 3
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentMethods.HasBehaviourColumns", swallowed)
             _present = False
         End Try
         Return _present
@@ -91,7 +92,8 @@ Public Module PaymentMethods
                 End Using
             End Using
             _chequeChecked = True
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentMethods.SupportsCheque", swallowed)
             _chequePresent = False
         End Try
         Return _chequePresent
@@ -153,7 +155,8 @@ Public Module PaymentMethods
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentMethods.LoadAll", swallowed)
             ' A read failure returns an empty list; callers keep the till usable
             ' with their own default rather than crashing.
         End Try

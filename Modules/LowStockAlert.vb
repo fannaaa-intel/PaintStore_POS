@@ -32,7 +32,7 @@ Public Module LowStockAlert
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("LowStockAlert.CountLowStock: " & ex.Message)
+            ErrorLog.Write("LowStockAlert.CountLowStock", ex)
             Return -1
         End Try
     End Function

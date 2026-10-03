@@ -187,7 +187,7 @@ Public Class AdminInventoryOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load categories: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load categories: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -226,7 +226,7 @@ Public Class AdminInventoryOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the inventory summary: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load the inventory summary: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -300,7 +300,7 @@ Public Class AdminInventoryOverviewPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load products: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load products: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

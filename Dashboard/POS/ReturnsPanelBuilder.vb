@@ -1103,7 +1103,7 @@ Public Class ReturnsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Database error: " & ex.Message, "Lookup Failed", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Database error: " & ErrorLog.ForUser(ex), "Lookup Failed", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 
         _rowsHost.SuspendLayout()
@@ -1161,6 +1161,7 @@ Public Class ReturnsPanelBuilder
     '  DB — PROCESS REFUND  (full InnoDB transaction)
     ' =========================================================================
     Private Shared Sub ProcessRefund()
+        If Not Permissions.Require(Permissions.RefundSale, "process a refund") Then Return
         ' Guards
         If _saleId <= 0 Then
             AppModal.Show("Please look up a receipt first.", "No Receipt Loaded",
@@ -1370,11 +1371,11 @@ Public Class ReturnsPanelBuilder
                 ' here would invite a second refund for the same items.
                 AppModal.Show(
                     "Refund " & returnNo & " was processed, but the screen could not be refreshed:" &
-                    Environment.NewLine & ex.Message & Environment.NewLine & Environment.NewLine &
+                    Environment.NewLine & ErrorLog.ForUser(ex) & Environment.NewLine & Environment.NewLine &
                     "Do NOT process this refund again - reopen Returns to continue.",
                     "Refund Processed", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Else
-                AppModal.Show("Failed to process refund: " & ex.Message, "Refund Error",
+                AppModal.Show("Failed to process refund: " & ErrorLog.ForUser(ex), "Refund Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
         End Try

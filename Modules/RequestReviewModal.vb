@@ -81,7 +81,8 @@ Public Module RequestReviewModal
                 "AND table_name = 'purchase_requests' AND column_name = 'review_note'", conn, tx)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("RequestReviewModal.HasReviewNote", swallowed)
             Return False
         End Try
     End Function
@@ -184,7 +185,7 @@ Public Module RequestReviewModal
         Try
             info = LoadRequest(requestId)
         Catch ex As Exception
-            AppModal.Show("Could not load the request:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the request:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return Nothing
         End Try
@@ -450,6 +451,7 @@ Public Module RequestReviewModal
     ' Writes the decision. Guarded on 'Pending' so an edit or removal by the
     ' requester in the meantime is never overwritten by a stale review.
     Private Function Decide(info As RequestInfo, newStatus As String, reason As String, lblErr As Label) As Boolean
+        If Not Permissions.Require(Permissions.ApproveRequests, "approve or reject purchase requests") Then Return False
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -477,7 +479,7 @@ Public Module RequestReviewModal
                                If(reason = "", "", " - " & reason))
             Return True
         Catch ex As Exception
-            lblErr.Text = "Could not save: " & ex.Message
+            lblErr.Text = "Could not save: " & ErrorLog.ForUser(ex)
             Return False
         End Try
     End Function

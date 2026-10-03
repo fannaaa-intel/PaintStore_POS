@@ -71,7 +71,8 @@ Public Module DeliveryIssues
                 conn.Open()
                 Return HasTable(conn)
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("DeliveryIssues.HasTable", swallowed)
             Return False
         End Try
     End Function
@@ -83,7 +84,8 @@ Public Module DeliveryIssues
                 "WHERE table_schema = DATABASE() AND table_name = 'goods_receipt_issues'", conn, tx)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("DeliveryIssues.HasTable", swallowed)
             Return False
         End Try
     End Function
@@ -142,7 +144,7 @@ Public Module DeliveryIssues
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("DeliveryIssues.ForPo error (PO " & poId & "): " & ex.Message)
+            ErrorLog.Write("DeliveryIssues.ForPo (PO " & poId & ")", ex)
             result.Clear()
         End Try
         Return result
@@ -165,7 +167,7 @@ Public Module DeliveryIssues
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("DeliveryIssues.CountsByPo error: " & ex.Message)
+            ErrorLog.Write("DeliveryIssues.CountsByPo error", ex)
         End Try
         Return result
     End Function

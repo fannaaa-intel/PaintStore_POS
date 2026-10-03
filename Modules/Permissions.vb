@@ -1,32 +1,14 @@
 Imports MySql.Data.MySqlClient
 
-' *****************************************************************************
-'  NOT IN USE YET — this file is not listed in PaintStore_POS.vbproj, so it is
-'  not compiled, and nothing calls it.
-'
-'  It is the start of real role permissions (see the header below). Two things
-'  are still missing before it does anything:
-'
-'    1. Add it to the project:
-'         <Compile Include="Modules\Permissions.vb" />
-'
-'    2. Call it at the points that need guarding, e.g. in VoidSale:
-'         If Not Permissions.Require(Permissions.VoidSale, "void a sale") Then Return
-'
-'  Until then roles work as they always have: CurrentRole only picks which
-'  dashboard opens at login and is never checked again. Kept in the repo so the
-'  design is not lost, not because it is live.
-' *****************************************************************************
-
 ' =============================================================================
 '  Permissions  —  what the signed-in user is allowed to do.
 '
 '  WHY THIS EXISTS
-'  Session.CurrentRole was read in six places in the whole codebase, and only to
-'  decide which dashboard form to open at login. After that the role was never
-'  consulted again: any code path reached from a form could do anything, and the
-'  roles table held nothing but a name, so "what may a Cashier do" existed only
-'  as the implicit shape of the POS form.
+'  Session.CurrentRole used to be read only to decide which dashboard form to
+'  open at login. After that the role was never consulted again: any code path
+'  reached from a form could do anything, so "what may a Cashier do" existed
+'  only as the implicit shape of the POS form. Every action that changes money,
+'  stock, users or settings now asks this module first.
 '
 '  This module turns that into an explicit, queryable rule:
 '
@@ -64,9 +46,20 @@ Public Module Permissions
     Public Const ViewFinancials As String = "finance.view"
     Public Const ManagePayables As String = "finance.payables"
 
+    Public Const RequestPurchase As String = "procurement.request"
+    Public Const ApproveRequests As String = "procurement.approve"
+    Public Const ManageSuppliers As String = "procurement.suppliers"
+
+    Public Const EditSignatories As String = "finance.signatories"
+
+    Public Const RequestPaymentMethod As String = "pos.paymethod.request"
+
     Public Const ManageUsers As String = "admin.users"
     Public Const ManageSettings As String = "admin.settings"
     Public Const ViewActivityLog As String = "admin.activitylog"
+
+    Public Const BackupData As String = "data.backup"
+    Public Const RestoreData As String = "data.restore"
 
     Private _loaded As Boolean = False
     Private _loadedForRole As String = Nothing
@@ -95,6 +88,15 @@ Public Module Permissions
         ActivityLog.Record("PERMISSION_DENIED", "permission", Nothing,
                            Session.CurrentRole & " attempted: " & permission)
         Return False
+    End Function
+
+    ' For module functions that report problems as a returned message rather
+    ' than a dialog. Logs the attempt the same way Require does.
+    Public Function DeniedMessage(actionDescription As String) As String
+        ActivityLog.Record("PERMISSION_DENIED", "permission", Nothing,
+                           If(Session.CurrentRole, "") & " attempted: " & actionDescription)
+        Return "Your role (" & If(String.IsNullOrEmpty(Session.CurrentRole), "not signed in", Session.CurrentRole) &
+               ") is not allowed to " & actionDescription & ". Ask an administrator if you need this."
     End Function
 
     ' Call on logout / role change so the next user does not inherit these.
@@ -150,7 +152,7 @@ Public Module Permissions
                 End Using
             Catch ex As Exception
                 ' Never block sign-in over this: fall through to the defaults.
-                System.Diagnostics.Debug.WriteLine("Permissions load error: " & ex.Message)
+                ErrorLog.Write("Permissions load error", ex)
             End Try
 
             ' No table, or a role with no rows yet: use the built-in defaults so
@@ -175,25 +177,33 @@ Public Module Permissions
                     SellItems, VoidSale, ApplyDiscount, RefundSale, OpenDrawer,
                     ViewInventory, EditProduct, AdjustStock,
                     ViewProcurement, ManagePo, ReceiveGoods,
-                    ViewFinancials, ManagePayables,
-                    ManageUsers, ManageSettings, ViewActivityLog}
+                    RequestPurchase, ApproveRequests, ManageSuppliers,
+                    ViewFinancials, ManagePayables, EditSignatories,
+                    RequestPaymentMethod,
+                    ManageUsers, ManageSettings, ViewActivityLog,
+                    BackupData, RestoreData}
 
             Case "cashier"
+                ' VoidSale only lets the cashier START a void: a completed
+                ' sale still needs an Admin's password (AdminApprovalModal).
                 Return New String() {
                     SellItems, VoidSale, ApplyDiscount, RefundSale, OpenDrawer,
-                    ViewInventory}
+                    ViewInventory, RequestPaymentMethod}
 
             Case "inventory"
+                ' ReceiveGoods = put-away of delivered stock onto the shelf.
                 Return New String() {
-                    ViewInventory, EditProduct, AdjustStock, ReceiveGoods}
+                    ViewInventory, EditProduct, AdjustStock, ReceiveGoods,
+                    RequestPurchase, BackupData}
 
             Case "procurement"
                 Return New String() {
-                    ViewProcurement, ManagePo, ReceiveGoods, ViewInventory}
+                    ViewProcurement, ManagePo, ReceiveGoods, ViewInventory,
+                    RequestPurchase, ManageSuppliers, ManagePayables}
 
             Case "accountant"
                 Return New String() {
-                    ViewFinancials, ManagePayables, ViewInventory, ViewActivityLog}
+                    ViewFinancials, ManagePayables, ViewInventory, EditSignatories}
 
             Case Else
                 ' An unrecognised role gets nothing rather than everything.

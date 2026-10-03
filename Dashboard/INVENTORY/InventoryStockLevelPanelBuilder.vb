@@ -306,7 +306,7 @@ Public Class InventoryStockLevelPanelBuilder
                 End If
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load stock levels:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load stock levels:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -1144,7 +1144,7 @@ Public Class InventoryStockLevelPanelBuilder
             If frm Is Nothing Then Return
             frm.OpenStockAdjustmentFor(productId)
         Catch ex As Exception
-            AppModal.Show("Could not open Stock Adjustment:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Stock Adjustment:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

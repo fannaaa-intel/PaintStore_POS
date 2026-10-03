@@ -207,7 +207,7 @@ Public Class AdminFinancialReportsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not build the financial report: " & ex.Message,
+            AppModal.Show("Could not build the financial report: " & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -800,7 +800,7 @@ Public Class AdminFinancialReportsPanelBuilder
                                   preparedBy:=If(String.IsNullOrWhiteSpace(Session.CurrentFullName),
                                                  "Administrator", Session.CurrentFullName))
         Catch ex As Exception
-            AppModal.Show("Could not build the report for export: " & ex.Message,
+            AppModal.Show("Could not build the report for export: " & ErrorLog.ForUser(ex),
                           "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try

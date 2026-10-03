@@ -59,12 +59,12 @@ Public Module ReportExport
         Catch ex As IOException
             Cursor.Current = oldCursor
             AppModal.Show("The file could not be saved. If it is open in Excel or a PDF viewer, " &
-                          "close it and try again." & vbCrLf & vbCrLf & ex.Message,
+                          "close it and try again." & vbCrLf & vbCrLf & ErrorLog.ForUser(ex),
                           "Save Failed", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         Catch ex As Exception
             Cursor.Current = oldCursor
-            AppModal.Show("The report could not be saved:" & vbCrLf & ex.Message,
+            AppModal.Show("The report could not be saved:" & vbCrLf & ErrorLog.ForUser(ex),
                           "Save Failed", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         Finally
@@ -80,7 +80,7 @@ Public Module ReportExport
             Try
                 Process.Start(New ProcessStartInfo(path) With {.UseShellExecute = True})
             Catch ex As Exception
-                AppModal.Show("The file was saved but could not be opened: " & ex.Message,
+                AppModal.Show("The file was saved but could not be opened: " & ErrorLog.ForUser(ex),
                               "Open File", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             End Try
         End If

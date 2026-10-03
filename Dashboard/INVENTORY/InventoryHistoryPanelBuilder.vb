@@ -116,7 +116,7 @@ Public Class InventoryHistoryPanelBuilder
             _totalRows = 0 : _unitsIn = 0 : _unitsOut = 0
             ' One message per failure, not one per keystroke in the search box.
             If Not _loadFailed Then
-                AppModal.Show("Could not load the transaction history:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not load the transaction history:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             _loadFailed = True

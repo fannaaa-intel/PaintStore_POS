@@ -108,7 +108,7 @@ Public Class AccountantLedgerPanelBuilder
                 LoadCashMovementTxns(conn)
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadData connection error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadData connection error", ex)
         End Try
 
         _allTxns.Sort(Function(a, b) b.TxnDate.CompareTo(a.TxnDate))
@@ -131,7 +131,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadAvgCosts error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadAvgCosts error", ex)
         End Try
     End Sub
 
@@ -151,7 +151,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadSaleItemMap error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadSaleItemMap error", ex)
         End Try
     End Sub
 
@@ -205,7 +205,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadSalesTxns error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadSalesTxns error", ex)
         End Try
     End Sub
 
@@ -232,7 +232,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadReturnTxns error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadReturnTxns error", ex)
         End Try
     End Sub
 
@@ -268,7 +268,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadPurchaseOrderTxns error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadPurchaseOrderTxns error", ex)
         End Try
     End Sub
 
@@ -312,7 +312,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("Ledger LoadCashMovementTxns error: " & ex.Message)
+            ErrorLog.Write("Ledger LoadCashMovementTxns error", ex)
         End Try
     End Sub
 
@@ -436,7 +436,7 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            Debug.WriteLine("GetTrialBalance error: " & ex.Message)
+            ErrorLog.Write("GetTrialBalance error", ex)
         End Try
 
         ' Net each account into its normal-balance column.

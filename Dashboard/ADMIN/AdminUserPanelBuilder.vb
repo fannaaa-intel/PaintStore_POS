@@ -240,7 +240,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load users: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load users: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 
@@ -279,7 +279,8 @@ Public Class AdminUserPanelBuilder
                     End Using
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.WarnUser("AdminUserPanelBuilder.LoadResetRequests", swallowed)
             ' A missing or unreadable request table must not stop the user list
             ' from rendering; the tab simply shows as empty.
         End Try
@@ -375,7 +376,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load roles: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load roles: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return list
@@ -393,7 +394,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not verify the username: " & ex.Message, "Database Error",
+            AppModal.Show("Could not verify the username: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             ' Fail closed — treat as taken so we never insert a duplicate blind.
             Return True
@@ -1343,6 +1344,7 @@ Public Class AdminUserPanelBuilder
     '  ACTION 1 — CREATE
     ' =========================================================================
     Private Shared Sub CreateUser()
+        If Not Permissions.Require(Permissions.ManageUsers, "create user accounts") Then Return
         Dim res As UserFormResult = ShowUserForm("New User", True, Nothing)
         If res Is Nothing Then Return
 
@@ -1376,7 +1378,7 @@ Public Class AdminUserPanelBuilder
                           "User Not Created", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         Catch ex As Exception
-            AppModal.Show("Could not create the user: " & ex.Message, "Database Error",
+            AppModal.Show("Could not create the user: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1402,6 +1404,7 @@ Public Class AdminUserPanelBuilder
     '  ACTION 2 — EDIT  (name / role / quota only — never the password)
     ' =========================================================================
     Private Shared Sub EditUser(r As UserRecord)
+        If Not Permissions.Require(Permissions.ManageUsers, "edit user accounts") Then Return
         Dim res As UserFormResult = ShowUserForm("Edit User", False, r)
         If res Is Nothing Then Return
 
@@ -1428,7 +1431,7 @@ Public Class AdminUserPanelBuilder
                           "User Not Saved", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         Catch ex As Exception
-            AppModal.Show("Could not update the user: " & ex.Message, "Database Error",
+            AppModal.Show("Could not update the user: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1441,6 +1444,7 @@ Public Class AdminUserPanelBuilder
     '  ACTION 3 — ENABLE / DISABLE
     ' =========================================================================
     Private Shared Sub ToggleActive(r As UserRecord)
+        If Not Permissions.Require(Permissions.ManageUsers, "enable or disable accounts") Then Return
         Dim newState As Boolean = Not r.IsActive
 
         ' Guard — an admin must never lock themselves out.
@@ -1479,7 +1483,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not update the account status: " & ex.Message, "Database Error",
+            AppModal.Show("Could not update the account status: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1498,6 +1502,7 @@ Public Class AdminUserPanelBuilder
     '  change at next sign-in.
     ' =========================================================================
     Private Shared Sub IssueResetPassword(q As ResetRequest)
+        If Not Permissions.Require(Permissions.ManageUsers, "reset passwords") Then Return
         If q.UserId <= 0 Then Return
 
         If Not ConfirmActingAdmin("Issue a new password for " & Chr(34) & q.UsernameTyped & Chr(34) & ".") Then
@@ -1529,7 +1534,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not issue a new password: " & ex.Message, "Database Error",
+            AppModal.Show("Could not issue a new password: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1550,6 +1555,7 @@ Public Class AdminUserPanelBuilder
     ' Closes a request without touching the account - for duplicates, or a
     ' username that never existed.
     Private Shared Sub DismissResetRequest(q As ResetRequest)
+        If Not Permissions.Require(Permissions.ManageUsers, "dismiss password requests") Then Return
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -1563,7 +1569,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not dismiss the request: " & ex.Message, "Database Error",
+            AppModal.Show("Could not dismiss the request: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -1584,7 +1590,8 @@ Public Class AdminUserPanelBuilder
                     Return Convert.ToInt32(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("AdminUserPanelBuilder.CountActiveAdmins", swallowed)
             Return 2
         End Try
     End Function
@@ -1593,6 +1600,7 @@ Public Class AdminUserPanelBuilder
     '  ACTION 4 — RESET PASSWORD
     ' =========================================================================
     Private Shared Sub ResetPassword(r As UserRecord)
+        If Not Permissions.Require(Permissions.ManageUsers, "reset passwords") Then Return
         ' Re-authenticate first. Setting another person's password is the single
         ' most abusable action on this screen, and an admin session left open at
         ' the counter would otherwise hand it to whoever walks past - including
@@ -1629,7 +1637,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not reset the password: " & ex.Message, "Database Error",
+            AppModal.Show("Could not reset the password: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -2207,7 +2215,7 @@ Public Class AdminUserPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not verify your password: " & ex.Message, "Database Error",
+            AppModal.Show("Could not verify your password: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try

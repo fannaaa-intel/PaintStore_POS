@@ -196,8 +196,7 @@ Public Class InventoryHomePanelBuilder
             ' FIX 2: Surface the error to the user instead of silently swallowing it.
             AppModal.Show(
                 "Dashboard data could not be loaded." & Environment.NewLine &
-                "Check your database connection and try again." & Environment.NewLine & Environment.NewLine &
-                ex.Message,
+                "Check your database connection and try again." & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex),
                 "Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
 
@@ -766,7 +765,7 @@ Public Class InventoryHomePanelBuilder
                 Case "lowStock" : frm.lowStock.PerformClick()
             End Select
         Catch ex As Exception
-            AppModal.Show("Could not open that section:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open that section:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -777,7 +776,7 @@ Public Class InventoryHomePanelBuilder
             If frm Is Nothing Then Return
             frm.OpenItemListFiltered(category, status)
         Catch ex As Exception
-            AppModal.Show("Could not open Item List:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Item List:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

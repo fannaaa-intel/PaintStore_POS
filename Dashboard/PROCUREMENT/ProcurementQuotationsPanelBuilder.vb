@@ -808,6 +808,7 @@ Public Class ProcurementQuotationsPanelBuilder
 
     ' Plain status flip used by Sent / Rejected.
     Private Shared Sub SetStatus(q As QuoteRow, newStatus As String, confirmMsg As String)
+        If Not Permissions.Require(Permissions.ManagePo, "change price quotations") Then Return
         If AppModal.Show(confirmMsg, "Confirm",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
             Return
@@ -829,7 +830,7 @@ Public Class ProcurementQuotationsPanelBuilder
             RenderDetail(q.QuotationId)
 
         Catch ex As Exception
-            AppModal.Show("Could not update the quotation:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not update the quotation:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -888,12 +889,13 @@ Public Class ProcurementQuotationsPanelBuilder
             RenderDetail(q.QuotationId)
 
         Catch ex As Exception
-            AppModal.Show("Could not accept the quotation:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not accept the quotation:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
     Private Shared Sub DeleteQuote(q As QuoteRow)
+        If Not Permissions.Require(Permissions.ManagePo, "delete price quotations") Then Return
         If AppModal.Show("Delete draft price quotation " & q.QuotationNo & "?" & Environment.NewLine &
                          If(Archive.HasArchiveTable(), "An admin can restore it from the Recycle Bin.",
                             "This cannot be undone."), "Delete Price Quotation",
@@ -940,7 +942,7 @@ Public Class ProcurementQuotationsPanelBuilder
             RenderList()
 
         Catch ex As Exception
-            AppModal.Show("Could not delete the quotation:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not delete the quotation:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -1494,7 +1496,8 @@ Public Class ProcurementQuotationsPanelBuilder
                     cmd.ExecuteNonQuery()
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ProcurementQuotationsPanelBuilder.ExpireStaleQuotes", swallowed)
             ' Non-fatal: the list still renders, rows just show as Draft/Sent.
         End Try
     End Sub
@@ -1548,7 +1551,7 @@ Public Class ProcurementQuotationsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load quotations:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load quotations:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1567,7 +1570,7 @@ Public Class ProcurementQuotationsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the quotation:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the quotation:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return Nothing
@@ -1600,7 +1603,7 @@ Public Class ProcurementQuotationsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load quotation items:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load quotation items:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1667,7 +1670,7 @@ Public Class ProcurementQuotationsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the supplier comparison:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the supplier comparison:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1703,7 +1706,7 @@ Public Class ProcurementQuotationsPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the compared products:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the compared products:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return result
@@ -1762,7 +1765,8 @@ Public Class ProcurementQuotationsPanelBuilder
                     Return SafeInt(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ProcurementQuotationsPanelBuilder.CountQuotesOnRequest", swallowed)
             Return 0
         End Try
     End Function
@@ -1781,7 +1785,8 @@ Public Class ProcurementQuotationsPanelBuilder
                     Return SafeInt(cmd.ExecuteScalar())
                 End Using
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("ProcurementQuotationsPanelBuilder.CountSiblingQuotes", swallowed)
             Return 0
         End Try
     End Function

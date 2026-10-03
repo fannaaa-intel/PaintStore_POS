@@ -325,7 +325,7 @@ Public Class InventoryReportsPanelBuilder
             _loadFailed = False
         Catch ex As Exception
             If Not _loadFailed Then
-                AppModal.Show("Could not generate the report:" & Environment.NewLine & ex.Message,
+                AppModal.Show("Could not generate the report:" & Environment.NewLine & ErrorLog.ForUser(ex),
                               "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             End If
             _loadFailed = True

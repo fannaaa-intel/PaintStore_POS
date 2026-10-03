@@ -274,7 +274,7 @@ Public Class CashPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            System.Diagnostics.Debug.WriteLine("LoadShiftData DB error: " & ex.Message)
+            ErrorLog.Write("LoadShiftData DB error", ex)
         End Try
     End Sub
 
@@ -317,9 +317,8 @@ Public Class CashPanelBuilder
             ' the counted amount on screen while the database never received it,
             ' so the drawer silently reconciled against stale numbers. Tell the
             ' cashier instead -- a failed count they know about can be retyped.
-            System.Diagnostics.Debug.WriteLine("SaveDenomCount error: " & ex.Message)
-            AppModal.Show("That denomination count could not be saved:" & Environment.NewLine & Environment.NewLine &
-                          ex.Message & Environment.NewLine & Environment.NewLine &
+            ErrorLog.Write("SaveDenomCount error", ex)
+            AppModal.Show("That denomination count could not be saved:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex) & Environment.NewLine & Environment.NewLine &
                           "Re-enter the count before closing the drawer.",
                           "Count Not Saved", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try
@@ -1021,8 +1020,7 @@ Public Class CashPanelBuilder
                             title, MessageBoxButtons.OK, MessageBoxIcon.Information)
             If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)   ' refresh expected cash
         Catch ex As Exception
-            AppModal.Show("Could not record the cash movement:" & Environment.NewLine &
-                            ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not record the cash movement:" & Environment.NewLine & ErrorLog.ForUser(ex), title, MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
@@ -1139,8 +1137,7 @@ Public Class CashPanelBuilder
                             "Drawer Closed", MessageBoxButtons.OK, MessageBoxIcon.Information)
             If _mainContainer IsNot Nothing Then LoadCash(_mainContainer)
         Catch ex As Exception
-            AppModal.Show("Could not close the drawer:" & Environment.NewLine &
-                            ex.Message, "Close Drawer", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            AppModal.Show("Could not close the drawer:" & Environment.NewLine & ErrorLog.ForUser(ex), "Close Drawer", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 
@@ -1571,9 +1568,8 @@ Public Class CashPanelBuilder
             ' what the drawer actually holds, which is the one thing this screen
             ' exists to get right. Surface it rather than showing a zeroed drawer
             ' that looks like a legitimate count.
-            System.Diagnostics.Debug.WriteLine("GetDrawer error: " & ex.Message)
-            AppModal.Show("The saved denomination counts could not be loaded:" & Environment.NewLine & Environment.NewLine &
-                          ex.Message & Environment.NewLine & Environment.NewLine &
+            ErrorLog.Write("GetDrawer error", ex)
+            AppModal.Show("The saved denomination counts could not be loaded:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex) & Environment.NewLine & Environment.NewLine &
                           "The drawer is showing zero for every denomination. Re-count before closing the drawer.",
                           "Counts Not Loaded", MessageBoxButtons.OK, MessageBoxIcon.Warning)
         End Try

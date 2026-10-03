@@ -19,5 +19,6 @@
         CurrentRole = String.Empty
         ShiftId = 0
         UserQuota = 0D
+        Permissions.Clear()
     End Sub
 End Module

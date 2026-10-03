@@ -224,7 +224,7 @@ Public Class ProcurementDashPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the procurement dashboard:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the procurement dashboard:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -714,7 +714,7 @@ Public Class ProcurementDashPanelBuilder
             If frm Is Nothing Then Return
             frm.OpenPOWithRequest(requestId)
         Catch ex As Exception
-            AppModal.Show("Could not open Purchase Orders:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not open Purchase Orders:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Navigation Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub

@@ -165,7 +165,7 @@ Public Module SupplierPaymentModal
                 choices = SupplierPayments.LoadOpenPos()
             End If
         Catch ex As Exception
-            AppModal.Show("Could not load purchase orders:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load purchase orders:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
@@ -649,6 +649,7 @@ Public Module SupplierPaymentModal
                                  invoiceNo As String, invoiceDate As Date,
                                  referenceNo As String, paidOn As Date,
                                  remarks As String) As (paymentId As Integer, nowPaid As Boolean)
+        If Not Permissions.Require(Permissions.ManagePayables, "record supplier payments") Then Return (0, False)
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
@@ -733,7 +734,7 @@ Public Module SupplierPaymentModal
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not record the payment:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not record the payment:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return (0, False)
         End Try

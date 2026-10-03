@@ -290,7 +290,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load the product:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Could not load the product:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return Nothing
@@ -326,7 +326,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Search failed:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Search failed:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
         Return list
@@ -427,13 +427,14 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Adjustment failed:" & Environment.NewLine & ex.Message,
+            AppModal.Show("Adjustment failed:" & Environment.NewLine & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return False
         End Try
     End Function
 
     Private Shared Sub OnSaveClicked()
+        If Not Permissions.Require(Permissions.AdjustStock, "adjust stock") Then Return
         If selected Is Nothing Then Return
 
         Dim delta As Integer = ResolveDelta()

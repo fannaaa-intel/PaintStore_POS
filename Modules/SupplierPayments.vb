@@ -58,7 +58,8 @@ Public Module SupplierPayments
                 cmd.Parameters.AddWithValue("@c", column)
                 Return Convert.ToInt32(cmd.ExecuteScalar()) > 0
             End Using
-        Catch
+        Catch swallowed As Exception
+            ErrorLog.Write("SupplierPayments.ColumnExists", swallowed)
             Return False
         End Try
     End Function

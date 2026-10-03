@@ -663,4 +663,18 @@ Public Class INVENTORY_STAFF
         Me.Close()
     End Sub
 
+    ' Locks the screen after a few idle minutes (see IdleLock.vb).
+    Private Sub AttachIdleLock(sender As Object, e As EventArgs) Handles MyBase.Shown
+        IdleLock.Attach(Me, AddressOf SignOutFromLock)
+    End Sub
+
+    ' An Admin signed this user out from the lock screen: no "are you sure".
+    Private Sub SignOutFromLock()
+        ActivityLog.Record("LOGOUT")
+        Session.Clear()
+        Dim loginForm As New LogIn()
+        loginForm.Show()
+        Me.Close()
+    End Sub
+
 End Class

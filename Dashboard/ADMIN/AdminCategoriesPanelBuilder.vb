@@ -98,7 +98,7 @@ Public Class AdminCategoriesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not load categories: " & ex.Message, "Database Error",
+            AppModal.Show("Could not load categories: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
@@ -151,7 +151,7 @@ Public Class AdminCategoriesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not verify the category name: " & ex.Message, "Database Error",
+            AppModal.Show("Could not verify the category name: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             ' Fail closed — never insert a possible duplicate blind.
             Return True
@@ -571,6 +571,7 @@ Public Class AdminCategoriesPanelBuilder
     '  CRUD
     ' =========================================================================
     Private Shared Sub AddCategory()
+        If Not Permissions.Require(Permissions.ManageSettings, "add categories") Then Return
         Dim name As String = AppModal.Prompt("Name of the new category:", "New Category")
         If name Is Nothing Then Return
         name = name.Trim()
@@ -607,7 +608,7 @@ Public Class AdminCategoriesPanelBuilder
                           "Duplicate Category", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         Catch ex As Exception
-            AppModal.Show("Could not add the category: " & ex.Message, "Database Error",
+            AppModal.Show("Could not add the category: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -617,6 +618,7 @@ Public Class AdminCategoriesPanelBuilder
     End Sub
 
     Private Shared Sub RenameCategory(r As CategoryRecord)
+        If Not Permissions.Require(Permissions.ManageSettings, "rename categories") Then Return
         Dim name As String = AppModal.Prompt("New name for """ & r.Name & """:",
                                              "Rename Category", r.Name)
         If name Is Nothing Then Return
@@ -668,7 +670,7 @@ Public Class AdminCategoriesPanelBuilder
                           "Duplicate Category", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         Catch ex As Exception
-            AppModal.Show("Could not rename the category: " & ex.Message, "Database Error",
+            AppModal.Show("Could not rename the category: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -686,6 +688,7 @@ Public Class AdminCategoriesPanelBuilder
     '  writes run in a transaction so a failure leaves nothing half-done.
     ' =========================================================================
     Private Shared Sub MergeCategory(source As CategoryRecord)
+        If Not Permissions.Require(Permissions.ManageSettings, "merge categories") Then Return
         Dim targets As New List(Of CategoryRecord)
         For Each r In _rows
             If r.CategoryId <> source.CategoryId Then targets.Add(r)
@@ -731,7 +734,7 @@ Public Class AdminCategoriesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not merge the category: " & ex.Message, "Database Error",
+            AppModal.Show("Could not merge the category: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -872,6 +875,7 @@ Public Class AdminCategoriesPanelBuilder
     End Function
 
     Private Shared Sub RemoveCategory(r As CategoryRecord)
+        If Not Permissions.Require(Permissions.ManageSettings, "remove categories") Then Return
         ' Re-check against the DB rather than trusting the cached row count —
         ' a product could have been assigned since this list was drawn.
         Dim inUse As Integer = 0
@@ -885,7 +889,7 @@ Public Class AdminCategoriesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not check whether the category is in use: " & ex.Message,
+            AppModal.Show("Could not check whether the category is in use: " & ErrorLog.ForUser(ex),
                           "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
@@ -919,7 +923,7 @@ Public Class AdminCategoriesPanelBuilder
                 End Using
             End Using
         Catch ex As Exception
-            AppModal.Show("Could not remove the category: " & ex.Message, "Database Error",
+            AppModal.Show("Could not remove the category: " & ErrorLog.ForUser(ex), "Database Error",
                           MessageBoxButtons.OK, MessageBoxIcon.Error)
             Return
         End Try
