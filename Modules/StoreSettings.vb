@@ -177,6 +177,37 @@ Public Module StoreSettings
         Return (subtotal, d, netSales, vatAmt, due, False)
     End Function
 
+    ' ── Refunds: what the customer actually paid per unit ────────────────────
+    '  sale_items.unit_price is the SHELF price. The customer paid the sale
+    '  total, which is the shelf prices less any discount (and, under exclusive
+    '  pricing, plus VAT). Refunding the shelf price handed back money that was
+    '  never taken - P1,000 back on a Senior sale that collected P714.29.
+    '
+    '  Each line's share of what was paid is its share of the shelf value, so
+    '  one ratio (total / lines) covers discounts, the Senior/PWD exemption and
+    '  exclusive VAT alike. Left unrounded on purpose: the refund screen rounds
+    '  the summed amount once, so a whole-sale refund comes back to the exact
+    '  centavo that was collected.
+    Public Function PaidUnitPrice(shelfPrice As Decimal, saleTotal As Decimal,
+                                  linesTotal As Decimal) As Decimal
+        If linesTotal <= 0D OrElse saleTotal < 0D Then Return shelfPrice
+        Return shelfPrice * saleTotal / linesTotal
+    End Function
+
+    ' ── Promo discounts: when an Admin has to approve ────────────────────────
+    '  A cashier may give up to this share of the cart on their own; more needs
+    '  an Admin's password. Senior/PWD are not affected - their 20% is fixed by
+    '  law and computed, not typed.
+    Public Const PromoApprovalPct As Decimal = 10D
+
+    Public Function PromoNeedsApproval(discountType As String, discountAmount As Decimal,
+                                       grossSubtotal As Decimal) As Boolean
+        If IsVatExemptDiscount(discountType) Then Return False
+        If discountAmount <= 0D Then Return False
+        If grossSubtotal <= 0D Then Return True
+        Return discountAmount > Math.Round(grossSubtotal * PromoApprovalPct / 100D, 2)
+    End Function
+
     ' VAT contained inside a known VAT-INCLUSIVE amount (e.g. a supplier invoice
     ' total). Unlike ComputeVat this ignores the store's inclusive/exclusive
     ' setting, because the caller already knows the amount includes tax.

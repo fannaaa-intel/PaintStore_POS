@@ -799,3 +799,23 @@ ALTER TABLE supplier_payments
 SHOW COLUMNS FROM purchase_requests LIKE 'purpose';
 SHOW COLUMNS FROM purchase_request_items LIKE 'unit_price';
 SHOW COLUMNS FROM supplier_payments LIKE 'invoice%';
+
+-- -----------------------------------------------------------------------------
+--  24. Senior / PWD cardholder on the sale record
+--
+--     RA 9994 (Senior Citizens) and RA 10754 (PWD) want the cardholder's name
+--     and ID number on the sale, not only on the printed receipt. Until now
+--     they were typed at the till, printed once, and never stored - a reprint
+--     or an audit had nothing to show.
+--
+--     Filled only on VAT-exempt (Senior / PWD) sales. Also kept on a HELD
+--     sale, so retrieving it brings the cardholder back with the cart.
+--
+--     Optional like the rest: without these columns the till saves the sale
+--     as before and the details still print on the receipt.
+-- -----------------------------------------------------------------------------
+ALTER TABLE sales
+    ADD COLUMN IF NOT EXISTS exempt_holder_name VARCHAR(120) DEFAULT NULL AFTER cheque_account_name,
+    ADD COLUMN IF NOT EXISTS exempt_id_no       VARCHAR(60)  DEFAULT NULL AFTER exempt_holder_name;
+
+SHOW COLUMNS FROM sales LIKE 'exempt%';

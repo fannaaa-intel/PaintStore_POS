@@ -80,11 +80,21 @@ Public Class AccountantDashPanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
 
-                ' Revenue
+                ' Revenue = gross sales less refunds paid in the period, the same
+                ' figure the Income screen reports. 'Refunded' sales stay in the
+                ' gross and the refund comes off once; before, a partly refunded
+                ' sale counted in full with nothing taken off, so this card and
+                ' the Income screen disagreed.
+                Dim refundClause As String = BuildDateClause("r.return_datetime")
                 Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(total),0) FROM sales s WHERE status IN ('Completed','Partially Refunded')" &
+                    "SELECT COALESCE(SUM(total),0) FROM sales s WHERE status IN ('Completed','Partially Refunded','Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _revenue = Convert.ToDecimal(cmd.ExecuteScalar())
+                End Using
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(r.total_refund),0) FROM returns r" &
+                    If(refundClause <> "", " WHERE " & refundClause, ""), conn)
+                    _revenue -= Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
                 ' Expenses
                 Using cmd As New MySqlCommand(
@@ -100,9 +110,19 @@ Public Class AccountantDashPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(si.qty * si.unit_cost),0) " &
                     "FROM sale_items si JOIN sales s ON s.sale_id = si.sale_id " &
-                    "WHERE s.status IN ('Completed','Partially Refunded')" &
+                    "WHERE s.status IN ('Completed','Partially Refunded','Refunded')" &
                     If(saleClause <> "", " AND " & saleClause, ""), conn)
                     _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
+                End Using
+                ' Returned units went back on the shelf, so their cost comes off
+                ' in the period they were returned - mirroring the revenue above.
+                Using cmd As New MySqlCommand(
+                    "SELECT COALESCE(SUM(ri.qty_returned * si.unit_cost),0) " &
+                    "FROM return_items ri " &
+                    "JOIN returns r ON r.return_id = ri.return_id " &
+                    "JOIN sale_items si ON si.sale_item_id = ri.sale_item_id" &
+                    If(refundClause <> "", " WHERE " & refundClause, ""), conn)
+                    _cogs -= Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
                 ' Inventory Value
@@ -303,7 +323,7 @@ Public Class AccountantDashPanelBuilder
             netSub = "Break-even on goods sold"
         End If
 
-        Dim c1 = MakeKpiCard("Total Revenue", Peso & _revenue.ToString("N2"), MintPrimary, "From completed sales")
+        Dim c1 = MakeKpiCard("Total Revenue", Peso & _revenue.ToString("N2"), MintPrimary, "Sales less refunds")
         Dim c2 = MakeKpiCard("Cost of Goods Sold", Peso & _cogs.ToString("N2"), AccentOrange, "Cost of what was sold")
         Dim c3 = MakeKpiCard("Gross Profit", netSign & Peso & Math.Abs(grossProfit).ToString("N2"), netClr, netSub)
         Dim c4 = MakeKpiCard("Inventory Value", Peso & _inventoryValue.ToString("N2"), AccentBlue, "Current stock at cost")

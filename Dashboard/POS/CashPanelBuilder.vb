@@ -108,7 +108,9 @@ Public Class CashPanelBuilder
     Public Shared Sub LoadCash(mainContainer As Panel)
         _mainContainer = mainContainer
         _warnedNoShift = False
-        mainContainer.Controls.Clear()
+        ' ScreenHost, not Controls.Clear(): this screen rebuilds itself after
+        ' every pay-in, pay-out and drop, and Clear() alone leaked the old one.
+        ScreenHost.Clear(mainContainer)
         mainContainer.BackColor = MintBg
 
         Dim root As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = MintBg}
@@ -228,15 +230,15 @@ Public Class CashPanelBuilder
                 End Using
 
                 ' Total cash sales for this shift.
-                ' 'Partially Refunded' is included: that cash really did enter the
-                ' drawer, and the refund is subtracted separately below. Counting
-                ' only 'Completed' removed the takings but kept the refund, showing
-                ' the cashier a shortfall that was not real.
+                ' 'Partially Refunded' and 'Refunded' are both included: that cash
+                ' really did enter the drawer, and the refund is subtracted
+                ' separately below. Leaving either out removed the takings but kept
+                ' the refund, showing the cashier a shortfall that was not real.
                 If cashMethodId > 0 Then
                     Using cmd As New MySqlCommand(
                         "SELECT COALESCE(SUM(total),0) FROM sales " &
                         "WHERE shift_id=@sid AND method_id=@mid " &
-                        "AND status IN ('Completed','Partially Refunded')", conn)
+                        "AND status IN ('Completed','Partially Refunded','Refunded')", conn)
                         cmd.Parameters.AddWithValue("@sid", _shiftId)
                         cmd.Parameters.AddWithValue("@mid", cashMethodId)
                         _cashSales = CDec(cmd.ExecuteScalar())

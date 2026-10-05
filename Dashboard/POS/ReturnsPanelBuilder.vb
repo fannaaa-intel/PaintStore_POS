@@ -112,7 +112,9 @@ Public Class ReturnsPanelBuilder
         _selectedRefundMethod = "Cash"
         _activeMethodBtn = Nothing
 
-        mainContainer.Controls.Clear()
+        ' ScreenHost, not Controls.Clear(): this screen rebuilds itself after
+        ' every refund and Cancel, and Clear() alone leaked the old one.
+        ScreenHost.Clear(mainContainer)
         mainContainer.BackColor = MintBg
 
         Dim root As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = MintBg}
@@ -378,7 +380,7 @@ Public Class ReturnsPanelBuilder
         colGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 132))
         colGrid.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute, 110))
 
-        Dim hdrTxt() As String = {"", "Product", "Unit Price", "Return Qty", "Refund"}
+        Dim hdrTxt() As String = {"", "Product", "Paid / Unit", "Return Qty", "Refund"}
         Dim hdrAl() As ContentAlignment = {
             ContentAlignment.MiddleLeft, ContentAlignment.MiddleLeft,
             ContentAlignment.MiddleRight, ContentAlignment.MiddleCenter, ContentAlignment.MiddleRight
@@ -551,7 +553,7 @@ Public Class ReturnsPanelBuilder
         Dim SyncRow As Action =
             Sub()
                 lblQty.Text = it.SelectedQty.ToString()
-                lblRefund.Text = "₱ " & (it.SelectedQty * it.UnitPrice).ToString("N2")
+                lblRefund.Text = "₱ " & LinePaid(it).ToString("N2")
                 lblRefund.ForeColor = If(it.SelectedQty > 0, RefundAmber, Color.FromArgb(170, 178, 175))
                 isChecked = (it.SelectedQty > 0)
                 chk.Invalidate()
@@ -830,14 +832,28 @@ Public Class ReturnsPanelBuilder
         Return Decimal.Round(subtotal * (_restockPct / 100D), 0)
     End Function
 
+    ' What the selected units were paid for, to the centavo. UnitPrice is the
+    ' unrounded paid price, so the sum is rounded here, once - every total on
+    ' the screen, the slip and the saved refund comes from this one figure.
+    Private Shared Function RefundSubtotal(sel As IEnumerable(Of ReturnItem)) As Decimal
+        If sel Is Nothing Then Return 0D
+        Return Decimal.Round(sel.Sum(Function(i) i.SelectedQty * i.UnitPrice), 2)
+    End Function
+
+    ' One line's paid value, for display.
+    Private Shared Function LinePaid(it As ReturnItem) As Decimal
+        Return Decimal.Round(it.SelectedQty * it.UnitPrice, 2)
+    End Function
+
     ' Per-line refund amounts, in the order of the list passed in, guaranteed to
-    ' sum to (subtotal - RestockFee(subtotal)).
-    Private Shared Function LineRefunds(sel As List(Of ReturnItem)) As List(Of Decimal)
+    ' sum to target (normally subtotal - RestockFee(subtotal)).
+    Private Shared Function LineRefunds(sel As List(Of ReturnItem),
+                                        Optional targetOverride As Decimal? = Nothing) As List(Of Decimal)
         Dim result As New List(Of Decimal)
         If sel Is Nothing OrElse sel.Count = 0 Then Return result
 
-        Dim subtotal As Decimal = sel.Sum(Function(i) i.SelectedQty * i.UnitPrice)
-        Dim target As Decimal = subtotal - RestockFee(subtotal)
+        Dim subtotal As Decimal = RefundSubtotal(sel)
+        Dim target As Decimal = If(targetOverride.HasValue, targetOverride.Value, subtotal - RestockFee(subtotal))
 
         If subtotal <= 0D Then
             For Each it In sel : result.Add(0D) : Next
@@ -846,7 +862,7 @@ Public Class ReturnsPanelBuilder
 
         Dim running As Decimal = 0D
         For idx = 0 To sel.Count - 1
-            Dim gross As Decimal = sel(idx).SelectedQty * sel(idx).UnitPrice
+            Dim gross As Decimal = LinePaid(sel(idx))
             Dim amt As Decimal
             If idx = sel.Count - 1 Then
                 ' Last line absorbs the remainder so the parts match the total.
@@ -866,7 +882,7 @@ Public Class ReturnsPanelBuilder
     Private Shared Sub Recalc()
         If _items Is Nothing Then Return
         Dim qty As Integer = _items.Sum(Function(i) i.SelectedQty)
-        Dim subtotal As Decimal = _items.Sum(Function(i) i.SelectedQty * i.UnitPrice)
+        Dim subtotal As Decimal = RefundSubtotal(_items)
         Dim fee As Decimal = RestockFee(subtotal)
         Dim total As Decimal = subtotal - fee
 
@@ -899,11 +915,15 @@ Public Class ReturnsPanelBuilder
     Private Shared Function BuildMethodBar() As Control
         Dim host As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent, .Padding = New Padding(0, 10, 0, 4)}
         Dim layout As New TableLayoutPanel With {
-            .Dock = DockStyle.Fill, .ColumnCount = 4, .RowCount = 1,
+            .Dock = DockStyle.Fill, .ColumnCount = 3, .RowCount = 1,
             .BackColor = Color.Transparent, .Margin = New Padding(0), .Padding = New Padding(0)
         }
-        For i = 0 To 3
-            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25.0F))
+        ' Three methods: Store Credit was removed because nothing tracked a
+        ' credit balance, so a "store credit" refund gave the customer nothing
+        ' they could ever spend. The enum value stays in the database so old
+        ' refunds recorded that way still read back.
+        For i = 0 To 2
+            layout.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100.0F / 3))
         Next
         layout.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
 
@@ -919,7 +939,6 @@ Public Class ReturnsPanelBuilder
         Dim btnCash = MakePayBtn("💵  CASH", Color.FromArgb(0, 148, 74), Color.FromArgb(0, 100, 55), 0, "Cash")
         Dim btnCard = MakePayBtn("💳  CARD REVERSAL", Color.FromArgb(30, 100, 190), Color.FromArgb(20, 70, 140), 4, "CardReversal")
         Dim btnWallet = MakePayBtn("📱  E-WALLET", Color.FromArgb(100, 50, 180), Color.FromArgb(70, 30, 140), 4, "EWallet")
-        Dim btnStore = MakePayBtn("🎟  STORE CREDIT", MintPrimary, MintDark, 4, "StoreCredit")
 
         ' Default highlight CASH
         _activeMethodBtn = btnCash
@@ -929,7 +948,6 @@ Public Class ReturnsPanelBuilder
         layout.Controls.Add(btnCash, 0, 0)
         layout.Controls.Add(btnCard, 1, 0)
         layout.Controls.Add(btnWallet, 2, 0)
-        layout.Controls.Add(btnStore, 3, 0)
 
         host.Controls.Add(layout)
         Return host
@@ -1064,6 +1082,9 @@ Public Class ReturnsPanelBuilder
                 Using cmd As New MySqlCommand(
                     "SELECT s.sale_id, s.sale_no, s.sale_datetime, " &
                     "si.sale_item_id, si.product_id, si.qty, si.unit_price, " &
+                    "s.total AS sale_total, " &
+                    "(SELECT SUM(si2.line_total) FROM sale_items si2 " &
+                    "  WHERE si2.sale_id = s.sale_id) AS lines_total, " &
                     "(si.qty - COALESCE(r.returned_qty, 0)) AS returnable_qty, " &
                     "p.name AS product_name, p.sku, p.color_hex " &
                     "FROM sales s " &
@@ -1088,13 +1109,20 @@ Public Class ReturnsPanelBuilder
                                 If colorHex.StartsWith("#") Then swatch = ColorTranslator.FromHtml(colorHex)
                             Catch : End Try
 
+                            ' What was actually PAID per unit, not the shelf
+                            ' price - see StoreSettings.PaidUnitPrice.
+                            Dim paidUnit As Decimal = StoreSettings.PaidUnitPrice(
+                                CDec(rdr("unit_price")),
+                                CDec(rdr("sale_total")),
+                                If(IsDBNull(rdr("lines_total")), 0D, CDec(rdr("lines_total"))))
+
                             newItems.Add(New ReturnItem With {
                                 .SaleItemId = CInt(rdr("sale_item_id")),
                                 .ProductId = CInt(rdr("product_id")),
                                 .Sku = rdr("sku").ToString(),
                                 .Name = rdr("product_name").ToString(),
                                 .Swatch = swatch,
-                                .UnitPrice = CDec(rdr("unit_price")),
+                                .UnitPrice = paidUnit,
                                 .Qty = CInt(rdr("returnable_qty")),
                                 .SelectedQty = 0
                             })
@@ -1174,7 +1202,7 @@ Public Class ReturnsPanelBuilder
                 MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
         End If
 
-        Dim subtotal As Decimal = selectedItems.Sum(Function(i) i.SelectedQty * i.UnitPrice)
+        Dim subtotal As Decimal = RefundSubtotal(selectedItems)
         Dim fee As Decimal = RestockFee(subtotal)
         Dim totalRefund As Decimal = subtotal - fee
         Dim reason As String = If(_cmbReason IsNot Nothing AndAlso _cmbReason.SelectedIndex >= 0,
@@ -1194,6 +1222,16 @@ Public Class ReturnsPanelBuilder
         If AppModal.Show(msg, "Confirm Refund", MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
             Return
         End If
+
+        ' A refund pays money out of the drawer just like a void does, and voids
+        ' already need an Admin. Without the same check here, "refund it in
+        ' full" was the way around the void approval.
+        Dim approval As AdminApprovalModal.Result = AdminApprovalModal.Show(
+            "Approve Refund",
+            ChrW(8369) & " " & totalRefund.ToString("N2") & " back to the customer for receipt #" &
+            _saleNo & ". An Admin must approve this.",
+            "Approve refund")
+        If approval Is Nothing Then Return
 
         Dim returnNo As String = DocNumber.Generate("RTN-")
         Dim committed As Boolean = False
@@ -1239,6 +1277,30 @@ Public Class ReturnsPanelBuilder
                                 " still returnable. Re-scan the receipt and try again.")
                         End If
                     Next
+
+                    ' Never pay out more than the sale took in. Per-unit paid
+                    ' prices are exact, but each refund rounds to the centavo, so
+                    ' several partial refunds of one sale can drift a few centavos
+                    ' over. That drift is trimmed; anything bigger means the
+                    ' figures are wrong and the refund is refused.
+                    Dim remaining As Decimal
+                    Using cmd As New MySqlCommand(
+                        "SELECT s.total - COALESCE((SELECT SUM(r.total_refund) FROM returns r " &
+                        "                           WHERE r.sale_id = s.sale_id), 0) " &
+                        "FROM sales s WHERE s.sale_id = @sid", conn, tx)
+                        cmd.Parameters.AddWithValue("@sid", _saleId)
+                        remaining = Convert.ToDecimal(cmd.ExecuteScalar())
+                    End Using
+                    If totalRefund > remaining Then
+                        If totalRefund - remaining > 0.05D Then
+                            Throw New Exception(
+                                "This refund (" & ChrW(8369) & totalRefund.ToString("N2") & ") is more than is left " &
+                                "to refund on sale #" & _saleNo & " (" & ChrW(8369) & Math.Max(0D, remaining).ToString("N2") & ")." &
+                                vbCrLf & "Re-scan the receipt and try again.")
+                        End If
+                        totalRefund = Math.Max(0D, remaining)
+                    End If
+
                     ' 1. INSERT into returns
                     Dim returnId As Integer
                     Using cmd As New MySqlCommand(
@@ -1261,7 +1323,7 @@ Public Class ReturnsPanelBuilder
                     End Using
 
                     ' 2. For each selected item: INSERT return_items + restore stock
-                    Dim lineAmounts = LineRefunds(selectedItems)
+                    Dim lineAmounts = LineRefunds(selectedItems, totalRefund)
                     For itemIdx = 0 To selectedItems.Count - 1
                         Dim it = selectedItems(itemIdx)
                         Dim refundAmt As Decimal = lineAmounts(itemIdx)
@@ -1325,11 +1387,14 @@ Public Class ReturnsPanelBuilder
 
                     ' Refunds move cash out of the drawer; without this the log
                     ' showed the sale but never the money going back.
-                    ActivityLog.Record("SALE_REFUND", "sale", CInt(_saleId),
+                    Dim logLine As String =
                         returnNo & " against " & _saleNo & " — " &
                         ChrW(8369) & totalRefund.ToString("N2") &
                         " via " & MethodDisplay(_selectedRefundMethod) &
-                        If(reason = "", "", " (" & reason & ")"))
+                        If(reason = "", "", " (" & reason & ")") &
+                        " | Approved by: " & approval.AdminName & " | Note: " & approval.Reason
+                    If logLine.Length > 255 Then logLine = logLine.Substring(0, 255)
+                    ActivityLog.Record("SALE_REFUND", "sale", CInt(_saleId), logLine)
 
                     ' Snapshot for PRINT SLIP before the screen resets.
                     _lastRtnNo = returnNo
@@ -1414,7 +1479,7 @@ Public Class ReturnsPanelBuilder
         ElseIf _saleId > 0 AndAlso _items IsNot Nothing AndAlso _items.Any(Function(i) i.SelectedQty > 0) Then
             ' Draft preview of the current selection (not yet processed).
             Dim sel = _items.Where(Function(i) i.SelectedQty > 0).ToList()
-            Dim subtotal As Decimal = sel.Sum(Function(i) i.SelectedQty * i.UnitPrice)
+            Dim subtotal As Decimal = RefundSubtotal(sel)
             Dim fee As Decimal = RestockFee(subtotal)
             lines.Add(New ReceiptPrinter.RLine("** DRAFT — NOT PROCESSED **", , ReceiptPrinter.LineStyle.Muted))
             lines.Add(New ReceiptPrinter.RLine("Orig. Receipt:", _saleNo))
@@ -1423,7 +1488,7 @@ Public Class ReturnsPanelBuilder
             For Each it In sel
                 lines.Add(New ReceiptPrinter.RLine(it.Name, "", ReceiptPrinter.LineStyle.Bold))
                 lines.Add(New ReceiptPrinter.RLine("  qty " & it.SelectedQty.ToString(),
-                                                   "₱ " & (it.SelectedQty * it.UnitPrice).ToString("N2")))
+                                                   "₱ " & LinePaid(it).ToString("N2")))
             Next
             lines.Add(ReceiptPrinter.Divider())
             lines.Add(New ReceiptPrinter.RLine("Subtotal", "₱ " & subtotal.ToString("N2")))

@@ -15,6 +15,7 @@
 '  against known rates.
 ' =============================================================================
 Imports System
+Imports System.Linq
 
 Module SaleMathTests
 
@@ -32,6 +33,8 @@ Module SaleMathTests
         OrdinaryDiscountTests()
         EdgeCaseTests()
         ChangeDueTests()
+        RefundPaidPriceTests()
+        PromoApprovalTests()
 
         Console.WriteLine("")
         Console.WriteLine("----------------------------------------------")
@@ -203,6 +206,68 @@ Module SaleMathTests
         ' Change on an exempt sale comes off the reduced total, not the shelf price.
         Dim sr = StoreSettings.ComputeSaleTotals(1000D, 0D, "Senior")
         Eq(1000D - sr.total, 285.71D, "1000 tendered on a Senior sale gives 285.71 change")
+    End Sub
+
+    ' ── Refunds pay back what was PAID, not the shelf price ──────────────────
+    '  Mirrors the Returns screen: per-unit paid price from PaidUnitPrice, the
+    '  selection summed and rounded once.
+    Private Function RefundOf(lines As (shelf As Decimal, qty As Integer)(),
+                              saleTotal As Decimal) As Decimal
+        Dim linesTotal As Decimal = lines.Sum(Function(l) l.shelf * l.qty)
+        Return Decimal.Round(lines.Sum(Function(l) l.qty *
+            StoreSettings.PaidUnitPrice(l.shelf, saleTotal, linesTotal)), 2)
+    End Function
+
+    Private Sub RefundPaidPriceTests()
+        Console.WriteLine("")
+        Console.WriteLine("[7] Refund paid price")
+        StoreSettings.ConfigureForTest(12D, True)
+
+        ' The reported bug: P1,000 Senior sale collected 714.29 but refunded 1,000.
+        Dim sr = StoreSettings.ComputeSaleTotals(1000D, 0D, "Senior")
+        Eq(RefundOf({(1000D, 1)}, sr.total), 714.29D, "Senior sale refunds 714.29, not 1000.00")
+
+        ' No discount: refund equals the shelf price, exactly as before.
+        Eq(StoreSettings.PaidUnitPrice(550D, 550D, 550D), 550D, "undiscounted: paid price is the shelf price")
+
+        ' Promo P100 off a P1,000 cart of two lines: each line gives back its share.
+        Eq(RefundOf({(600D, 1)}, 900D), 900D, "single line gets the whole paid total")
+        Dim twoLines = {(600D, 1), (400D, 1)}
+        Dim lt As Decimal = 1000D
+        Eq(Decimal.Round(StoreSettings.PaidUnitPrice(600D, 900D, lt), 2), 540D, "promo: 600 line refunds 540.00")
+        Eq(Decimal.Round(StoreSettings.PaidUnitPrice(400D, 900D, lt), 2), 360D, "promo: 400 line refunds 360.00")
+        Eq(RefundOf(twoLines, 900D), 900D, "promo: whole sale refunds exactly what was paid")
+
+        ' Awkward thirds: three lines refunded one at a time never exceed the total.
+        Dim thirdsTotal As Decimal = StoreSettings.ComputeSaleTotals(99.99D, 0D, "Senior").total
+        Dim oneThird As Decimal = Decimal.Round(StoreSettings.PaidUnitPrice(33.33D, thirdsTotal, 99.99D), 2)
+        IsTrue(oneThird * 3D - thirdsTotal <= 0.05D, "thirds: three partial refunds stay within 5 centavos of the total")
+        Eq(RefundOf({(33.33D, 3)}, thirdsTotal), thirdsTotal, "thirds: one full refund is exact")
+
+        ' VAT-exclusive: the customer paid VAT on top, so it comes back too.
+        StoreSettings.ConfigureForTest(12D, False)
+        Dim ex = StoreSettings.ComputeSaleTotals(1000D, 0D, "None")
+        Eq(RefundOf({(1000D, 1)}, ex.total), 1120D, "exclusive: refund includes the VAT paid (1120.00)")
+
+        ' Zero-value sale cannot divide by zero.
+        Eq(StoreSettings.PaidUnitPrice(0D, 0D, 0D), 0D, "zero sale: paid price is 0")
+
+        StoreSettings.ConfigureForTest(12D, True)
+    End Sub
+
+    ' ── Promo discounts over 10% need an Admin ───────────────────────────────
+    Private Sub PromoApprovalTests()
+        Console.WriteLine("")
+        Console.WriteLine("[8] Promo approval rule")
+
+        IsTrue(Not StoreSettings.PromoNeedsApproval("Promo", 100D, 1000D), "exactly 10% needs no Admin")
+        IsTrue(StoreSettings.PromoNeedsApproval("Promo", 100.01D, 1000D), "just over 10% needs an Admin")
+        IsTrue(StoreSettings.PromoNeedsApproval("Promo", 1000D, 1000D), "100% needs an Admin")
+        IsTrue(Not StoreSettings.PromoNeedsApproval("Promo", 0D, 1000D), "no discount needs no Admin")
+        IsTrue(Not StoreSettings.PromoNeedsApproval("Senior", 178.57D, 1000D), "Senior (fixed by law) needs no Admin")
+        IsTrue(Not StoreSettings.PromoNeedsApproval("PWD", 178.57D, 1000D), "PWD (fixed by law) needs no Admin")
+        ' Cart shrank after a 10% discount: same P100 is now 50% of P200.
+        IsTrue(StoreSettings.PromoNeedsApproval("Promo", 100D, 200D), "10% that became 50% after removing items needs an Admin")
     End Sub
 
 End Module

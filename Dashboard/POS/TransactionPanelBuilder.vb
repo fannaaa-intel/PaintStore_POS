@@ -107,6 +107,23 @@ Public Class TransactionPanelBuilder
     ' onto the receipt. Kept alongside the discount so clearing one clears both.
     Private Shared _discountIdNo As String = ""
     Private Shared _discountIdName As String = ""
+    ' The Promo discount an Admin has approved for this cart (see
+    ' EnsurePromoApproved). Valid while the discount is no bigger and the cart
+    ' no smaller than when it was approved.
+    Private Shared _promoApprovedAmount As Decimal = 0
+    Private Shared _promoApprovedSubtotal As Decimal = 0
+
+    ' Drops the discount and everything that belongs to it. Clearing only the
+    ' amount and type used to leave the last Senior/PWD cardholder's name and ID
+    ' behind, to be printed on a later sale's receipt.
+    Private Shared Sub ClearDiscount()
+        _discountAmount = 0
+        _discountType = "None"
+        _discountIdNo = ""
+        _discountIdName = ""
+        _promoApprovedAmount = 0
+        _promoApprovedSubtotal = 0
+    End Sub
 
 
     ' Quota badge
@@ -157,10 +174,7 @@ Public Class TransactionPanelBuilder
     ' cashier's receipt with the NEW cashier's name printed on it.
     Public Shared Sub ResetForNewSession()
         _cart = New Dictionary(Of Integer, CartLine)
-        _discountAmount = 0
-        _discountType = "None"
-        _discountIdNo = ""
-        _discountIdName = ""
+        ClearDiscount()
         _searchText = ""
         _activeCategory = ALL_CATEGORIES
 
@@ -217,7 +231,10 @@ Public Class TransactionPanelBuilder
         LoadProducts()
         SyncCartWithCatalog()
 
-        mainContainer.Controls.Clear()
+        ' ScreenHost, not Controls.Clear(): this rebuild runs after every sale,
+        ' hold, void and retrieve, and Clear() alone left the old screen - and
+        ' its 1-second clock timer - alive until the app closed.
+        ScreenHost.Clear(mainContainer)
         mainContainer.BackColor = MintBg
 
         Dim root As New Panel With {.Dock = DockStyle.Fill, .BackColor = MintBg}
@@ -1400,6 +1417,21 @@ Public Class TransactionPanelBuilder
                 Dim disc As Decimal = payTotals.discount
                 Dim grand As Decimal = payTotals.total
 
+                ' Checked here, before any money is asked for: the cart may have
+                ' shrunk since the discount was approved (or a held sale brought
+                ' a big discount back), and a sale cannot be refused once paid.
+                If Not EnsurePromoApproved(_discountType, subtotal, disc) Then Return
+
+                ' A Senior/PWD sale is only claimable with the cardholder's name
+                ' and ID. They can be missing on a held sale brought back, so
+                ' stop here rather than print a receipt with blank details.
+                If payTotals.vatExempt AndAlso (_discountIdNo.Trim() = "" OrElse _discountIdName.Trim() = "") Then
+                    AppModal.Show("This " & _discountType & " sale needs the cardholder's name and ID number." &
+                                  Environment.NewLine & "Press Discount (F2) to enter them, then take payment.",
+                                  "Details Required", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return
+                End If
+
                 ' Per-method capture: cash needs the amount tendered (-> change);
                 ' everything else needs a reference number (no change given).
                 Dim tendered As Decimal = grand
@@ -1732,13 +1764,22 @@ Public Class TransactionPanelBuilder
                         Next
 
                         Dim withCheque As Boolean = _chequeAccountName <> "" AndAlso PaymentMethods.SupportsCheque()
+                        ' Senior/PWD cardholder kept on the sale itself (section 24),
+                        ' not only on the paper receipt.
+                        Dim withExempt As Boolean = saleTotals.vatExempt AndAlso PaymentMethods.SupportsExemptHolder()
                         Using cmd As New MySqlCommand(
                             "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
                             "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due, reference_no" &
-                            If(withCheque, ", cheque_account_name", "") & ") " &
+                            If(withCheque, ", cheque_account_name", "") &
+                            If(withExempt, ", exempt_holder_name, exempt_id_no", "") & ") " &
                         "VALUES (@sno, @uid, @sid, @mid, NOW(), 'Completed', @dtype, @sub, @disc, @vat, @total, @tendered, @change, @ref" &
-                            If(withCheque, ", @chqacct", "") & ")", conn, txn)
+                            If(withCheque, ", @chqacct", "") &
+                            If(withExempt, ", @exname, @exid", "") & ")", conn, txn)
                             If withCheque Then cmd.Parameters.AddWithValue("@chqacct", _chequeAccountName)
+                            If withExempt Then
+                                cmd.Parameters.AddWithValue("@exname", Left(_discountIdName, 120))
+                                cmd.Parameters.AddWithValue("@exid", Left(_discountIdNo, 60))
+                            End If
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                             cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
@@ -1837,8 +1878,7 @@ Public Class TransactionPanelBuilder
 
             ' Fresh cart for the next customer
             _cart = New Dictionary(Of Integer, CartLine)
-            _discountAmount = 0
-            _discountType = "None"
+            ClearDiscount()
             LoadTransaction(_mainContainer)
 
         Catch ex As Exception
@@ -1858,7 +1898,7 @@ Public Class TransactionPanelBuilder
     ' =========================================================================
     Friend Shared Function HandleShortcut(keyData As Keys) As Boolean
         ' Only act while the transaction screen is actually the one on show --
-        ' otherwise F4 would void a sale from the Returns or Cash tab.
+        ' otherwise F6 would void a sale from the Returns or Cash tab.
         If _mainContainer Is Nothing OrElse _mainContainer.IsDisposed Then Return False
         If _cartHost Is Nothing OrElse _cartHost.IsDisposed Then Return False
 
@@ -1931,12 +1971,42 @@ Public Class TransactionPanelBuilder
         End If
         Dim r = PromptDiscount(subtotal, _discountType, _discountAmount)
         If Not r.ok Then Return
+        ' A big Promo needs an Admin before it touches the cart; cancelling
+        ' leaves the previous discount exactly as it was.
+        If Not EnsurePromoApproved(r.dtype, subtotal, r.amount) Then Return
         _discountType = r.dtype
         _discountAmount = r.amount
         _discountIdNo = r.idNo
         _discountIdName = r.idName
         RenderCart()
     End Sub
+
+    ' A cashier may give up to StoreSettings.PromoApprovalPct of the cart on
+    ' their own; more needs an Admin's password. Asked when the discount is
+    ' applied AND again when payment starts, because removing items after a
+    ' 10% discount can turn the same peso amount into 50% of what is left.
+    ' Returns False when an Admin was needed and did not approve.
+    Private Shared Function EnsurePromoApproved(dtype As String, subtotal As Decimal, discount As Decimal) As Boolean
+        If Not StoreSettings.PromoNeedsApproval(dtype, discount, subtotal) Then Return True
+        If _promoApprovedAmount > 0 AndAlso discount <= _promoApprovedAmount AndAlso
+           subtotal >= _promoApprovedSubtotal Then Return True
+
+        Dim pct As Decimal = If(subtotal > 0, Math.Round(discount * 100D / subtotal, 1), 100D)
+        Dim approval = AdminApprovalModal.Show("Approve Discount",
+            "P " & discount.ToString("N2") & " off a P " & subtotal.ToString("N2") & " cart (" &
+            pct.ToString("0.#") & "%). Over " & StoreSettings.PromoApprovalPct.ToString("0") &
+            "% needs an Admin.",
+            "Approve discount")
+        If approval Is Nothing Then Return False
+
+        _promoApprovedAmount = discount
+        _promoApprovedSubtotal = subtotal
+        Dim logLine As String = "P" & discount.ToString("N2") & " (" & pct.ToString("0.#") & "%) on a P" &
+            subtotal.ToString("N2") & " cart | Reason: " & approval.Reason & " | Approved by: " & approval.AdminName
+        If logLine.Length > 255 Then logLine = logLine.Substring(0, 255)
+        ActivityLog.Record("DISCOUNT_APPROVED", "sale", Nothing, logLine)
+        Return True
+    End Function
 
     Private Shared Function PromptDiscount(subtotal As Decimal, currentType As String, currentAmount As Decimal) As (ok As Boolean, dtype As String, amount As Decimal, idNo As String, idName As String)
         Using f As New Form With {.Text = "Apply Discount", .FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -2070,13 +2140,12 @@ Public Class TransactionPanelBuilder
         End If
         Dim subtotal As Decimal = 0
         For Each it In items : subtotal += it.lineTotal : Next
-        Dim discount As Decimal = _discountAmount
-        If discount < 0 Then discount = 0
-        If discount > subtotal Then discount = subtotal
-        ' Mirror the checkout maths so the parked figures match what the sale will
-        ' actually charge when it is retrieved.
-        Dim netAmount As Decimal = subtotal - discount
-        Dim total As Decimal = StoreSettings.ComputeTotalDue(netAmount)
+        ' The same helper checkout uses, so the parked figures match what the
+        ' sale will actually charge when it is retrieved. Hand-rolled maths here
+        ' missed the Senior/PWD exemption: a P1,000 Senior cart was parked at
+        ' P821.43 with VAT, when checkout charges P714.29 with none.
+        Dim heldTotals = StoreSettings.ComputeSaleTotals(subtotal, _discountAmount, _discountType)
+        Dim withExempt As Boolean = heldTotals.vatExempt AndAlso PaymentMethods.SupportsExemptHolder()
         Dim saleNo As String = DocNumber.Generate("HOLD-")
         Try
             Using conn As MySqlConnection = Db.GetConnection()
@@ -2085,16 +2154,22 @@ Public Class TransactionPanelBuilder
                     Try
                         Using cmd As New MySqlCommand(
                             "INSERT INTO sales (sale_no, user_id, shift_id, method_id, sale_datetime, status, discount_type, " &
-                            "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due) " &
-                            "VALUES (@sno, @uid, @sid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, @vat, @total, NULL, NULL)", conn, txn)
+                            "subtotal, discount_amount, vat_amount, total, amount_tendered, change_due" &
+                            If(withExempt, ", exempt_holder_name, exempt_id_no", "") & ") " &
+                            "VALUES (@sno, @uid, @sid, NULL, NOW(), 'OnHold', @dtype, @sub, @disc, @vat, @total, NULL, NULL" &
+                            If(withExempt, ", @exname, @exid", "") & ")", conn, txn)
                             cmd.Parameters.AddWithValue("@sno", saleNo)
                             cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
                             cmd.Parameters.AddWithValue("@sid", If(Session.ShiftId > 0, CType(Session.ShiftId, Object), CType(DBNull.Value, Object)))
                             cmd.Parameters.AddWithValue("@dtype", _discountType)
                             cmd.Parameters.AddWithValue("@sub", subtotal)
-                            cmd.Parameters.AddWithValue("@disc", discount)
-                            cmd.Parameters.AddWithValue("@vat", StoreSettings.ComputeVat(netAmount))
-                            cmd.Parameters.AddWithValue("@total", total)
+                            cmd.Parameters.AddWithValue("@disc", heldTotals.discount)
+                            cmd.Parameters.AddWithValue("@vat", heldTotals.vat)
+                            cmd.Parameters.AddWithValue("@total", heldTotals.total)
+                            If withExempt Then
+                                cmd.Parameters.AddWithValue("@exname", Left(_discountIdName, 120))
+                                cmd.Parameters.AddWithValue("@exid", Left(_discountIdNo, 60))
+                            End If
                             cmd.ExecuteNonQuery()
                         End Using
                         Dim saleId As Long
@@ -2125,8 +2200,7 @@ Public Class TransactionPanelBuilder
             AppModal.Show("Sale held as " & saleNo & "." & Environment.NewLine & "Use RETRIEVE to bring it back.",
                 "Sale Held", MessageBoxButtons.OK, MessageBoxIcon.Information)
             _cart = New Dictionary(Of Integer, CartLine)
-            _discountAmount = 0
-            _discountType = "None"
+            ClearDiscount()
             LoadTransaction(_mainContainer)
         Catch ex As Exception
             AppModal.Show("Could not hold the sale:" & Environment.NewLine & Environment.NewLine & ErrorLog.ForUser(ex),
@@ -2165,6 +2239,9 @@ Public Class TransactionPanelBuilder
         Dim qtyByPid As New Dictionary(Of Integer, Integer)
         Dim heldDiscount As Decimal = 0
         Dim heldDiscountType As String = "None"
+        Dim heldExemptName As String = ""
+        Dim heldExemptId As String = ""
+        Dim withExempt As Boolean = PaymentMethods.SupportsExemptHolder()
         Try
             Using conn As MySqlConnection = Db.GetConnection()
                 conn.Open()
@@ -2178,7 +2255,8 @@ Public Class TransactionPanelBuilder
                         ' list was built before the dialog, so another till may have
                         ' already retrieved or voided this sale.
                         Using cmd As New MySqlCommand(
-                            "SELECT status, discount_amount, discount_type FROM sales " &
+                            "SELECT status, discount_amount, discount_type" &
+                            If(withExempt, ", exempt_holder_name, exempt_id_no", "") & " FROM sales " &
                             "WHERE sale_id = @sid FOR UPDATE", conn, txn)
                             cmd.Parameters.AddWithValue("@sid", chosenId)
                             Using rdr = cmd.ExecuteReader()
@@ -2196,6 +2274,14 @@ Public Class TransactionPanelBuilder
                                 End If
                                 If Not rdr.IsDBNull(rdr.GetOrdinal("discount_type")) Then
                                     heldDiscountType = rdr.GetString("discount_type")
+                                End If
+                                If withExempt Then
+                                    If Not rdr.IsDBNull(rdr.GetOrdinal("exempt_holder_name")) Then
+                                        heldExemptName = rdr.GetString("exempt_holder_name")
+                                    End If
+                                    If Not rdr.IsDBNull(rdr.GetOrdinal("exempt_id_no")) Then
+                                        heldExemptId = rdr.GetString("exempt_id_no")
+                                    End If
                                 End If
                             End Using
                         End Using
@@ -2251,8 +2337,16 @@ Public Class TransactionPanelBuilder
         For Each kv In _cart : newSubtotal += kv.Value.Qty * kv.Value.UnitPrice : Next
         If heldDiscount < 0 Then heldDiscount = 0
         If heldDiscount > newSubtotal Then heldDiscount = newSubtotal
+        ' Start clean so nothing from the previous customer - an approval, a
+        ' cardholder ID - rides along. A big Promo is re-approved at payment,
+        ' and a Senior/PWD sale with no saved cardholder asks for one there.
+        ClearDiscount()
         _discountAmount = heldDiscount
         _discountType = If(heldDiscount > 0, heldDiscountType, "None")
+        If StoreSettings.IsVatExemptDiscount(_discountType) Then
+            _discountIdName = heldExemptName
+            _discountIdNo = heldExemptId
+        End If
 
         ActivityLog.Record("SALE_RETRIEVE", "sale", CInt(chosenId), "Brought a held sale back to the cart")
         LoadTransaction(_mainContainer)

@@ -65,7 +65,37 @@ Public Module PaymentMethods
     Public Sub ResetSchemaCache()
         _checked = False
         _chequeChecked = False
+        _exemptChecked = False
     End Sub
+
+    ' -------------------------------------------------------------------------
+    '  SENIOR / PWD CARDHOLDER ON THE SALE (migrations.sql section 24)
+    '
+    '  RA 9994 / RA 10754 want the cardholder's name and ID on the sale record,
+    '  not only on the printed receipt. Until the columns exist the sale saves
+    '  as before and the details still print on the receipt.
+    ' -------------------------------------------------------------------------
+    Private _exemptChecked As Boolean = False
+    Private _exemptPresent As Boolean = False
+
+    Public Function SupportsExemptHolder() As Boolean
+        If _exemptChecked Then Return _exemptPresent
+        Try
+            Using cn = Db.GetConnection()
+                cn.Open()
+                Using cmd As New MySqlCommand(
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() " &
+                    "AND table_name = 'sales' AND column_name IN ('exempt_holder_name', 'exempt_id_no')", cn)
+                    _exemptPresent = Convert.ToInt32(cmd.ExecuteScalar()) = 2
+                End Using
+            End Using
+            _exemptChecked = True
+        Catch swallowed As Exception
+            ErrorLog.Write("PaymentMethods.SupportsExemptHolder", swallowed)
+            _exemptPresent = False
+        End Try
+        Return _exemptPresent
+    End Function
 
     ' -------------------------------------------------------------------------
     '  CHEQUE SUPPORT (migrations.sql section 17)
