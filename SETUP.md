@@ -149,4 +149,5 @@ header of `migrations.sql` explains the cause and how to avoid it.
 |---|---|
 | `paint_store_pos_full.sql` | Complete database — schema and data. First install only. |
 | `migrations.sql` | Schema changes only. Safe to re-run; use for updates. |
+| `Database\paint_store_pos.sql` | phpMyAdmin export (Sep 28 2026, schema up to migration 22). Import into an **empty** `paint_store_pos` database, then run `migrations.sql` to bring it up to date. |
 | `Tests\run-tests.cmd` | Runs the 47 sale-math tests (VAT, discounts, change). |
