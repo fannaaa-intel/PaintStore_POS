@@ -245,6 +245,10 @@ Public Class AccountantDashPanelBuilder
     Private Shared Function BuildTopRegion() As Panel
         Const SIDE_PAD As Integer = 24
 
+        ' A laptop screen (container under ~700px tall) gets a shorter title
+        ' row and KPI cards so the cards below keep enough height.
+        Dim shortScreen As Boolean = _container.Height > 0 AndAlso _container.Height < 700
+
         Dim region As New Panel With {
             .BackColor = MintBg,
             .Padding = New Padding(0),
@@ -259,10 +263,10 @@ Public Class AccountantDashPanelBuilder
         }
         Dim lblTitle As New Label With {
             .Text = "Dashboard",
-            .Font = New Font("Segoe UI", 28, FontStyle.Bold),
+            .Font = New Font("Segoe UI", If(shortScreen, 22, 28), FontStyle.Bold),
             .ForeColor = MintDark,
             .AutoSize = True,
-            .Location = New Point(SIDE_PAD, 16)
+            .Location = New Point(SIDE_PAD, If(shortScreen, 10, 16))
         }
 
         titleBar.Controls.Add(lblTitle)
@@ -347,8 +351,14 @@ Public Class AccountantDashPanelBuilder
         region.Controls.Add(pillBar)
         region.Controls.Add(titleBar)
 
-        ' Total region height = titleBar(72) + pillBar(52) + kpiBar(165) = 289
-        region.Height = 72 + 52 + 165
+        ' 72 + 52 + 165 = 289 at 100% scaling; each row grows if its text
+        ' is taller than that under Windows display scaling.
+        titleBar.Height = Math.Max(If(shortScreen, 52, 72), lblTitle.PreferredHeight + 2 * lblTitle.Top)
+        pillBar.Height = Math.Max(52, period.Height + 18)
+        Dim kpiText As Integer = New Font("Segoe UI", 11).Height + New Font("Segoe UI", 26, FontStyle.Bold).Height +
+                                 New Font("Segoe UI", 10).Height
+        kpiBar.Height = Math.Max(If(shortScreen, 140, 165), kpiText + 14 + 4 + 18 + kpiBar.Padding.Vertical)
+        region.Height = titleBar.Height + pillBar.Height + kpiBar.Height
 
         Return region
     End Function
@@ -377,6 +387,26 @@ Public Class AccountantDashPanelBuilder
             .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+
+        ' Stack from the measured heights (display scaling makes text taller
+        ' than the old fixed slots) and shrink the figure until it fits the
+        ' card - on a laptop a quarter of the width is too narrow for a
+        ' 26pt seven-digit amount.
+        AddHandler card.Resize,
+            Sub()
+                If card.Width <= 0 Then Return
+                Dim maxW As Integer = card.Width - 40
+                Dim size As Single = 26
+                Do While size > 12
+                    Using f As New Font("Segoe UI", size, FontStyle.Bold)
+                        If TextRenderer.MeasureText(value, f).Width <= maxW Then Exit Do
+                    End Using
+                    size -= 1
+                Loop
+                If Math.Abs(lblVal.Font.Size - size) > 0.1F Then lblVal.Font = New Font("Segoe UI", size, FontStyle.Bold)
+                lblVal.Top = lblCap.Bottom + 2
+                lblSub.Top = lblVal.Bottom + 2
+            End Sub
         Return card
     End Function
 
@@ -439,6 +469,8 @@ Public Class AccountantDashPanelBuilder
         AddHandler header.Resize, Sub()
                                       lblCount.Left = header.Width - lblCount.Width - 18
                                       lblCount.Top = 20
+                                      ' Narrow screen: drop the count rather than run it into the title.
+                                      lblCount.Visible = lblCount.Left > lblH.Right + 8
                                   End Sub
         AddHandler header.Paint,
             Sub(s, e)
@@ -585,6 +617,8 @@ Public Class AccountantDashPanelBuilder
         AddHandler header.Resize, Sub()
                                       lblCount.Left = header.Width - lblCount.Width - 18
                                       lblCount.Top = 20
+                                      ' Narrow screen: drop the count rather than run it into the title.
+                                      lblCount.Visible = lblCount.Left > lblH.Right + 8
                                   End Sub
         AddHandler header.Paint,
             Sub(s, e)
@@ -720,165 +754,26 @@ Public Class AccountantDashPanelBuilder
 
     ' =========================================================================
     '  RIGHT — PERIOD SUMMARY
+    '
+    '  The sections used to sit at fixed pixel heights (about 560px in all), so
+    '  on a laptop - a shorter screen, or Windows display scaling at 125-150%
+    '  making the text taller than its slot - NET SUMMARY at the bottom was cut
+    '  off. Everything is now placed from the labels' measured heights and
+    '  re-fitted on every resize: normal spacing when there is room, tighter
+    '  spacing, then smaller headline figures, then payment method and
+    '  transactions side by side; only if even that does not fit does the
+    '  card scroll.
     ' =========================================================================
     Private Shared Function BuildStatsCard() As Panel
-        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
+        Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .Padding = New Padding(4)}
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
 
-        ' Header
-        Dim header As New Panel With {.Height = 56, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim lblH As New Label With {
-            .Text = "Period Summary",
-            .Font = New Font("Segoe UI", 13, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True,
-            .Location = New Point(18, 16), .BackColor = Color.Transparent
-        }
-        AddHandler header.Paint,
-            Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, header.Height - 1, header.Width - 16, header.Height - 1)
-                End Using
-            End Sub
-        header.Controls.Add(lblH)
-        card.Controls.Add(header)
-
-        ' Section 1 — Top Payment Method (fixed 88px)
-        Dim sec1 As New Panel With {.Height = 88, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim lblCapMethod As New Label With {
-            .Text = "TOP PAYMENT METHOD",
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(18, 12), .BackColor = Color.Transparent
-        }
-        Dim lblMethod As New Label With {
-            .Text = _topMethod,
-            .Font = New Font("Segoe UI", 22, FontStyle.Bold),
-            .ForeColor = MintDeep, .AutoSize = True,
-            .Location = New Point(18, 34), .BackColor = Color.Transparent
-        }
-        AddHandler sec1.Paint,
-            Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, sec1.Height - 1, sec1.Width - 16, sec1.Height - 1)
-                End Using
-            End Sub
-        sec1.Controls.AddRange({lblCapMethod, lblMethod})
-        card.Controls.Add(sec1)
-        sec1.BringToFront()
-
-        ' Section 2 — Transactions with functioning arc (fixed 100px)
-        ' Arc sweeps 0–260° proportional to txn count; caps at 50 txns = full arc
-        Dim sec2 As New BufferedPanel With {.Height = 100, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim lblCapTxn As New Label With {
-            .Text = "TRANSACTIONS",
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(18, 14), .BackColor = Color.Transparent
-        }
-        Dim lblTxnBig As New Label With {
-            .Text = _txnCount.ToString("N0"),
-            .Font = New Font("Segoe UI", 32, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True,
-            .Location = New Point(18, 34), .BackColor = Color.Transparent
-        }
-        AddHandler sec2.Paint,
-            Sub(s, e)
-                Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, sec2.Height - 1, sec2.Width - 16, sec2.Height - 1)
-                End Using
-            End Sub
-        sec2.Controls.AddRange({lblCapTxn, lblTxnBig})
-        card.Controls.Add(sec2)
-        sec2.BringToFront()
-
-        ' Section 3 — Revenue vs Expenses bars (fixed 168px)
-        Dim sec3 As New BufferedPanel With {.Height = 168, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim lblCapBars As New Label With {
-            .Text = "REVENUE VS EXPENSES",
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(18, 16), .BackColor = Color.Transparent
-        }
-        Dim lblRevLbl As New Label With {
-            .Text = "Revenue",
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 44), .BackColor = Color.Transparent
-        }
-        Dim lblRevVal As New Label With {
-            .Text = Peso & _revenue.ToString("N2"),
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-        Dim lblExpLbl As New Label With {
-            .Text = "Expenses",
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 106), .BackColor = Color.Transparent
-        }
-        Dim lblExpVal As New Label With {
-            .Text = Peso & _expenses.ToString("N2"),
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = AccentOrange, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
-
-        AddHandler sec3.Resize,
-            Sub()
-                lblRevVal.Left = sec3.Width - lblRevVal.Width - 18 : lblRevVal.Top = 44
-                lblExpVal.Left = sec3.Width - lblExpVal.Width - 18 : lblExpVal.Top = 106
-            End Sub
-
-        AddHandler sec3.Paint,
-            Sub(s, e)
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-                Dim bw As Integer = sec3.Width - 36
-                If bw < 4 Then Return
-                Dim maxVal As Decimal = Math.Max(_revenue, Math.Max(_expenses, 1))
-                ' Revenue bar
-                Using br As New SolidBrush(Color.FromArgb(215, 240, 235))
-                    e.Graphics.FillRectangle(br, New Rectangle(18, 68, bw, 8))
-                End Using
-                Dim revFill As Integer = CInt(bw * CSng(_revenue / maxVal))
-                If revFill > 0 Then
-                    Using br As New SolidBrush(MintPrimary)
-                        e.Graphics.FillRectangle(br, New Rectangle(18, 68, revFill, 8))
-                    End Using
-                End If
-                ' Expenses bar
-                Using br As New SolidBrush(Color.FromArgb(252, 235, 215))
-                    e.Graphics.FillRectangle(br, New Rectangle(18, 130, bw, 8))
-                End Using
-                Dim expFill As Integer = CInt(bw * CSng(_expenses / maxVal))
-                If expFill > 0 Then
-                    Using br As New SolidBrush(AccentOrange)
-                        e.Graphics.FillRectangle(br, New Rectangle(18, 130, expFill, 8))
-                    End Using
-                End If
-            End Sub
-
-        sec3.Controls.AddRange({lblCapBars, lblRevLbl, lblRevVal, lblExpLbl, lblExpVal})
-        card.Controls.Add(sec3)
-        sec3.BringToFront()
-
-        ' Section 4 — Net Profit / Returns / VAT summary (fills remaining space)
-        ' Styled to match sec3: plain colored value labels, no pill backgrounds
-        Dim sec4 As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
-
-        Dim lblCapSummary As New Label With {
-            .Text = "NET SUMMARY",
-            .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-            .ForeColor = FaintText, .AutoSize = True,
-            .Location = New Point(18, 16), .BackColor = Color.Transparent
-        }
+        Dim content As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .AutoScroll = True}
+        card.Controls.Add(content)
 
         Dim netProfit As Decimal = _revenue - _expenses
         Dim netClr As Color
         Dim netSign As String
-
         If netProfit > 0 Then
             netClr = MintDeep
             netSign = "+"
@@ -890,69 +785,164 @@ Public Class AccountantDashPanelBuilder
             netSign = ""
         End If
 
+        Dim capFont As New Font("Segoe UI", 9, FontStyle.Bold)
+        Dim rowFont As New Font("Segoe UI", 10.5F)
+        Dim rowBold As New Font("Segoe UI", 10.5F, FontStyle.Bold)
+        ' Normal / compact sizes for the title and the two headline figures.
+        Dim titleFonts = {New Font("Segoe UI", 13, FontStyle.Bold), New Font("Segoe UI", 12, FontStyle.Bold)}
+        Dim methodFonts = {New Font("Segoe UI", 22, FontStyle.Bold), New Font("Segoe UI", 16, FontStyle.Bold)}
+        Dim txnFonts = {New Font("Segoe UI", 32, FontStyle.Bold), New Font("Segoe UI", 20, FontStyle.Bold)}
 
+        Dim MakeLbl As Func(Of String, Font, Color, Label) =
+            Function(text, fnt, clr) New Label With {
+                .Text = text, .Font = fnt, .ForeColor = clr,
+                .AutoSize = True, .BackColor = Color.Transparent}
 
-        Dim lblNetLbl As New Label With {
-            .Text = "Net Profit",
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 44), .BackColor = Color.Transparent
-        }
-        Dim lblNetVal As New Label With {
-          .Text = netSign & Peso & Math.Abs(netProfit).ToString("N2"),
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = netClr, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
+        Dim lblH = MakeLbl("Period Summary", titleFonts(0), MintDark)
+        Dim lblCapMethod = MakeLbl("TOP PAYMENT METHOD", capFont, FaintText)
+        Dim lblMethod = MakeLbl(_topMethod, methodFonts(0), MintDeep)
+        Dim lblCapTxn = MakeLbl("TRANSACTIONS", capFont, FaintText)
+        Dim lblTxnBig = MakeLbl(_txnCount.ToString("N0"), txnFonts(0), MintPrimary)
+        Dim lblCapBars = MakeLbl("REVENUE VS EXPENSES", capFont, FaintText)
+        Dim lblRevLbl = MakeLbl("Revenue", rowFont, SubText)
+        Dim lblRevVal = MakeLbl(Peso & _revenue.ToString("N2"), rowBold, MintPrimary)
+        Dim lblExpLbl = MakeLbl("Expenses", rowFont, SubText)
+        Dim lblExpVal = MakeLbl(Peso & _expenses.ToString("N2"), rowBold, AccentOrange)
+        Dim lblCapSummary = MakeLbl("NET SUMMARY", capFont, FaintText)
+        Dim lblNetLbl = MakeLbl("Net Profit", rowFont, SubText)
+        Dim lblNetVal = MakeLbl(netSign & Peso & Math.Abs(netProfit).ToString("N2"), rowBold, netClr)
+        Dim lblInvLbl = MakeLbl("Inventory Value", rowFont, SubText)
+        Dim lblInvVal = MakeLbl(Peso & _inventoryValue.ToString("N2"), rowBold, AccentBlue)
+        Dim lblVatLbl = MakeLbl("VAT Collected", rowFont, SubText)
+        Dim lblVatVal = MakeLbl(Peso & _vatCollected.ToString("N2"), rowBold, MintPrimary)
 
-        ' Inventory Value row
-        Dim lblRetLbl As New Label With {
-            .Text = "Inventory Value",
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 82), .BackColor = Color.Transparent
-        }
-        Dim lblRetVal As New Label With {
-            .Text = Peso & _inventoryValue.ToString("N2"),
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = AccentBlue, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
+        content.Controls.AddRange({lblH, lblCapMethod, lblMethod, lblCapTxn, lblTxnBig,
+                                   lblCapBars, lblRevLbl, lblRevVal, lblExpLbl, lblExpVal,
+                                   lblCapSummary, lblNetLbl, lblNetVal, lblInvLbl, lblInvVal,
+                                   lblVatLbl, lblVatVal})
 
-        ' VAT Collected row
-        Dim lblVatLbl As New Label With {
-            .Text = "VAT Collected",
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(18, 120), .BackColor = Color.Transparent
-        }
-        Dim lblVatVal As New Label With {
-            .Text = Peso & _vatCollected.ToString("N2"),
-            .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintPrimary, .AutoSize = True,
-            .BackColor = Color.Transparent,
-            .Anchor = AnchorStyles.Top Or AnchorStyles.Right
-        }
+        Const BAR_H As Integer = 8
+        Dim dividers As New List(Of Integer)    ' y of each section divider, unscrolled
+        Dim barY As Integer() = {0, 0}           ' revenue bar, expenses bar
 
-        AddHandler sec4.Resize,
+        ' Places everything top to bottom and returns the height used.
+        Dim Place As Func(Of Integer, Integer, Integer) =
+            Function(mode, gap)
+                Dim fi As Integer = Math.Min(mode, 1)
+                lblH.Font = titleFonts(fi)
+                lblMethod.Font = methodFonts(fi)
+                lblTxnBig.Font = txnFonts(fi)
+                dividers.Clear()
+
+                Dim oy As Integer = content.AutoScrollPosition.Y
+                Dim right As Integer = content.ClientSize.Width - 18
+                Dim y As Integer = gap
+
+                Dim PutLeft As Action(Of Label, Integer) =
+                    Sub(l, top)
+                        l.Location = New Point(18, top + oy)
+                    End Sub
+                ' A label + value pair on one line, value right-aligned.
+                Dim PutRow As Func(Of Label, Label, Integer, Integer) =
+                    Function(l, v, top)
+                        PutLeft(l, top)
+                        v.Location = New Point(Math.Max(l.Right + 8, right - v.Width), top + oy)
+                        Return top + Math.Max(l.Height, v.Height)
+                    End Function
+
+                PutLeft(lblH, y) : y += lblH.Height + gap
+                dividers.Add(y) : y += gap
+
+                lblCapMethod.Text = If(mode = 2, "TOP METHOD", "TOP PAYMENT METHOD")
+                If mode = 2 Then
+                    ' Tightest: payment method and transactions side by side.
+                    Dim x2 As Integer = content.ClientSize.Width \ 2 + 8
+                    PutLeft(lblCapMethod, y)
+                    lblCapTxn.Location = New Point(x2, y + oy)
+                    y += lblCapMethod.Height + 2
+                    PutLeft(lblMethod, y)
+                    lblTxnBig.Location = New Point(x2, y + oy)
+                    y += Math.Max(lblMethod.Height, lblTxnBig.Height) + gap
+                    dividers.Add(y) : y += gap
+                Else
+                    PutLeft(lblCapMethod, y) : y += lblCapMethod.Height + 2
+                    PutLeft(lblMethod, y) : y += lblMethod.Height + gap
+                    dividers.Add(y) : y += gap
+
+                    PutLeft(lblCapTxn, y) : y += lblCapTxn.Height + 2
+                    PutLeft(lblTxnBig, y) : y += lblTxnBig.Height + gap
+                    dividers.Add(y) : y += gap
+                End If
+
+                PutLeft(lblCapBars, y) : y += lblCapBars.Height + gap \ 2
+                y = PutRow(lblRevLbl, lblRevVal, y) + 4
+                barY(0) = y : y += BAR_H + gap \ 2 + 2
+                y = PutRow(lblExpLbl, lblExpVal, y) + 4
+                barY(1) = y : y += BAR_H + gap
+                dividers.Add(y) : y += gap
+
+                PutLeft(lblCapSummary, y) : y += lblCapSummary.Height + gap \ 2
+                y = PutRow(lblNetLbl, lblNetVal, y) + gap \ 2 + 2
+                y = PutRow(lblInvLbl, lblInvVal, y) + gap \ 2 + 2
+                y = PutRow(lblVatLbl, lblVatVal, y) + gap
+                Return y
+            End Function
+
+        Dim fitting As Boolean = False
+        Dim Fit As Action =
             Sub()
-                lblNetVal.Left = sec4.Width - lblNetVal.Width - 18 : lblNetVal.Top = 44
-                lblRetVal.Left = sec4.Width - lblRetVal.Width - 18 : lblRetVal.Top = 82
-                lblVatVal.Left = sec4.Width - lblVatVal.Width - 18 : lblVatVal.Top = 120
+                If fitting OrElse content.ClientSize.Width <= 0 Then Return
+                fitting = True
+                content.SuspendLayout()
+                Dim avail As Integer = content.ClientSize.Height
+                Dim used As Integer = 0
+                Dim fits As Boolean = False
+                For Each mode In {0, 1, 2}
+                    For Each gap In {16, 12, 8, 6, 4}
+                        used = Place(mode, gap)
+                        If used <= avail Then fits = True : Exit For
+                    Next
+                    If fits Then Exit For
+                Next
+                ' Last resort: smallest layout, and let the card scroll.
+                content.AutoScrollMinSize = If(fits, Size.Empty, New Size(0, used))
+                If Not fits Then Place(2, 4)
+                content.ResumeLayout()
+                content.Invalidate()
+                fitting = False
             End Sub
+        AddHandler content.Resize, Sub() Fit()
+        AddHandler content.Scroll, Sub() content.Invalidate()
 
-        AddHandler sec4.Paint,
+        AddHandler content.Paint,
             Sub(s, e)
+                Dim g = e.Graphics
+                g.TranslateTransform(0, content.AutoScrollPosition.Y)
+                Dim w As Integer = content.ClientSize.Width
                 Using pen As New Pen(RowDivider, 1)
-                    e.Graphics.DrawLine(pen, 16, 0, sec4.Width - 16, 0)
+                    For Each dy In dividers
+                        g.DrawLine(pen, 16, dy, w - 16, dy)
+                    Next
                 End Using
-            End Sub
 
-        sec4.Controls.AddRange({lblCapSummary, lblNetLbl, lblNetVal, lblRetLbl, lblRetVal, lblVatLbl, lblVatVal})
-        card.Controls.Add(sec4)
-        sec4.BringToFront()
+                Dim bw As Integer = w - 36
+                If bw < 4 Then Return
+                Dim maxVal As Decimal = Math.Max(_revenue, Math.Max(_expenses, 1))
+                Dim DrawBar As Action(Of Integer, Decimal, Color, Color) =
+                    Sub(top, value, track, fill)
+                        Using br As New SolidBrush(track)
+                            g.FillRectangle(br, New Rectangle(18, top, bw, BAR_H))
+                        End Using
+                        Dim fw As Integer = CInt(bw * CSng(Math.Max(0D, value) / maxVal))
+                        If fw > 0 Then
+                            Using br As New SolidBrush(fill)
+                                g.FillRectangle(br, New Rectangle(18, top, fw, BAR_H))
+                            End Using
+                        End If
+                    End Sub
+                DrawBar(barY(0), _revenue, Color.FromArgb(215, 240, 235), MintPrimary)
+                DrawBar(barY(1), _expenses, Color.FromArgb(252, 235, 215), AccentOrange)
+            End Sub
 
         Return card
     End Function
