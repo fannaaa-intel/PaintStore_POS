@@ -309,6 +309,7 @@
     <Compile Include="Modules\Permissions.vb" />
     <Compile Include="Modules\Credentials.vb" />
     <Compile Include="Modules\ErrorLog.vb" />
+    <Compile Include="Modules\SchemaCheck.vb" />
     <Compile Include="Modules\AdminApprovalModal.vb" />
     <Compile Include="Modules\IdleLock.vb" />
     <Compile Include="Modules\StoreSettings.vb" />
@@ -332,6 +333,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="My Project\AssemblyInfo.vb" />
+    <Compile Include="My Project\ApplicationEvents.vb" />
     <Compile Include="My Project\Application.Designer.vb">
       <AutoGen>True</AutoGen>
       <DependentUpon>Application.myapp</DependentUpon>

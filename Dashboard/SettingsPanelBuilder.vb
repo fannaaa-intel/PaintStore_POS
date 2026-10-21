@@ -679,7 +679,7 @@ Public Class SettingsPanelBuilder
             Sub()
                 Using dlg As New OpenFileDialog With {
                         .Filter = "SQL backup (*.sql)|*.sql", .InitialDirectory = _backupFolder,
-                        .Title = "Choose a backup to restore"}
+                        .Title = "Choose a backup to restore", .RestoreDirectory = True}
                     If dlg.ShowDialog() = DialogResult.OK Then DoRestore(dlg.FileName)
                 End Using
             End Sub

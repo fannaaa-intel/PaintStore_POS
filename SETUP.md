@@ -133,8 +133,18 @@ MySQL is not started in the XAMPP Control Panel.
 **"Unknown database 'paint_store_pos'"**
 The import in step 3 did not run.
 
-**"Unknown column ..." right after an update**
-The code was pulled but the schema was not — run `migrations.sql`.
+**"Database Update Needed" at the log-in screen, or "Unknown column ..." right after an update**
+The code was pulled but the schema was not — run `migrations.sql`. The log-in
+warning names the sections that are missing.
+
+**XAMPP's MySQL will not start (port 3306 in use)**
+MySQL Server 8.0 is installed as a Windows service and took the port. Open
+`services.msc`, stop **MySQL80** and set its Startup type to **Manual**.
+
+**"Unexpected Error" message**
+The app caught an error and kept running. The details are in
+`%LOCALAPPDATA%\PaintStore_POS\Logs\errors-<year>-<month>.log` — send that file
+to the developer.
 
 **"#1932 — Table doesn't exist in engine"**
 A table's metadata was written by the wrong MySQL client. The data file is

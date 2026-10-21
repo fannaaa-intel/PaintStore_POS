@@ -994,6 +994,7 @@ Public Class InventoryItemListPanelBuilder
         Dim header As New Panel With {.Dock = DockStyle.Top, .Height = 86, .BackColor = MintDark}
         AddHandler header.Paint,
             Sub(s, e)
+                If header.Width <= 0 Then Return
                 Using lg As New LinearGradientBrush(header.ClientRectangle, MintDark, MintDeep, 25.0F)
                     e.Graphics.FillRectangle(lg, header.ClientRectangle)
                 End Using
@@ -1155,6 +1156,7 @@ Public Class InventoryItemListPanelBuilder
             Sub()
                 Using ofd As New OpenFileDialog With {
                     .Title = "Choose product image",
+                    .RestoreDirectory = True,
                     .Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files|*.*"
                 }
                     If ofd.ShowDialog() = DialogResult.OK Then

@@ -65,6 +65,9 @@ Public Class LogIn
             End Sub
 
         BuildLoginCard()
+
+        ' After a git pull the code can be newer than this laptop's database.
+        AddHandler Me.Shown, Sub() SchemaCheck.WarnIfOutdated()
     End Sub
 
     ' ===== CARD SHELL (split panel) =====

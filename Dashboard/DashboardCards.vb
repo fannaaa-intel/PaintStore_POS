@@ -120,8 +120,9 @@ Public Class DashboardCards
         .BackColor = Color.Transparent
     }
 
-        If IO.File.Exists("C:\Users\DELL\source\repos\PaintStore_POS\arrow.png") Then
-            arrow.Image = Image.FromFile("C:\Users\DELL\source\repos\PaintStore_POS\arrow.png")
+        Dim arrowFile As String = IO.Path.Combine(Application.StartupPath, "arrow.png")
+        If IO.File.Exists(arrowFile) Then
+            arrow.Image = Image.FromFile(arrowFile)
             arrow.SizeMode = PictureBoxSizeMode.StretchImage
         End If
 

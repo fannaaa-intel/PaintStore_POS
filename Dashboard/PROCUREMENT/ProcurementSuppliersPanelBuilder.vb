@@ -908,6 +908,7 @@ Public Class ProcurementSuppliersPanelBuilder
             Sub()
                 Using ofd As New OpenFileDialog With {
                     .Title = "Choose supplier logo",
+                    .RestoreDirectory = True,
                     .Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files|*.*"
                 }
                     If ofd.ShowDialog() = DialogResult.OK Then

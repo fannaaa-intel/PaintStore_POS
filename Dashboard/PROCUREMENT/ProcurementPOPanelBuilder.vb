@@ -2649,6 +2649,7 @@ Public Class ProcurementPOPanelBuilder
             Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Dim r As New Rectangle(0, 0, totalBar.Width - 1, totalBar.Height - 1)
+                If r.Width <= 0 OrElse r.Height <= 0 Then Return
                 Using path As GraphicsPath = RoundRect(r, 14)
                     Using br As New LinearGradientBrush(r, MintDark, TotalDeep, 90.0F)
                         e.Graphics.FillPath(br, path)

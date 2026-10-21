@@ -359,6 +359,7 @@ Public Class TransactionPanelBuilder
             Sub(s As Object, e As PaintEventArgs)
                 Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = bar.ClientRectangle : rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using path = Rounded(rect, 10)
                     Using br As New LinearGradientBrush(rect, MintDark, HeaderBg, 0.0F)
                         g.FillPath(br, path)
@@ -979,6 +980,7 @@ Public Class TransactionPanelBuilder
             Sub(s, e)
                 Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect As New Rectangle(1, 1, totalCard.Width - 2, totalCard.Height - 2)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using br As New LinearGradientBrush(rect, MintDark, Color.FromArgb(0, 60, 50), 90.0F) : g.FillRoundedRectangle(br, rect, 13) : End Using
             End Sub
         Dim lblTotL As New Label With {.Text = "TOTAL", .Dock = DockStyle.Left, .Width = 90,
@@ -1582,6 +1584,7 @@ Public Class TransactionPanelBuilder
             Sub(s, e)
                 Dim b = CType(s, Button) : Dim g = e.Graphics : g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 If b.Enabled Then
                     Using br As New LinearGradientBrush(rect, MintPrimary, MintDark, 90.0F) : g.FillRoundedRectangle(br, rect, 8) : End Using
                 Else

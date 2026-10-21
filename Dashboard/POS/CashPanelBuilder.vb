@@ -338,6 +338,7 @@ Public Class CashPanelBuilder
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = bar.ClientRectangle : rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using path As New GraphicsPath()
                     Dim r = 10
                     path.AddArc(rect.X, rect.Y, r, r, 180, 90)
@@ -890,6 +891,7 @@ Public Class CashPanelBuilder
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = varCard.ClientRectangle : rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using br As New LinearGradientBrush(rect, MintDark, Color.FromArgb(0, 60, 50), 90.0F)
                     g.FillRoundedRectangle(br, rect, 10)
                 End Using
@@ -1441,6 +1443,7 @@ Public Class CashPanelBuilder
                 Dim b = CType(s, Button) : Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using path As New GraphicsPath()
                     Dim r = 8
                     path.AddArc(rect.X, rect.Y, r, r, 180, 90)

@@ -40,6 +40,7 @@ Public Module ReportExport
         Dim path As String
         Using dlg As New SaveFileDialog With {
                 .Title = If(isExcel, "Save report as Excel", "Save report as PDF"),
+                .RestoreDirectory = True,
                 .Filter = If(isExcel, "Excel workbook (*.xlsx)|*.xlsx", "PDF document (*.pdf)|*.pdf"),
                 .FileName = SafeFileName(doc.Title & " " & doc.PeriodValue) & ext,
                 .InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),

@@ -151,6 +151,7 @@ Public Class SalesPanelBuilder
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Dim rect = topBar.ClientRectangle
                 rect.Inflate(-1, -1)
+                If rect.Width <= 0 OrElse rect.Height <= 0 Then Return
                 Using path As New GraphicsPath()
                     Dim r = 10
                     path.AddArc(rect.X, rect.Y, r, r, 180, 90)
@@ -743,6 +744,7 @@ Public Class SalesPanelBuilder
 
         Using sfd As New SaveFileDialog()
             sfd.Title = "Export Transactions"
+            sfd.RestoreDirectory = True
             sfd.Filter = "CSV file (*.csv)|*.csv"
             sfd.FileName = "transactions_" & DateTime.Now.ToString("yyyyMMdd_HHmm") & ".csv"
             If sfd.ShowDialog() <> DialogResult.OK Then Return
