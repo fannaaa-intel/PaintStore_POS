@@ -76,7 +76,19 @@ git push origin main
 git pull
 ```
 
-Then rebuild in Visual Studio (**F5**).
+Then open `PaintStore_POS.sln` in Visual Studio → **Build → Rebuild Solution**
+(or **F5**). Git does not carry `PaintStore_POS.exe`; every laptop builds its
+own, so a pull never conflicts with the exe that laptop built last time.
+
+> **Laptops last updated before Oct 21 2026** still have the old tracked exe.
+> The first pull after that date needs one extra line first:
+>
+> ```
+> git checkout -- PaintStore_POS.exe PaintStore_POS.pdb PaintStore_POS.xml
+> git pull
+> ```
+>
+> The pull then removes the old exe — rebuild in Visual Studio to make the new one.
 
 ## If your change touched the database
 
@@ -102,6 +114,7 @@ When in doubt, have them run `migrations.sql`. It is harmless.
 | | Travels with git? |
 |---|---|
 | Your code — new screens, fixes, buttons | ✅ yes |
+| `PaintStore_POS.exe` — the built program | ❌ no, rebuild in Visual Studio after each pull |
 | Their data — sales, products, stock counts | ❌ no, stays on their machine |
 | Database shape — new columns and tables | ❌ no, that is what `migrations.sql` is for |
 | `mail.config` — the Gmail App Password | ❌ no, copy it by hand (see A.4) |

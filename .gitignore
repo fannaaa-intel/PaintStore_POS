@@ -5,3 +5,8 @@ objcheckbuild*/
 Tests/bin/
 mail.config
 Backups/
+
+# Build output - each laptop builds its own (Visual Studio writes it to the repo root)
+PaintStore_POS.exe
+PaintStore_POS.pdb
+PaintStore_POS.xml
