@@ -546,15 +546,7 @@ Public Class AccountantReportsPanelBuilder
 
         card.Height = y + 20
 
-        AddHandler card.ParentChanged,
-        Sub()
-            If card.Parent IsNot Nothing Then
-                card.Width = card.Parent.ClientSize.Width
-                AddHandler card.Parent.Resize,
-                    Sub() card.Width = card.Parent.ClientSize.Width
-            End If
-        End Sub
-
+        FitWidthToParent(card)
         Return card
     End Function
 
@@ -670,14 +662,7 @@ Public Class AccountantReportsPanelBuilder
 
         card.Height = y + 8
 
-        AddHandler card.ParentChanged,
-            Sub()
-                If card.Parent IsNot Nothing Then
-                    card.Width = card.Parent.ClientSize.Width
-                    AddHandler card.Parent.Resize,
-                        Sub() card.Width = card.Parent.ClientSize.Width
-                End If
-            End Sub
+        FitWidthToParent(card)
         Return card
     End Function
 
@@ -876,16 +861,30 @@ Public Class AccountantReportsPanelBuilder
 
         card.Height = y + 24
 
-        AddHandler card.ParentChanged,
-            Sub()
-                If card.Parent IsNot Nothing Then
-                    card.Width = card.Parent.ClientSize.Width
-                    AddHandler card.Parent.Resize,
-                        Sub() card.Width = card.Parent.ClientSize.Width
-                End If
-            End Sub
+        FitWidthToParent(card)
         Return card
     End Function
+
+    ' Keeps a report card as wide as the content host. Switching tabs removes
+    ' the old card, so its Resize hook must be detached too: left attached it
+    ' fired on the next window resize with card.Parent = Nothing and threw
+    ' "Object reference not set", which also stopped the new card from sizing
+    ' (Balance Sheet values went missing).
+    Private Shared Sub FitWidthToParent(card As Panel)
+        Dim host As Control = Nothing
+        Dim onHostResize As EventHandler =
+            Sub(s, e) card.Width = DirectCast(s, Control).ClientSize.Width
+
+        AddHandler card.ParentChanged,
+            Sub()
+                If host IsNot Nothing Then RemoveHandler host.Resize, onHostResize
+                host = card.Parent
+                If host IsNot Nothing Then
+                    card.Width = host.ClientSize.Width
+                    AddHandler host.Resize, onHostResize
+                End If
+            End Sub
+    End Sub
 
     Private Shared Function MakeSheetSectionRow(title As String, h As Integer) As Panel
         Dim hdr As New Panel With {.Height = h, .BackColor = SectionBg}
