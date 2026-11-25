@@ -1036,7 +1036,7 @@ Public Class InventoryItemListPanelBuilder
         ' header comes from the starting y instead.
         Dim body As New Panel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .AutoScroll = True, .Padding = New Padding(0)}
 
-        Dim y As Integer = 34
+        Dim y As Integer = 20
         Dim L As Integer = 28
         Dim fullW As Integer = 484
         Dim halfW As Integer = 234
@@ -1332,9 +1332,13 @@ Public Class InventoryItemListPanelBuilder
         End If
 
         f.Controls.Add(footer)
-        ' body is added last so the Fill region is measured after the Bottom dock
-        ' has claimed its 72px; otherwise the footer overlaps the Restock Level row.
         f.Controls.Add(body)
+        ' WinForms docks from the back of the z-order to the front, so the Fill
+        ' panel must be FRONTMOST to be laid out after the header and footer.
+        ' Added at the back, body filled the whole dialog and the header was
+        ' painted over its first row -- the Product Name box was hidden, and
+        ' Save then complained "Product name is required" with no field to type in.
+        body.BringToFront()
 
         Dim layoutFooter As Action =
             Sub()
