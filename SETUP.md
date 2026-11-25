@@ -24,16 +24,30 @@ Install XAMPP, open the **XAMPP Control Panel**, press **Start** next to MySQL.
 
 ## 2. Get the code
 
+Open a terminal in a short folder such as `C:\Users\<name>\source\repos` and run:
+
 ```
-git clone https://github.com/fannaaa-intel/PaintStore_POS.git
+git clone -c core.longpaths=true https://github.com/fannaaa-intel/PaintStore_POS.git
 ```
+
+> Some files inside `packages\` have long names. Without `core.longpaths=true`,
+> cloning into a deeply nested folder fails with **"Filename too long"**. Keep
+> the folder you clone into short (under about 120 characters) either way.
 
 ## 3. Import the database
 
-Open <http://localhost/phpmyadmin> → **Import** tab → **Choose File** →
-`paint_store_pos_full.sql` → **Go**.
+Two imports, in this order:
 
-The file creates the database itself, so there is nothing to create first.
+1. Open <http://localhost/phpmyadmin> → **Import** tab → **Choose File** →
+   `paint_store_pos_full.sql` → **Go**. The file creates the database itself,
+   so there is nothing to create first.
+2. Click the new **paint_store_pos** database on the left → **SQL** tab →
+   paste the whole contents of **`migrations.sql`** → **Go**.
+
+Step 2 is not optional. `paint_store_pos_full.sql` is an older export and is
+missing the newer columns and tables (cheques, recycle bin, Senior/PWD and
+more). `migrations.sql` adds them. Without it the log-in screen shows
+**"Database Update Needed"**.
 
 ## 4. Email sender (mail.config)
 
@@ -90,6 +104,11 @@ own, so a pull never conflicts with the exe that laptop built last time.
 >
 > The pull then removes the old exe — rebuild in Visual Studio to make the new one.
 
+> **Laptops last updated before Oct 30 2026:** the first pull after that date
+> removes `PaintStore_POS.exe.config` (git no longer carries it). The program
+> will not start until you **Rebuild** in Visual Studio, which makes a fresh one
+> from `App.config`.
+
 ## If your change touched the database
 
 `git pull` brings **code**. It does not change the shape of their database. So
@@ -114,7 +133,7 @@ When in doubt, have them run `migrations.sql`. It is harmless.
 | | Travels with git? |
 |---|---|
 | Your code — new screens, fixes, buttons | ✅ yes |
-| `PaintStore_POS.exe` — the built program | ❌ no, rebuild in Visual Studio after each pull |
+| `PaintStore_POS.exe` and `.exe.config` — the built program | ❌ no, rebuild in Visual Studio after each pull |
 | Their data — sales, products, stock counts | ❌ no, stays on their machine |
 | Database shape — new columns and tables | ❌ no, that is what `migrations.sql` is for |
 | `mail.config` — the Gmail App Password | ❌ no, copy it by hand (see A.4) |
@@ -139,6 +158,19 @@ replaces it with the exported data — real sales included.
 ---
 
 # Troubleshooting
+
+**`git pull` says "Your local changes to the following files would be overwritten"**
+Someone edited a file on that laptop, usually `App.config` (e.g. a MySQL
+password). Keep the edit and still get the update:
+
+```
+git stash
+git pull
+git stash pop
+```
+
+If `git stash pop` reports a conflict in `App.config`, open it, keep both the
+new lines from the update and the laptop's own password/server, then save.
 
 **"Could not reach the database"**
 MySQL is not started in the XAMPP Control Panel.
