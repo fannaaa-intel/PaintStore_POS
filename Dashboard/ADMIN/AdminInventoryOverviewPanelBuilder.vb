@@ -630,6 +630,7 @@ Public Class AdminInventoryOverviewPanelBuilder
             .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+        TextFit.FitWidth(valueLabel, card)
 
         card.Controls.Add(New Label With {
             .Text = subLabel,

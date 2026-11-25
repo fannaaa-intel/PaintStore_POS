@@ -178,7 +178,7 @@ Public Class ProcurementReceivePanelBuilder
         }
         Dim lblSub As New Label With {
             .Text = count & If(count = 1, " order awaiting receipt", " orders awaiting receipt"),
-            .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 58)
+            .Font = New Font("Segoe UI", 11), .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 64)
         }
 
         region.Controls.AddRange({lblTitle, lblSub})

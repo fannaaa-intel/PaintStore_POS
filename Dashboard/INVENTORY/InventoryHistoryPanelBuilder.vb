@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 
@@ -396,6 +396,7 @@ Public Class InventoryHistoryPanelBuilder
             .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+        TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,

@@ -104,26 +104,9 @@ Public Class AccountantDashPanelBuilder
                     _expenses = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' Cost of goods sold: the per-unit cost captured on each sale line at
-                ' the moment it was sold, so re-pricing stock later cannot rewrite a
-                ' period that has already been reported.
-                Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(si.qty * si.unit_cost),0) " &
-                    "FROM sale_items si JOIN sales s ON s.sale_id = si.sale_id " &
-                    "WHERE s.status IN ('Completed','Partially Refunded','Refunded')" &
-                    If(saleClause <> "", " AND " & saleClause, ""), conn)
-                    _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
-                End Using
-                ' Returned units went back on the shelf, so their cost comes off
-                ' in the period they were returned - mirroring the revenue above.
-                Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(ri.qty_returned * si.unit_cost),0) " &
-                    "FROM return_items ri " &
-                    "JOIN returns r ON r.return_id = ri.return_id " &
-                    "JOIN sale_items si ON si.sale_item_id = ri.sale_item_id" &
-                    If(refundClause <> "", " WHERE " & refundClause, ""), conn)
-                    _cogs -= Convert.ToDecimal(cmd.ExecuteScalar())
-                End Using
+                ' Cost of goods sold, less the cost of units returned -- the one
+                ' rule shared with the Income Statement and Trial Balance.
+                _cogs = AccountantPeriod.CostOfGoodsSold(conn, AccountantPeriod.FromDate, AccountantPeriod.ToDate)
 
                 ' Inventory Value
                 ' Valued at COST, not sell price: stock on the shelf is money spent,
@@ -387,6 +370,7 @@ Public Class AccountantDashPanelBuilder
             .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
 
         ' Stack from the measured heights (display scaling makes text taller
         ' than the old fixed slots) and shrink the figure until it fits the

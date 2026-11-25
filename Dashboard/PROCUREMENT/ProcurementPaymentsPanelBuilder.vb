@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Globalization
 Imports System.Windows.Forms
@@ -334,10 +334,10 @@ Public Class ProcurementPaymentsPanelBuilder
         })
 
         Dim btnPrint As Button = MakeActionButton("Print", 90, MintDark, MintDeep)
-        Dim btnPdf As Button = MakeActionButton("Save as PDF", 130, MintDark, MintDeep)
+        Dim btnPdf As Button = MakeActionButton("PDF", 90, MintDark, MintDeep)
         Dim btnNew As Button = MakeActionButton("+  Record Payment", 170, MintPrimary, MintDeep)
-        AddHandler btnPrint.Click, Sub() PrintReport()
-        AddHandler btnPdf.Click, Sub() SaveReport(btnPdf)
+        AddHandler btnPrint.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.Print)
+        AddHandler btnPdf.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.SavePdf)
         AddHandler btnNew.Click,
             Sub()
                 If SupplierPaymentModal.ShowNew() Then ReQuery()
@@ -529,6 +529,7 @@ Public Class ProcurementPaymentsPanelBuilder
             .AutoSize = True, .Location = New Point(20, 38), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+        TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,
@@ -850,20 +851,12 @@ Public Class ProcurementPaymentsPanelBuilder
         Return doc
     End Function
 
-    Private Shared Sub PrintReport()
+    ' The preview logs REPORT_EXPORT once the report is printed or saved.
+    Private Shared Sub PreviewReport(action As ReportPrinter.PreviewAction)
         Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
         If doc Is Nothing Then Return
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           Left(doc.Title & " (Print) - " & doc.PeriodValue, 250))
         ReportPrinter.Preview(doc, companyName:=ReportPrinter.CompanyName(),
-                              preparedBy:=Session.CurrentFullName)
-    End Sub
-
-    Private Shared Sub SaveReport(owner As Control)
-        Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
-        If doc Is Nothing Then Return
-        ReportExport.SaveWithDialog(doc, ReportExport.ExportFormat.Pdf, ReportPrinter.CompanyName(),
-                                    Session.CurrentFullName, owner.FindForm())
+                              preparedBy:=Session.CurrentFullName, action:=action)
     End Sub
 
     ' =========================================================================

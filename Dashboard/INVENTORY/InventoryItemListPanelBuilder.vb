@@ -321,7 +321,7 @@ Public Class InventoryItemListPanelBuilder
         }
         lblSubtitle = New Label With {
             .Text = SubtitleText(), .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 58)
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 64)
         }
         region.Controls.AddRange({lblTitle, lblSubtitle})
 
@@ -398,8 +398,8 @@ Public Class InventoryItemListPanelBuilder
 
         Dim kpiDef() As (title As String, status As String, clr As Color, sub1 As String, badge As String) = {
             ("Total Products", "", MintDark, "Active items", "Items"),
-            ("In Stock", "in", MintGreen, "Above restock level", "Good"),
-            ("Low Stock", "low", AccentYellow, "Needs restock", "Low"),
+            ("In Stock", "in", MintGreen, "Comfortably above restock", "Good"),
+            ("Low Stock", "low", AccentYellow, "At or near restock level", "Low"),
             ("Out of Stock", "out", AccentRed, "Zero on hand", "Out")
         }
 
@@ -552,8 +552,8 @@ Public Class InventoryItemListPanelBuilder
 
     Private Shared Sub RefreshKpiVisuals()
         Dim total = items.Count
-        Dim inStock = items.Where(Function(p) p.StockQty > p.ReorderLevel).Count()
-        Dim low = items.Where(Function(p) p.StockQty <= p.ReorderLevel AndAlso p.StockQty > 0).Count()
+        Dim inStock = items.Where(Function(p) Not LowStockAlert.NeedsRestock(p.StockQty, p.ReorderLevel)).Count()
+        Dim low = items.Where(Function(p) LowStockAlert.NeedsRestock(p.StockQty, p.ReorderLevel) AndAlso p.StockQty > 0).Count()
         Dim outOfStock = items.Where(Function(p) p.StockQty <= 0).Count()
         Dim vals() As Integer = {total, inStock, low, outOfStock}
         For i = 0 To kpiCards.Count - 1
@@ -657,8 +657,8 @@ Public Class InventoryItemListPanelBuilder
         Dim q = items.AsEnumerable()
         If activeCategory <> "" Then q = q.Where(Function(p) p.CategoryName = activeCategory)
         Select Case activeStatus
-            Case "in" : q = q.Where(Function(p) p.StockQty > p.ReorderLevel)
-            Case "low" : q = q.Where(Function(p) p.StockQty <= p.ReorderLevel AndAlso p.StockQty > 0)
+            Case "in" : q = q.Where(Function(p) Not LowStockAlert.NeedsRestock(p.StockQty, p.ReorderLevel))
+            Case "low" : q = q.Where(Function(p) LowStockAlert.NeedsRestock(p.StockQty, p.ReorderLevel) AndAlso p.StockQty > 0)
             Case "out" : q = q.Where(Function(p) p.StockQty <= 0)
         End Select
         If searchTerm <> "" Then
@@ -950,7 +950,7 @@ Public Class InventoryItemListPanelBuilder
 
     Private Shared Function StatusOf(it As ProdItem) As (text As String, fore As Color, back As Color)
         If it.StockQty <= 0 Then Return ("Out", AccentRed, Color.FromArgb(251, 234, 234))
-        If it.StockQty <= it.ReorderLevel Then Return ("Low", Color.FromArgb(170, 130, 0), Color.FromArgb(251, 244, 222))
+        If LowStockAlert.NeedsRestock(it.StockQty, it.ReorderLevel) Then Return ("Low", Color.FromArgb(170, 130, 0), Color.FromArgb(251, 244, 222))
         Return ("In Stock", Color.FromArgb(0, 130, 90), Color.FromArgb(227, 247, 238))
     End Function
 
@@ -1248,10 +1248,14 @@ Public Class InventoryItemListPanelBuilder
             })
         End If
 
-        If editing AndAlso Not viewOnly Then
+        ' Stock is never typed here. A new item starts at 0 and its first count
+        ' goes through Stock Adjustment > New Stock (owner's revision, Nov 2026),
+        ' so every unit on the shelf has a logged movement behind it.
+        If Not viewOnly Then
             numStock.Enabled = False
             Dim lblStockLock As New Label With {
-                .Text = "Locked " & ChrW(8226) & " change in Stock Adjustment",
+                .Text = If(editing, "Locked " & ChrW(8226) & " change in Stock Adjustment",
+                                    "Starts at 0 " & ChrW(8226) & " add the first stock in Stock Adjustment"),
                 .Font = New Font("Segoe UI", 7.5F), .ForeColor = FaintText,
                 .AutoSize = True, .Location = New Point(L, y + 50), .BackColor = Color.Transparent
             }
@@ -1296,10 +1300,12 @@ Public Class InventoryItemListPanelBuilder
                     Dim hexToSave As String = If(isPaint, txtHex.Text.Trim(), "")
                     Dim imgToSave As String = If(isPaint, "", pickedImagePath)
                     Dim typeToSave As String = If(isPaint, txtType.Text.Trim(), "")
+                    Dim newId As Integer = 0
                     If SaveItem(productId, txtName, txtSku, cboCat, typeToSave, txtSize,
-                                hexToSave, imgToSave, txtPrice, txtCost, numStock, numReorder) Then
+                                hexToSave, imgToSave, txtPrice, txtCost, numReorder, newId) Then
                         f.Close()
                         ReloadAndRefresh()
+                        If newId > 0 Then OfferFirstStock(newId, txtName.Text.Trim())
                     End If
                 End Sub
             footer.Controls.Add(btnSave)
@@ -1398,10 +1404,23 @@ Public Class InventoryItemListPanelBuilder
     ' =========================================================================
     '  SAVE
     ' =========================================================================
+    ' A new item is on file with 0 in stock; offer to enter its first count now.
+    Private Shared Sub OfferFirstStock(newId As Integer, name As String)
+        If AppModal.Show("""" & name & """ was added with 0 in stock." & Environment.NewLine & Environment.NewLine &
+                         "Enter its first stock now in Stock Adjustment?",
+                         "Item Added", MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then
+            Return
+        End If
+        Dim frm As INVENTORY_STAFF = Application.OpenForms.OfType(Of INVENTORY_STAFF)().FirstOrDefault()
+        If frm IsNot Nothing Then frm.OpenStockAdjustmentFor(newId)
+    End Sub
+
+    ' newId receives the product_id of an item just added (0 when editing).
     Private Shared Function SaveItem(productId As Integer, txtName As TextBox, txtSku As TextBox,
                                      cboCat As ComboBox, paintType As String, txtSize As TextBox,
                                      hex As String, imagePath As String, txtPrice As TextBox, txtCost As TextBox,
-                                     numStock As NumericUpDown, numReorder As NumericUpDown) As Boolean
+                                     numReorder As NumericUpDown, ByRef newIdOut As Integer) As Boolean
+        newIdOut = 0
         If Not Permissions.Require(Permissions.EditProduct, "add or edit products") Then Return False
         Dim name = txtName.Text.Trim()
         Dim sku = txtSku.Text.Trim()
@@ -1445,12 +1464,9 @@ Public Class InventoryItemListPanelBuilder
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
-                ' A new product's opening stock has to be recorded as a movement
-                ' as well, or that inventory appears from nowhere and stock on
-                ' hand can never be reconciled against the movement history. The
-                ' schema already defines an 'Initial' movement type for this; it
-                ' was simply never written. Both statements go in one transaction
-                ' so the product and its opening balance are never half-saved.
+                ' A new product is saved with 0 in stock. Its opening stock is
+                ' entered afterwards in Stock Adjustment > New Stock, which writes
+                ' the 'Initial' movement -- so stock never appears from nowhere.
                 Using txn As MySqlTransaction = conn.BeginTransaction()
                     Try
                         Dim sql As String
@@ -1465,7 +1481,7 @@ Public Class InventoryItemListPanelBuilder
                         End If
 
                         Dim newId As Integer = 0
-                        Dim openingQty As Integer = If(productId > 0, 0, CInt(numStock.Value))
+                        Const openingQty As Integer = 0
 
                         Using cmd As New MySqlCommand(sql, conn, txn)
                             cmd.Parameters.AddWithValue("@cat", catId)
@@ -1484,20 +1500,8 @@ Public Class InventoryItemListPanelBuilder
                             If productId <= 0 Then newId = CInt(cmd.LastInsertedId)
                         End Using
 
-                        If productId <= 0 AndAlso openingQty <> 0 Then
-                            Using cmd As New MySqlCommand(
-                                "INSERT INTO stock_movements " &
-                                "(product_id, user_id, movement_type, qty_change, reference_type, note, created_at) " &
-                                "VALUES (@pid, @uid, 'Initial', @qc, 'newitem', 'Opening stock on item creation', NOW())",
-                                conn, txn)
-                                cmd.Parameters.AddWithValue("@pid", newId)
-                                cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)
-                                cmd.Parameters.AddWithValue("@qc", openingQty)
-                                cmd.ExecuteNonQuery()
-                            End Using
-                        End If
-
                         txn.Commit()
+                        newIdOut = newId
 
                         ' Product changes are exactly what an audit needs to see;
                         ' this screen previously logged nothing but LOGOUT.
@@ -1505,7 +1509,7 @@ Public Class InventoryItemListPanelBuilder
                             ActivityLog.Record("PRODUCT_EDIT", "product", productId, name)
                         Else
                             ActivityLog.Record("PRODUCT_ADD", "product", newId,
-                                               name & " (" & sku & "), opening stock " & openingQty)
+                                               name & " (" & sku & "), 0 in stock until its first count")
                         End If
                     Catch
                         txn.Rollback()

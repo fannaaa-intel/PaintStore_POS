@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Globalization
 Imports System.Windows.Forms
@@ -505,6 +505,7 @@ Public Class ProcurementRequestsPanelBuilder
             .AutoSize = True, .Location = New Point(20, 38), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+        TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,

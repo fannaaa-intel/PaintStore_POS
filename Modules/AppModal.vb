@@ -92,7 +92,7 @@ Public Module AppModal
             .Size = size,
             .Location = loc,
             .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI Semibold", 9.5F),
+            .Font = Theme.Semibold(9.5F),
             .Cursor = Cursors.Hand,
             .DialogResult = sp.result,
             .BackColor = If(isPrimary, MintPrimary, LightBtn),
@@ -154,7 +154,7 @@ Public Module AppModal
         ' -- Title
         Dim lblTitle As New Label With {
             .Text = caption,
-            .Font = New Font("Segoe UI Semibold", 12.0F),
+            .Font = Theme.Semibold(12.0F),
             .ForeColor = TitleClr,
             .AutoSize = False,
             .Location = New Point(PAD, PAD),
@@ -163,7 +163,7 @@ Public Module AppModal
         }
 
         ' -- Body
-        Dim bodyFont As New Font("Segoe UI", 9.5F)
+        Dim bodyFont As Font = Theme.Regular(9.5F)
         Dim textW As Integer = CARD_W - PAD * 2
         Dim measured As Size = TextRenderer.MeasureText(
             text, bodyFont, New Size(textW, 0),
@@ -305,7 +305,7 @@ Public Module AppModal
 
         Dim lblTitle As New Label With {
             .Text = caption,
-            .Font = New Font("Segoe UI Semibold", 12.0F),
+            .Font = Theme.Semibold(12.0F),
             .ForeColor = TitleClr,
             .AutoSize = False,
             .Location = New Point(PAD, PAD),
@@ -313,7 +313,7 @@ Public Module AppModal
             .BackColor = Color.Transparent
         }
 
-        Dim bodyFont As New Font("Segoe UI", 9.5F)
+        Dim bodyFont As Font = Theme.Regular(9.5F)
         Dim textW As Integer = CARD_W - PAD * 2
         Dim measured As Size = TextRenderer.MeasureText(
             message, bodyFont, New Size(textW, 0),
@@ -338,7 +338,7 @@ Public Module AppModal
             .BackColor = FieldBg
         }
         Dim txt As New TextBox With {
-            .Font = New Font("Segoe UI", 11.0F),
+            .Font = Theme.Regular(11.0F),
             .Text = defaultValue,
             .BorderStyle = BorderStyle.None,
             .BackColor = FieldBg,

@@ -93,17 +93,18 @@ Public Class AccountantLedgerPanelBuilder
     Private Shared Sub LoadData()
         _allTxns.Clear()
 
-        Dim avgCost As New Dictionary(Of Integer, Decimal)
-        Dim saleItemsBySale As New Dictionary(Of Integer, List(Of (ProductId As Integer, Qty As Integer)))
+        ' Cost of each sale and each return, by the one COGS rule in
+        ' AccountantPeriod (captured line cost, else average purchase cost).
+        Dim saleCost As New Dictionary(Of Integer, Decimal)
+        Dim returnCost As New Dictionary(Of Integer, Decimal)
 
         Try
             Using conn = Db.GetConnection()
                 conn.Open()
 
-                LoadAvgCosts(conn, avgCost)
-                LoadSaleItemMap(conn, saleItemsBySale)
-                LoadSalesTxns(conn, avgCost, saleItemsBySale)
-                LoadReturnTxns(conn)
+                LoadLineCosts(conn, saleCost, returnCost)
+                LoadSalesTxns(conn, saleCost)
+                LoadReturnTxns(conn, returnCost)
                 LoadPurchaseOrderTxns(conn)
                 LoadCashMovementTxns(conn)
             End Using
@@ -115,53 +116,41 @@ Public Class AccountantLedgerPanelBuilder
         ApplyFilters()
     End Sub
 
-    Private Shared Sub LoadAvgCosts(conn As MySqlConnection, avgCost As Dictionary(Of Integer, Decimal))
+    Private Shared Sub LoadLineCosts(conn As MySqlConnection,
+                                     saleCost As Dictionary(Of Integer, Decimal),
+                                     returnCost As Dictionary(Of Integer, Decimal))
         Try
             Using cmd As New MySqlCommand(
-                "SELECT product_id, SUM(unit_cost * qty) AS total_cost, SUM(qty) AS total_qty " &
-                "FROM po_items GROUP BY product_id", conn)
+                "SELECT si.sale_id, SUM(si.qty * " & AccountantPeriod.SaleLineCostSql & ") AS cost " &
+                "FROM sale_items si " & AccountantPeriod.AvgCostJoinSql & "GROUP BY si.sale_id", conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
-                        Dim pid As Integer = Convert.ToInt32(rdr("product_id"))
-                        Dim totalQty As Decimal = Convert.ToDecimal(rdr("total_qty"))
-                        If totalQty > 0 Then
-                            avgCost(pid) = Convert.ToDecimal(rdr("total_cost")) / totalQty
-                        End If
+                        saleCost(Convert.ToInt32(rdr("sale_id"))) =
+                            If(IsDBNull(rdr("cost")), 0D, Convert.ToDecimal(rdr("cost")))
+                    End While
+                End Using
+            End Using
+            Using cmd As New MySqlCommand(
+                "SELECT ri.return_id, SUM(ri.qty_returned * " & AccountantPeriod.SaleLineCostSql & ") AS cost " &
+                "FROM return_items ri JOIN sale_items si ON si.sale_item_id = ri.sale_item_id " &
+                AccountantPeriod.AvgCostJoinSql & "GROUP BY ri.return_id", conn)
+                Using rdr = cmd.ExecuteReader()
+                    While rdr.Read()
+                        returnCost(Convert.ToInt32(rdr("return_id"))) =
+                            If(IsDBNull(rdr("cost")), 0D, Convert.ToDecimal(rdr("cost")))
                     End While
                 End Using
             End Using
         Catch ex As Exception
-            ErrorLog.Write("Ledger LoadAvgCosts error", ex)
+            ErrorLog.Write("Ledger LoadLineCosts error", ex)
         End Try
     End Sub
 
-    Private Shared Sub LoadSaleItemMap(conn As MySqlConnection,
-                                        map As Dictionary(Of Integer, List(Of (ProductId As Integer, Qty As Integer))))
-        Try
-            Using cmd As New MySqlCommand(
-                "SELECT sale_id, product_id, qty FROM sale_items WHERE product_id IS NOT NULL", conn)
-                Using rdr = cmd.ExecuteReader()
-                    While rdr.Read()
-                        Dim sid As Integer = Convert.ToInt32(rdr("sale_id"))
-                        Dim pid As Integer = Convert.ToInt32(rdr("product_id"))
-                        Dim qty As Integer = Convert.ToInt32(rdr("qty"))
-                        If Not map.ContainsKey(sid) Then map(sid) = New List(Of (ProductId As Integer, Qty As Integer))
-                        map(sid).Add((pid, qty))
-                    End While
-                End Using
-            End Using
-        Catch ex As Exception
-            ErrorLog.Write("Ledger LoadSaleItemMap error", ex)
-        End Try
-    End Sub
-
-    Private Shared Sub LoadSalesTxns(conn As MySqlConnection,
-                                      avgCost As Dictionary(Of Integer, Decimal),
-                                      saleItemsBySale As Dictionary(Of Integer, List(Of (ProductId As Integer, Qty As Integer))))
+    Private Shared Sub LoadSalesTxns(conn As MySqlConnection, saleCost As Dictionary(Of Integer, Decimal))
         Try
             Using cmd As New MySqlCommand(
                 "SELECT s.sale_id, s.sale_no, s.sale_datetime, s.total, s.vat_amount " &
-                "FROM sales s WHERE s.status IN ('Completed','Partially Refunded','Refunded') " &
+                "FROM sales s WHERE s.status IN " & AccountantPeriod.RevenueStatusesSql & " " &
                 BuildDateWhereCol("s.sale_datetime").Replace("WHERE ", "AND "), conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
@@ -184,21 +173,16 @@ Public Class AccountantLedgerPanelBuilder
                         }
 
                         Dim revenue As Decimal = total - vat
-
-                        Dim cogs As Decimal = 0
-                        If saleItemsBySale.ContainsKey(saleId) Then
-                            For Each item In saleItemsBySale(saleId)
-                                If avgCost.ContainsKey(item.ProductId) Then
-                                    cogs += avgCost(item.ProductId) * item.Qty
-                                End If
-                            Next
-                        End If
+                        Dim cogs As Decimal = 0D
+                        saleCost.TryGetValue(saleId, cogs)
 
                         txn.Lines.Add(New LedgerLine With {.Account = "Cash", .Debit = total})
                         txn.Lines.Add(New LedgerLine With {.Account = "Sales Revenue", .Credit = revenue})
                         txn.Lines.Add(New LedgerLine With {.Account = "Output VAT Payable", .Credit = vat})
-                        txn.Lines.Add(New LedgerLine With {.Account = "COGS", .Debit = cogs})
-                        txn.Lines.Add(New LedgerLine With {.Account = "Inventory", .Credit = cogs})
+                        If cogs <> 0D Then
+                            txn.Lines.Add(New LedgerLine With {.Account = "COGS", .Debit = cogs})
+                            txn.Lines.Add(New LedgerLine With {.Account = "Inventory", .Credit = cogs})
+                        End If
 
                         _allTxns.Add(txn)
                     End While
@@ -209,10 +193,10 @@ Public Class AccountantLedgerPanelBuilder
         End Try
     End Sub
 
-    Private Shared Sub LoadReturnTxns(conn As MySqlConnection)
+    Private Shared Sub LoadReturnTxns(conn As MySqlConnection, returnCost As Dictionary(Of Integer, Decimal))
         Try
             Using cmd As New MySqlCommand(
-                "SELECT rt.return_no, rt.return_datetime, rt.total_refund " &
+                "SELECT rt.return_id, rt.return_no, rt.return_datetime, rt.total_refund " &
                 "FROM returns rt " & BuildDateWhereCol("rt.return_datetime"), conn)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
@@ -227,6 +211,13 @@ Public Class AccountantLedgerPanelBuilder
                         }
                         txn.Lines.Add(New LedgerLine With {.Account = "Sales Returns", .Debit = refund})
                         txn.Lines.Add(New LedgerLine With {.Account = "Cash", .Credit = refund})
+                        ' The returned units go back on the shelf: their cost leaves COGS.
+                        Dim cost As Decimal = 0D
+                        returnCost.TryGetValue(Convert.ToInt32(rdr("return_id")), cost)
+                        If cost <> 0D Then
+                            txn.Lines.Add(New LedgerLine With {.Account = "Inventory", .Debit = cost})
+                            txn.Lines.Add(New LedgerLine With {.Account = "COGS", .Credit = cost})
+                        End If
                         _allTxns.Add(txn)
                     End While
                 End Using
@@ -371,19 +362,9 @@ Public Class AccountantLedgerPanelBuilder
                 End Using
 
                 ' ── COGS: Dr COGS / Cr Inventory (cost of items SOLD) ──
-                Dim periodCogs As Decimal = 0D
-                Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(si.qty * ac.avg_cost), 0) " &
-                    "FROM sale_items si " &
-                    "JOIN sales s ON s.sale_id = si.sale_id " &
-                    "JOIN (SELECT product_id, SUM(unit_cost * qty) / NULLIF(SUM(qty),0) AS avg_cost " &
-                    "      FROM po_items GROUP BY product_id) ac ON ac.product_id = si.product_id " &
-                    "WHERE si.product_id IS NOT NULL AND s.status IN ('Completed','Partially Refunded') " &
-                    "AND s.sale_datetime BETWEEN @from AND @to", conn)
-                    cmd.Parameters.AddWithValue("@from", fromVal)
-                    cmd.Parameters.AddWithValue("@to", toVal)
-                    periodCogs = Convert.ToDecimal(cmd.ExecuteScalar())
-                End Using
+                ' Net of returned units (they go back to Inventory), the one rule
+                ' shared with the Dashboard and the Income Statement.
+                Dim periodCogs As Decimal = AccountantPeriod.CostOfGoodsSold(conn, fromDate, toDate)
                 postDr("COGS", periodCogs)
                 postCr("Inventory", periodCogs)
 
@@ -597,11 +578,11 @@ Public Class AccountantLedgerPanelBuilder
                     If active Then
                         b.BackColor = MintPrimary
                         b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 9.5F, FontStyle.Bold)
+                        b.Font = Theme.SemiboldBold(9.5F)
                     Else
                         b.BackColor = Color.FromArgb(220, 235, 232)
                         b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 9.5F)
+                        b.Font = Theme.Regular(9.5F)
                     End If
                     b.Invalidate()
                 End Sub
@@ -772,6 +753,7 @@ Public Class AccountantLedgerPanelBuilder
                 .BackColor = Color.Transparent
             }
             card.Controls.AddRange({lblCap, lblVal, lblSub})
+            TextFit.FitWidth(lblVal, card)
 
             Dim onClick As EventHandler =
                 Sub(s, e)
@@ -828,6 +810,7 @@ Public Class AccountantLedgerPanelBuilder
             .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
         Return card
     End Function
 

@@ -118,7 +118,7 @@ Partial Class POS_STAFF
         Me.ClientSize = New System.Drawing.Size(1924, 853)
         Me.Controls.Add(Me.Nav)
         Me.Name = "POS_STAFF"
-        Me.Text = "POS_STAFF"
+        Me.Text = "Paint Store POS - Cashier"
         Me.WindowState = System.Windows.Forms.FormWindowState.Maximized
         Me.Nav.ResumeLayout(False)
         Me.ResumeLayout(False)

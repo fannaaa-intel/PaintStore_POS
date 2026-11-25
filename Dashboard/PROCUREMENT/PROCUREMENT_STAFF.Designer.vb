@@ -119,7 +119,7 @@ Partial Class PROCUREMENT_STAFF
         Me.ClientSize = New System.Drawing.Size(1924, 853)
         Me.Controls.Add(Me.Nav)
         Me.Name = "PROCUREMENT_STAFF"
-        Me.Text = "PROCUREMENT_STAFF"
+        Me.Text = "Paint Store POS - Procurement"
         Me.WindowState = System.Windows.Forms.FormWindowState.Maximized
         Me.Nav.ResumeLayout(False)
         Me.ResumeLayout(False)

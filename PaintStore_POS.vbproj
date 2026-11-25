@@ -221,6 +221,7 @@
     </Compile>
     <Compile Include="Dashboard\INVENTORY\InventoryStockAdjustmentPanelBuilder.vb" />
     <Compile Include="Dashboard\INVENTORY\InventoryMovements.vb" />
+    <Compile Include="Dashboard\INVENTORY\InventoryDashCharts.vb" />
     <Compile Include="Dashboard\INVENTORY\InventoryHistoryPanelBuilder.vb" />
     <Compile Include="Dashboard\INVENTORY\InventoryReportsPanelBuilder.vb" />
     <Compile Include="Dashboard\POS\HomePanelBuilder.vb" />

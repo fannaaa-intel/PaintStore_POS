@@ -32,7 +32,7 @@ Public Class ReportPrinter
         Public Cells As String() = {}
     End Class
 
-    ' How a table column's values are shown, and stored in Excel.
+    ' How a table column's values are aligned and shown.
     Public Enum ColumnKind
         Text            ' left-aligned, kept as text (names, SKUs, dates)
         Number          ' right-aligned whole number
@@ -161,13 +161,25 @@ Public Class ReportPrinter
     ' the physical printout. The dark title bar you see in the preview window
     ' ("Income Statement") is WinForms chrome on the PreviewForm itself — it
     ' is never part of the drawn page and is not sent to the printer.
+    ' What the preview window offers once the user has looked the report over.
+    ' Each report screen has one PDF and one Print button; both open this
+    ' preview first, and the preview carries only the matching action -- so
+    ' the same buttons are never shown twice (owner's revision, Nov 2026).
+    Public Enum PreviewAction
+        Print
+        SavePdf
+    End Enum
+
     Public Shared Sub Preview(doc As ReportDoc,
                                Optional companyName As String = "PAINT STORE",
-                               Optional preparedBy As String = "")
+                               Optional preparedBy As String = "",
+                               Optional action As PreviewAction = PreviewAction.Print)
         EnsureSignatures(doc)
         Dim job As New PrintJob(doc, companyName, preparedBy)
-        Dim frm As New PreviewForm(job.PrintDoc, doc, companyName, preparedBy)
-        frm.ShowDialog()
+        Using frm As New PreviewForm(job.PrintDoc, doc, companyName, preparedBy, action)
+            frm.ShowDialog()
+        End Using
+        job.PrintDoc.Dispose()
     End Sub
 
     ' Draws every page of the report onto bitmaps at the given resolution,
@@ -226,7 +238,7 @@ Public Class ReportPrinter
             _preparedBy = preparedBy
             PrintDoc.DocumentName = doc.Title
             ' Page settings come from the default printer; on a PC with none
-            ' installed they throw. Exporting to PDF/Excel must still work there.
+            ' installed they throw. Saving a PDF must still work there.
             Try
                 PrintDoc.DefaultPageSettings.PaperSize = New PaperSize("Letter", PAGE_W, PAGE_H)
                 PrintDoc.DefaultPageSettings.Margins = New Margins(MARGIN_X, MARGIN_X, MARGIN_Y, MARGIN_Y)
@@ -480,7 +492,22 @@ Public Class ReportPrinter
 
                 Case RowKind.TableRow
                     Using f As New Font(ReportFont, 9.5F)
-                        DrawCells(g, row.Cells, f, InkBody, left, y, w)
+                        Dim filled = If(row.Cells, {}).Select(Function(c, i) (c, i)).
+                                     Where(Function(t) Not String.IsNullOrEmpty(t.c)).ToList()
+                        If filled.Count = 1 AndAlso _doc.Columns IsNot Nothing AndAlso
+                           _doc.Columns.Count > 2 AndAlso
+                           _doc.Columns(filled(0).i).Kind = ColumnKind.Text Then
+                            ' A message line ("Nothing needs restocking right now.")
+                            ' runs on across the empty columns instead of being cut
+                            ' to "Nothing needs restoc..." inside one of them.
+                            Dim totalW As Single = Math.Max(0.01F, _doc.Columns.Sum(Function(c) c.Weight))
+                            Dim x0 As Single = left + w * _doc.Columns.Take(filled(0).i).Sum(Function(c) c.Weight) / totalW
+                            Using br As New SolidBrush(InkMuted), fi As New Font(ReportFont, 9.5F, FontStyle.Italic)
+                                g.DrawString(filled(0).c, fi, br, x0 + 2, y)
+                            End Using
+                        Else
+                            DrawCells(g, row.Cells, f, InkBody, left, y, w)
+                        End If
                     End Using
                     Using rule As New Pen(RuleLight, 0.5F)
                         g.DrawLine(rule, left, y + 19, right, y + 19)
@@ -499,7 +526,17 @@ Public Class ReportPrinter
         Private Sub DrawTableHeader(g As Graphics, left As Integer, y As Integer, w As Integer)
             If _doc.Columns Is Nothing Then Return
             Dim captions As String() = _doc.Columns.Select(Function(c) c.Header.ToUpper()).ToArray()
-            Using f As New Font(ReportFont, 8.5F, FontStyle.Bold)
+            ' A caption wider than its column steps down to 7.5pt before it is
+            ' ever cut to "OPENI..." -- a heading that cannot be read is no heading.
+            Dim totalW As Single = Math.Max(0.01F, _doc.Columns.Sum(Function(c) c.Weight))
+            Dim size As Single = 8.5F
+            Using probe As New Font(ReportFont, 8.5F, FontStyle.Bold)
+                For i As Integer = 0 To captions.Length - 1
+                    Dim colW As Single = w * _doc.Columns(i).Weight / totalW - 6
+                    If g.MeasureString(captions(i), probe).Width > colW Then size = 7.5F : Exit For
+                Next
+            End Using
+            Using f As New Font(ReportFont, size, FontStyle.Bold)
                 DrawCells(g, captions, f, InkMuted, left, y + 4, w)
             End Using
             Using rule As New Pen(RuleMedium, 0.75F)
@@ -572,9 +609,12 @@ Public Class ReportPrinter
         Inherits Form
 
         Public Sub New(doc As PrintDocument, report As ReportDoc,
-                       companyName As String, preparedBy As String)
+                       companyName As String, preparedBy As String,
+                       action As PreviewAction)
             Dim title As String = report.Title
-            Me.Text = "Print Preview — " & title
+            Me.Text = If(action = PreviewAction.SavePdf, "PDF Preview — ", "Print Preview — ") & title
+            Me.KeyPreview = True
+            AddHandler Me.KeyDown, Sub(s, e) If e.KeyCode = Keys.Escape Then Me.Close()
             ' Most of the screen, so the page is read at a comfortable size
             ' instead of squinting at a small window.
             Dim scr As Rectangle = Screen.PrimaryScreen.WorkingArea
@@ -624,57 +664,68 @@ Public Class ReportPrinter
             btnClose.FlatAppearance.MouseDownBackColor = Color.FromArgb(205, 205, 205)
             AddHandler btnClose.Click, Sub() Me.Close()
 
-            Dim btnPrint As New Button With {
-                .Text = "Print", .Size = New Size(120, 36), .FlatStyle = FlatStyle.Flat,
+            ' The one action this preview was opened for.
+            Dim isPdf As Boolean = (action = PreviewAction.SavePdf)
+            Dim btnGo As New Button With {
+                .Text = If(isPdf, "Save as PDF", "Print"), .Size = New Size(140, 36),
+                .FlatStyle = FlatStyle.Flat, .Cursor = Cursors.Hand,
                 .BackColor = BrandDark, .ForeColor = Color.White,
                 .Font = New Font("Segoe UI Semibold", 9.5F)
             }
-            btnPrint.FlatAppearance.BorderSize = 0
-            btnPrint.FlatAppearance.MouseOverBackColor = BrandDeep
-            btnPrint.FlatAppearance.MouseDownBackColor = BrandPrimary
-            AddHandler btnPrint.Click,
+            btnGo.FlatAppearance.BorderSize = 0
+            btnGo.FlatAppearance.MouseOverBackColor = BrandDeep
+            btnGo.FlatAppearance.MouseDownBackColor = BrandPrimary
+            btnClose.Cursor = Cursors.Hand
+            AddHandler btnGo.Click,
                 Sub()
+                    If isPdf Then
+                        ' Saved -> the job is done, so the preview closes itself.
+                        If ReportExport.SavePdfWithDialog(report, companyName, preparedBy, Me) Then Me.Close()
+                        Return
+                    End If
                     Using pd As New PrintDialog()
                         pd.Document = doc
                         pd.AllowSomePages = False
                         pd.AllowSelection = False
-                        If pd.ShowDialog(Me) = DialogResult.OK Then
-                            Try
+                        pd.UseEXDialog = True
+                        Dim printed As Boolean = False
+                        Try
+                            If pd.ShowDialog(Me) = DialogResult.OK Then
                                 doc.Print()
-                            Catch ex As Exception
-                                MessageBox.Show("Failed to print: " & ErrorLog.ForUser(ex), "Print Error",
-                                                 MessageBoxButtons.OK, MessageBoxIcon.Error)
-                            End Try
+                                printed = True
+                            End If
+                        Catch ex As Exception
+                            ' No printer installed, spooler stopped, printer offline...
+                            AppModal.Show("The report could not be printed: " & ErrorLog.ForUser(ex) &
+                                          vbCrLf & vbCrLf & "Check that a printer is installed and switched on, " &
+                                          "or use Save as PDF instead.", "Print Error",
+                                          MessageBoxButtons.OK, MessageBoxIcon.Error)
+                        End Try
+                        If printed Then
+                            ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
+                                               Strings.Left(report.Title & " (Print) - " & report.PeriodValue, 250))
+                            Me.Close()
                         End If
                     End Using
                 End Sub
+            Me.AcceptButton = btnGo
 
-            Dim makeExport =
-                Function(caption As String, format As ReportExport.ExportFormat) As Button
-                    Dim b As New Button With {
-                        .Text = caption, .Size = New Size(140, 36), .FlatStyle = FlatStyle.Flat,
-                        .BackColor = Color.FromArgb(220, 235, 232), .ForeColor = BrandDark,
-                        .Font = New Font("Segoe UI Semibold", 9.5F), .Cursor = Cursors.Hand
-                    }
-                    b.FlatAppearance.BorderSize = 0
-                    b.FlatAppearance.MouseOverBackColor = Color.FromArgb(205, 228, 223)
-                    AddHandler b.Click,
-                        Sub() ReportExport.SaveWithDialog(report, format, companyName, preparedBy, Me)
-                    Return b
-                End Function
-            Dim btnExcel As Button = makeExport("Save as Excel", ReportExport.ExportFormat.Excel)
-            Dim btnPdf As Button = makeExport("Save as PDF", ReportExport.ExportFormat.Pdf)
+            Dim lblHint As New Label With {
+                .Text = If(isPdf, "Check the report, then save it as a PDF file.",
+                                  "Check the report, then send it to the printer."),
+                .Font = New Font("Segoe UI", 9.5F), .ForeColor = InkMuted,
+                .AutoSize = True, .BackColor = Color.Transparent
+            }
 
             AddHandler btnBar.Resize,
                 Sub()
-                    Dim cy As Integer = (btnBar.Height - btnPrint.Height) \ 2
-                    btnPrint.Location = New Point(btnBar.Width - btnPrint.Width - 20, cy)
-                    btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
-                    btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
-                    btnClose.Location = New Point(20, cy)
+                    Dim cy As Integer = (btnBar.Height - btnGo.Height) \ 2
+                    btnGo.Location = New Point(btnBar.Width - btnGo.Width - 20, cy)
+                    btnClose.Location = New Point(btnGo.Left - btnClose.Width - 10, cy)
+                    lblHint.Location = New Point(20, (btnBar.Height - lblHint.Height) \ 2)
                 End Sub
 
-            btnBar.Controls.AddRange({btnClose, btnExcel, btnPdf, btnPrint})
+            btnBar.Controls.AddRange({lblHint, btnClose, btnGo})
 
             Me.Controls.Add(ppc)
             Me.Controls.Add(btnBar)

@@ -351,11 +351,11 @@ Public Class AccountantIncomePanelBuilder
                 If isActive Then
                     b.BackColor = activeColor
                     b.ForeColor = Color.White
-                    b.Font = New Font("Segoe UI Semibold", 9.5F)
+                    b.Font = Theme.Semibold(9.5F)
                 Else
                     b.BackColor = Color.FromArgb(220, 235, 232)
                     b.ForeColor = SubText
-                    b.Font = New Font("Segoe UI", 9.5F)
+                    b.Font = Theme.Regular(9.5F)
                 End If
                 b.Invalidate()
             End Sub
@@ -554,6 +554,7 @@ Public Class AccountantIncomePanelBuilder
             .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
         Return card
     End Function
 

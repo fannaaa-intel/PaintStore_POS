@@ -110,20 +110,10 @@ Public Class AccountantReportsPanelBuilder
                     _poCost = Convert.ToDecimal(cmd.ExecuteScalar())
                 End Using
 
-                ' True Cost of Goods Sold: items actually SOLD in the period,
-                ' valued at each product's average purchase cost.
-                Using cmd As New MySqlCommand(
-                    "SELECT COALESCE(SUM(si.qty * ac.avg_cost), 0) " &
-                    "FROM sale_items si " &
-                    "JOIN sales s ON s.sale_id = si.sale_id " &
-                    "JOIN (SELECT product_id, SUM(unit_cost * qty) / NULLIF(SUM(qty),0) AS avg_cost " &
-                    "      FROM po_items GROUP BY product_id) ac ON ac.product_id = si.product_id " &
-                    "WHERE si.product_id IS NOT NULL " &
-                    "AND s.sale_datetime BETWEEN @from AND @to", conn)
-                    cmd.Parameters.AddWithValue("@from", fromVal)
-                    cmd.Parameters.AddWithValue("@to", toVal)
-                    _cogs = Convert.ToDecimal(cmd.ExecuteScalar())
-                End Using
+                ' Cost of Goods Sold, the same rule as the Dashboard and Trial
+                ' Balance. (This query used to cost voided and held sales too,
+                ' because it had no status filter.)
+                _cogs = AccountantPeriod.CostOfGoodsSold(conn, _dateFrom, _dateTo)
 
                 ' Same rule as the Payables screen's "Unpaid": an order placed
                 ' with a supplier and not yet settled, as of the report date.
@@ -216,29 +206,21 @@ Public Class AccountantReportsPanelBuilder
             .Location = New Point(SIDE_PAD - 4, 14)
         }
 
-        ' Generate the report on screen as Excel (editable), PDF, or print.
+        ' PDF and Print each open a preview first; the file is written or the
+        ' page printed from there, after the report has been looked over.
         Dim btnPrint As Button = MakeActionButton("Print", 110, MintDark, MintDeep)
-        Dim btnPdf As Button = MakeActionButton("Save as PDF", 140, MintDark, MintDeep)
-        Dim btnExcel As Button = MakeActionButton("Save as Excel", 150, MintPrimary, MintDeep)
-        AddHandler btnPrint.Click, Sub() PrintActiveTab()
-        AddHandler btnPdf.Click,
-            Sub() ReportExport.SaveWithDialog(BuildReportDoc(), ReportExport.ExportFormat.Pdf,
-                                              ReportPrinter.CompanyName(), Session.CurrentFullName,
-                                              btnPdf.FindForm())
-        AddHandler btnExcel.Click,
-            Sub() ReportExport.SaveWithDialog(BuildReportDoc(), ReportExport.ExportFormat.Excel,
-                                              ReportPrinter.CompanyName(), Session.CurrentFullName,
-                                              btnExcel.FindForm())
+        Dim btnPdf As Button = MakeActionButton("PDF", 110, MintPrimary, MintDeep)
+        AddHandler btnPrint.Click, Sub() PreviewActiveTab(ReportPrinter.PreviewAction.Print)
+        AddHandler btnPdf.Click, Sub() PreviewActiveTab(ReportPrinter.PreviewAction.SavePdf)
 
         AddHandler bar.Resize,
             Sub()
                 Dim cy As Integer = (bar.Height - btnPrint.Height) \ 2
                 btnPrint.Location = New Point(bar.Width - btnPrint.Width - SIDE_PAD, cy)
                 btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
-                btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
             End Sub
 
-        bar.Controls.AddRange({lblTitle, btnExcel, btnPdf, btnPrint})
+        bar.Controls.AddRange({lblTitle, btnPdf, btnPrint})
         Return bar
     End Function
 
@@ -326,11 +308,11 @@ Public Class AccountantReportsPanelBuilder
                     If active Then
                         b.BackColor = MintPrimary
                         b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 10)
+                        b.Font = Theme.Semibold(10)
                     Else
                         b.BackColor = Color.FromArgb(220, 235, 232)
                         b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 10)
+                        b.Font = Theme.Regular(10)
                     End If
                     b.Invalidate()
                 End Sub
@@ -377,11 +359,11 @@ Public Class AccountantReportsPanelBuilder
                             If isNowActive Then
                                 btn.BackColor = MintPrimary
                                 btn.ForeColor = Color.White
-                                btn.Font = New Font("Segoe UI Semibold", 10)
+                                btn.Font = Theme.Semibold(10)
                             Else
                                 btn.BackColor = Color.FromArgb(220, 235, 232)
                                 btn.ForeColor = SubText
-                                btn.Font = New Font("Segoe UI", 10)
+                                btn.Font = Theme.Regular(10)
                             End If
                             btn.Invalidate()
                         End If
@@ -968,19 +950,15 @@ Public Class AccountantReportsPanelBuilder
     ' =========================================================================
     '  PRINT
     ' =========================================================================
-    Private Shared Sub PrintActiveTab()
+    ' Financial statements leaving the system is a reportable event: the
+    ' preview logs REPORT_EXPORT once the page is actually printed or saved.
+    Private Shared Sub PreviewActiveTab(action As ReportPrinter.PreviewAction)
         Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
-
-        ' Financial statements leaving the system is a reportable event;
-        ' the Admin export records one, so this one does too.
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           doc.Title & " (Print) - " & doc.PeriodValue)
-
         ReportPrinter.Preview(doc, companyName:=ReportPrinter.CompanyName(),
-                              preparedBy:=Session.CurrentFullName)
+                              preparedBy:=Session.CurrentFullName, action:=action)
     End Sub
 
-    ' The report on the active tab, as rows for print, PDF and Excel alike.
+    ' The report on the active tab, as rows for print and PDF alike.
     ' Signatories are added on output (ReportPrinter.EnsureSignatures).
     Private Shared Function BuildReportDoc() As ReportPrinter.ReportDoc
         Dim doc As New ReportPrinter.ReportDoc()

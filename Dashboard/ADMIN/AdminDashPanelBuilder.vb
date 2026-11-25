@@ -366,7 +366,7 @@ Public Class AdminDashPanelBuilder
             .Font = New Font("Segoe UI", 10.5F),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(2, 50),
+            .Location = New Point(2, 54),
             .BackColor = Color.Transparent
         }
 
@@ -496,6 +496,7 @@ Public Class AdminDashPanelBuilder
             .BackColor = Color.Transparent
         }
         card.Controls.Add(lblVal)
+        TextFit.FitWidth(lblVal, card)
 
         Dim y As Integer = 92
         If deltaText <> "" Then
@@ -791,7 +792,7 @@ Public Class AdminDashPanelBuilder
             .Font = New Font("Segoe UI", 9.5F),
             .ForeColor = Color.FromArgb(180, tint.fore),
             .AutoSize = True,
-            .Location = New Point(22, 86),
+            .Location = New Point(22, 90),
             .BackColor = Color.Transparent
         }
         tile.Controls.AddRange({lblCount, lblSub})

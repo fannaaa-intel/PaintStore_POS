@@ -182,9 +182,26 @@ Public Class QuietScrollPanel
         Dim maxPos As Integer = Math.Max(Me.DisplayRectangle.Height - Me.ClientSize.Height, 0)
         Dim [next] As Integer = Math.Max(0, Math.Min(pos - CInt(e.Delta / 120.0 * 48), maxPos))
         Me.AutoScrollPosition = New Point(0, [next])
+        RaiseEvent Scrolled(Me, EventArgs.Empty)
 
         Dim h = TryCast(e, HandledMouseEventArgs)
         If h IsNot Nothing Then h.Handled = True
+    End Sub
+
+    ' Raised after the wheel moves the content (the bar is hidden, so there is
+    ' no Scroll event from it) -- lets a "more below" cue follow the position.
+    Public Event Scrolled As EventHandler
+
+    ' True while part of the content is still below the visible area.
+    Public ReadOnly Property HasMoreBelow As Boolean
+        Get
+            Return -Me.AutoScrollPosition.Y + Me.ClientSize.Height < Me.DisplayRectangle.Height - 4
+        End Get
+    End Property
+
+    Public Sub ScrollToEnd()
+        Me.AutoScrollPosition = New Point(0, Math.Max(0, Me.DisplayRectangle.Height - Me.ClientSize.Height))
+        RaiseEvent Scrolled(Me, EventArgs.Empty)
     End Sub
 
     Protected Overrides Sub WndProc(ByRef m As Message)

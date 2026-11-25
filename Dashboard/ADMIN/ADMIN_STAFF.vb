@@ -217,29 +217,45 @@ Public Class ADMIN_STAFF
         ' NavList hides its scrollbar (QuietScrollPanel), so buttons use the
         ' same 28px side allowance as everywhere else - no reserve needed.
         Dim btnWidth As Integer = Nav.Width - 28
-        Dim y As Integer = 8
+        Dim secList As New List(Of (header As Label, buttons As Button()))
         For Each sec In sections
-            NavList.Controls.Add(MakeSectionHeader(sec.Item1, y))
-            y += 28
+            Dim hdr As Label = MakeSectionHeader(sec.Item1, 0)
+            NavList.Controls.Add(hdr)
             For Each btn As Button In sec.Item2
                 StyleButton(btn)
                 btn.Left = 14
-                btn.Top = y
                 btn.Width = btnWidth
-                btn.Height = 48
-                RoundButton(btn, 12)
-                y += 54
             Next
-            y += 10
+            secList.Add((hdr, sec.Item2))
         Next
+        _navSections = secList
 
         ' A trailing spacer so the scrollable extent runs 12px past the last
         ' button. AutoScroll then lets the final row clear the bottom edge
         ' instead of being cut mid-height when the panel is not an exact
         ' multiple of the row step.
-        NavList.Controls.Add(New Panel With {
-            .Left = 0, .Top = y, .Width = 1, .Height = 12, .BackColor = NavBg
-        })
+        _navTail = New Panel With {.Left = 0, .Width = 1, .Height = 12, .BackColor = NavBg}
+        NavList.Controls.Add(_navTail)
+
+        ' "More ▾" under the list while items are hidden below it: the bar is
+        ' hidden, so without this cue the Oversight screens (Sales Overview to
+        ' Activity Log) were simply out of sight on a laptop.
+        _navMore = New Label With {
+            .Text = "More  " & ChrW(9662), .Font = Theme.SemiboldBold(9),
+            .ForeColor = Theme.Primary, .BackColor = NavBg, .AutoSize = False,
+            .Size = New Size(Nav.Width - 28, 22), .TextAlign = ContentAlignment.MiddleCenter,
+            .Cursor = Cursors.Hand, .Visible = False,
+            .Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
+        }
+        AddHandler _navMore.Click, Sub() NavList.ScrollToEnd()
+        Nav.Controls.Add(_navMore)
+        AddHandler NavList.Scrolled, Sub() UpdateNavMore()
+        AddHandler NavList.Resize,
+            Sub()
+                LayoutNavList()
+                UpdateNavMore()
+            End Sub
+        LayoutNavList()
 
         ' ── SETTINGS ────────────────────────────────────────────────────────────
         ' Replaces the old My Account button. Settings holds My Account (with
@@ -319,6 +335,56 @@ Public Class ADMIN_STAFF
     End Sub
 
     ' ===========================================================================
+    ' NAV LIST LAYOUT — full-size rows when they fit; compact rows on a short
+    ' screen so as much of the menu as possible is in view, with "More ▾"
+    ' shown while anything is still hidden below.
+    ' ===========================================================================
+    Private _navSections As List(Of (header As Label, buttons As Button()))
+    Private _navTail As Panel
+    Private _navMore As Label
+    Private _navCompact As Boolean? = Nothing
+
+    Private Sub LayoutNavList()
+        If _navSections Is Nothing OrElse NavList Is Nothing Then Return
+        Dim btnCount As Integer = _navSections.Sum(Function(s) s.buttons.Length)
+        Dim natural As Integer = 8 + _navSections.Count * (28 + 10) + btnCount * 54 + 12
+        Dim compact As Boolean = natural > NavList.ClientSize.Height
+        Dim hdrStep As Integer = If(compact, 22, 28)
+        Dim btnH As Integer = If(compact, 40, 48)
+        Dim pitch As Integer = If(compact, 44, 54)
+        Dim secGap As Integer = If(compact, 4, 10)
+
+        NavList.SuspendLayout()
+        ' Child positions are relative to the scrolled view; lay out from the top.
+        Dim scrollY As Integer = NavList.AutoScrollPosition.Y
+        Dim y As Integer = 8 + scrollY
+        For Each sec In _navSections
+            sec.header.Top = y
+            y += hdrStep
+            For Each btn In sec.buttons
+                btn.Top = y
+                If btn.Height <> btnH OrElse _navCompact <> compact Then
+                    btn.Height = btnH
+                    RoundButton(btn, 12)
+                End If
+                y += pitch
+            Next
+            y += secGap
+        Next
+        If _navTail IsNot Nothing Then _navTail.Top = y
+        _navCompact = compact
+        NavList.ResumeLayout()
+    End Sub
+
+    Private Sub UpdateNavMore()
+        If _navMore Is Nothing OrElse NavList Is Nothing Then Return
+        _navMore.Left = 14
+        _navMore.Top = NavList.Bottom - _navMore.Height
+        _navMore.Visible = navIsOpen AndAlso NavList.HasMoreBelow
+        If _navMore.Visible Then _navMore.BringToFront()
+    End Sub
+
+    ' ===========================================================================
     ' SECTION HEADER — same treatment as the "MENU" label on the other dashboards
     ' ===========================================================================
     Private Function MakeSectionHeader(text As String, top As Integer) As Label
@@ -393,6 +459,7 @@ Public Class ADMIN_STAFF
 
         NavList.ResumeLayout()
         Nav.ResumeLayout()
+        UpdateNavMore()
         Nav.Invalidate()
         NavList.Invalidate()
         MainContainer.PerformLayout()
@@ -492,7 +559,7 @@ Public Class ADMIN_STAFF
 
         ' Hard guarantee against a second line, which would shift the baseline.
         btn.AutoEllipsis = True
-        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+        btn.Font = Theme.Semibold(12)
         btn.ForeColor = Color.FromArgb(90, 105, 102)
         btn.TextImageRelation = TextImageRelation.ImageBeforeText
         btn.ImageAlign = ContentAlignment.MiddleLeft
@@ -517,13 +584,13 @@ Public Class ADMIN_STAFF
             If TypeOf ctrl Is Button AndAlso ctrl IsNot logout Then
                 ctrl.BackColor = NavBg
                 ctrl.ForeColor = Color.FromArgb(90, 105, 102)
-                ctrl.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+                ctrl.Font = Theme.Semibold(12)
                 ctrl.Tag = ""
             End If
         Next
         btn.BackColor = MintLight
         btn.ForeColor = MintDarkTop
-        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
+        btn.Font = Theme.SemiboldBold(12)
         btn.Tag = "active"
     End Sub
 
@@ -590,7 +657,7 @@ Public Class ADMIN_STAFF
     Private Sub ApplyModernButton(btn As Button)
         btn.FlatStyle = FlatStyle.Flat
         btn.FlatAppearance.BorderSize = 0
-        btn.Font = New Font("Segoe UI Semibold", 10, FontStyle.Bold)
+        btn.Font = Theme.SemiboldBold(10)
         btn.ForeColor = Color.White
         btn.Cursor = Cursors.Hand
 
@@ -746,6 +813,8 @@ Public Class ADMIN_STAFF
     ' Locks the screen after a few idle minutes (see IdleLock.vb).
     Private Sub AttachIdleLock(sender As Object, e As EventArgs) Handles MyBase.Shown
         IdleLock.Attach(Me, AddressOf SignOutFromLock)
+        LayoutNavList()
+        UpdateNavMore()
         ' After the dashboard has painted, so the reminder sits on top of it.
         BeginInvoke(New Action(AddressOf Backup.RemindIfStale))
     End Sub

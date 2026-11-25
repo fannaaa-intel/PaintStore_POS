@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Globalization
 Imports System.Windows.Forms
@@ -7,15 +7,22 @@ Imports MySql.Data.MySqlClient
 ' =============================================================================
 '  InventoryReportsPanelBuilder  —  Inventory ▸ Reports
 '
-'  Four tabular reports, each generated on screen and saved as Excel (numbers
-'  stay editable), PDF, or printed -- with the Prepared / Checked / Approved
-'  signature block, exactly like the Accountant's reports.
+'  Four tabular reports, each generated on screen, then previewed and saved
+'  as PDF or printed -- with a Prepared by / Approved by signature block
+'  (Inventory printouts carry no Checked by line; owner's revision, Nov 2026).
 '
-'     Stock on Hand          every active item, qty, status and value   (as of now)
-'     Items to Restock       the Low Stock Alerts list, as a purchase plan (as of now)
-'     Stock Movements        every stock change in a period          (From / To, Type)
-'     Damage & Adjustments   hand corrections and damage in a period  (From / To)
-'  All four filter by Category.
+'     Stock on Hand          per item: opening, in, out, closing for the period
+'     Items to Restock       the Low Stock Alerts list as a purchase plan, with
+'                            how much of each item went out in the period
+'     Stock Movements        every stock change in a period          (Type)
+'     Damage & Adjustments   hand corrections and damage in a period
+'  All four take From / To and filter by Category.
+'
+'  Stock on Hand works backwards from today's quantity: closing = stock now
+'  minus every change after the To date, opening = closing minus the changes
+'  inside the period. So the closing figure always agrees with the shelf
+'  when To is today, even on a database whose oldest stock pre-dates the
+'  movement log. Dock rows are left out (see InventoryMovements).
 '
 '  The on-screen table is drawn from the SAME ReportDoc that is printed and
 '  exported, so what is seen is exactly what is saved.
@@ -94,12 +101,6 @@ Public Class InventoryReportsPanelBuilder
         End Get
     End Property
 
-    Private Shared ReadOnly Property IsPeriodReport As Boolean
-        Get
-            Return _activeTab = TAB_MOVES OrElse _activeTab = TAB_ADJUST
-        End Get
-    End Property
-
     ' =========================================================================
     '  FRAME
     ' =========================================================================
@@ -136,21 +137,19 @@ Public Class InventoryReportsPanelBuilder
             .Location = New Point(SIDE_PAD - 4, 14)
         })
 
+        ' PDF and Print each open a preview first.
         Dim btnPrint As Button = MakeActionButton("Print", 110, MintDark, MintDeep)
-        Dim btnPdf As Button = MakeActionButton("Save as PDF", 140, MintDark, MintDeep)
-        Dim btnExcel As Button = MakeActionButton("Save as Excel", 150, MintPrimary, MintDeep)
-        AddHandler btnPrint.Click, Sub() PrintReport()
-        AddHandler btnPdf.Click, Sub() SaveReport(ReportExport.ExportFormat.Pdf, btnPdf)
-        AddHandler btnExcel.Click, Sub() SaveReport(ReportExport.ExportFormat.Excel, btnExcel)
+        Dim btnPdf As Button = MakeActionButton("PDF", 110, MintPrimary, MintDeep)
+        AddHandler btnPrint.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.Print)
+        AddHandler btnPdf.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.SavePdf)
 
         AddHandler bar.Resize,
             Sub()
                 Dim cy As Integer = (bar.Height - btnPrint.Height) \ 2
                 btnPrint.Location = New Point(bar.Width - btnPrint.Width - SIDE_PAD, cy)
                 btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
-                btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
             End Sub
-        bar.Controls.AddRange({btnExcel, btnPdf, btnPrint})
+        bar.Controls.AddRange({btnPdf, btnPrint})
         Return bar
     End Function
 
@@ -217,8 +216,7 @@ Public Class InventoryReportsPanelBuilder
         Next
     End Sub
 
-    ' Only the filters that apply to the report on screen are shown: the
-    ' "as of now" reports have no period, and only Stock Movements has a Type.
+    ' Every report takes From / To and Category; only Stock Movements has a Type.
     Private Shared Sub RebuildFilters()
         FilterFields.ClosePopup()
         For Each c As Control In _filterBar.Controls.Cast(Of Control).ToList()
@@ -239,36 +237,35 @@ Public Class InventoryReportsPanelBuilder
                 x += l.PreferredWidth + 8
             End Sub
 
-        If IsPeriodReport Then
-            addLabel("From")
-            Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
-            Dim boxFrom As Panel = FilterFields.MakeDateField(140, _from,
-                Sub(d As Date)
-                    _from = d.Date
-                    If _from > _to Then
-                        _to = _from
-                        setTo(_to)
-                    End If
-                    Regenerate()
-                End Sub, setFrom)
-            boxFrom.Location = New Point(x, TOP_Y)
-            _filterBar.Controls.Add(boxFrom)
-            x += boxFrom.Width + 16
+        ' From / To
+        addLabel("From")
+        Dim setFrom As Action(Of Date) = Nothing, setTo As Action(Of Date) = Nothing
+        Dim boxFrom As Panel = FilterFields.MakeDateField(140, _from,
+            Sub(d As Date)
+                _from = d.Date
+                If _from > _to Then
+                    _to = _from
+                    setTo(_to)
+                End If
+                Regenerate()
+            End Sub, setFrom)
+        boxFrom.Location = New Point(x, TOP_Y)
+        _filterBar.Controls.Add(boxFrom)
+        x += boxFrom.Width + 16
 
-            addLabel("To")
-            Dim boxTo As Panel = FilterFields.MakeDateField(140, _to,
-                Sub(d As Date)
-                    _to = d.Date
-                    If _to < _from Then
-                        _from = _to
-                        setFrom(_from)
-                    End If
-                    Regenerate()
-                End Sub, setTo)
-            boxTo.Location = New Point(x, TOP_Y)
-            _filterBar.Controls.Add(boxTo)
-            x += boxTo.Width + 24
-        End If
+        addLabel("To")
+        Dim boxTo As Panel = FilterFields.MakeDateField(140, _to,
+            Sub(d As Date)
+                _to = d.Date
+                If _to < _from Then
+                    _from = _to
+                    setFrom(_from)
+                End If
+                Regenerate()
+            End Sub, setTo)
+        boxTo.Location = New Point(x, TOP_Y)
+        _filterBar.Controls.Add(boxTo)
+        x += boxTo.Width + 24
 
         If _activeTab = TAB_MOVES Then
             addLabel("Type")
@@ -293,16 +290,6 @@ Public Class InventoryReportsPanelBuilder
         boxCat.Location = New Point(x, TOP_Y)
         _filterBar.Controls.Add(boxCat)
         x += boxCat.Width + 24
-
-        If Not IsPeriodReport Then
-            Dim lblAsOf As New Label With {
-                .Text = "Current stock, as of when the report is generated",
-                .Font = New Font("Segoe UI", 9.5F, FontStyle.Italic), .ForeColor = FaintText,
-                .AutoSize = True, .BackColor = Color.Transparent
-            }
-            lblAsOf.Location = New Point(x, TOP_Y + (FilterFields.FIELD_H - lblAsOf.PreferredHeight) \ 2)
-            _filterBar.Controls.Add(lblAsOf)
-        End If
     End Sub
 
     ' =========================================================================
@@ -322,6 +309,8 @@ Public Class InventoryReportsPanelBuilder
                 Case TAB_ADJUST : doc = BuildAdjustments()
                 Case Else : doc = BuildStockOnHand()
             End Select
+            ' Prepared by (the clerk) and Approved by only -- no Checked by.
+            doc.Signers = ReportSignatories.ForReport(includeChecked:=False)
             _loadFailed = False
         Catch ex As Exception
             If Not _loadFailed Then
@@ -345,9 +334,12 @@ Public Class InventoryReportsPanelBuilder
         Return "Report"
     End Function
 
-    ' "As of Sep 28, 2026 3:05 PM", plus the category when one is picked.
-    Private Shared Function AsOfText() As String
-        Return DateTime.Now.ToString("MMM d, yyyy h:mm tt", CultureInfo.InvariantCulture) & CategorySuffix()
+    ' "Nov 1, 2026 to Nov 24, 2026", plus the category when one is picked.
+    Private Shared Function PeriodText() As String
+        Dim s As String = If(_from.Date = _to.Date, _from.ToString("MMM d, yyyy", CultureInfo.InvariantCulture),
+                             _from.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) & " to " &
+                             _to.ToString("MMM d, yyyy", CultureInfo.InvariantCulture))
+        Return s & CategorySuffix()
     End Function
 
     Private Shared Function CategorySuffix() As String
@@ -368,25 +360,50 @@ Public Class InventoryReportsPanelBuilder
         Public Sku As String
         Public Name As String
         Public Category As String
-        Public Qty As Integer
+        Public Qty As Integer           ' on the shelf now
         Public Restock As Integer
         Public UnitPrice As Decimal
+        ' Stock flow over the From / To period (dock rows excluded).
+        Public UnitsIn As Integer
+        Public UnitsOut As Integer      ' negative or zero
+        Public AfterTo As Integer       ' net change after the To date
+        Public ReadOnly Property Closing As Integer
+            Get
+                Return Qty - AfterTo
+            End Get
+        End Property
+        Public ReadOnly Property Opening As Integer
+            Get
+                Return Closing - UnitsIn - UnitsOut
+            End Get
+        End Property
     End Class
 
+    ' Active products with their stock flow for the period. onlyToRestock
+    ' keeps the Low Stock Alerts condition, word for word.
     Private Shared Function LoadProducts(onlyToRestock As Boolean) As List(Of ProductLine)
         Dim list As New List(Of ProductLine)
+        Dim notDock As String = "NOT " & InventoryMovements.DOCK_SQL
         Using conn = Db.GetConnection()
             conn.Open()
-            ' The restock condition is the Low Stock Alerts one, word for word.
             Using cmd As New MySqlCommand(
-                "SELECT p.sku, p.name, COALESCE(c.name, '') AS cname, p.stock_qty, p.reorder_level, p.unit_price " &
+                "SELECT p.sku, p.name, COALESCE(c.name, '') AS cname, p.stock_qty, p.reorder_level, p.unit_price, " &
+                " COALESCE(SUM(CASE WHEN m.created_at >= @from AND m.created_at < @to AND m.qty_change > 0 " &
+                "                   THEN m.qty_change END), 0) AS ins, " &
+                " COALESCE(SUM(CASE WHEN m.created_at >= @from AND m.created_at < @to AND m.qty_change < 0 " &
+                "                   THEN m.qty_change END), 0) AS outs, " &
+                " COALESCE(SUM(CASE WHEN m.created_at >= @to THEN m.qty_change END), 0) AS after_to " &
                 "FROM products p LEFT JOIN categories c ON c.category_id = p.category_id " &
+                "LEFT JOIN stock_movements m ON m.product_id = p.product_id AND " & notDock & " " &
                 "WHERE p.is_active = 1 " &
                 If(CategoryId > 0, "AND p.category_id = @cat ", "") &
+                If(onlyToRestock, "AND p.stock_qty * 100 <= p.reorder_level * 125 ", "") &
+                "GROUP BY p.product_id, p.sku, p.name, cname, p.stock_qty, p.reorder_level, p.unit_price " &
                 If(onlyToRestock,
-                   "AND p.stock_qty * 100 <= p.reorder_level * 125 " &
                    "ORDER BY p.stock_qty - p.reorder_level ASC, p.name ASC",
                    "ORDER BY cname ASC, p.name ASC"), conn)
+                cmd.Parameters.AddWithValue("@from", _from.Date)
+                cmd.Parameters.AddWithValue("@to", _to.Date.AddDays(1))
                 If CategoryId > 0 Then cmd.Parameters.AddWithValue("@cat", CategoryId)
                 Using rdr = cmd.ExecuteReader()
                     While rdr.Read()
@@ -396,7 +413,10 @@ Public Class InventoryReportsPanelBuilder
                             .Category = rdr("cname").ToString(),
                             .Qty = Convert.ToInt32(rdr("stock_qty")),
                             .Restock = Convert.ToInt32(rdr("reorder_level")),
-                            .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price")))
+                            .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
+                            .UnitsIn = Convert.ToInt32(rdr("ins")),
+                            .UnitsOut = Convert.ToInt32(rdr("outs")),
+                            .AfterTo = Convert.ToInt32(rdr("after_to"))
                         })
                     End While
                 End Using
@@ -405,12 +425,12 @@ Public Class InventoryReportsPanelBuilder
         Return list
     End Function
 
-    ' Same tiers as the Stock Levels screen.
-    Private Shared Function StatusOf(p As ProductLine) As String
-        If p.Qty <= 0 Then Return "Out"
-        If p.Qty <= p.Restock Then Return "Critical"
-        If p.Qty * 100 <= p.Restock * 125 Then Return "Low"
-        Return "OK"
+    ' Same tiers as the Stock Levels screen ("Normal" was "Healthy" / "OK").
+    Private Shared Function StatusOf(qty As Integer, restock As Integer) As String
+        If qty <= 0 Then Return "Out"
+        If qty <= restock Then Return "Critical"
+        If qty * 100 <= restock * 125 Then Return "Low"
+        Return "Normal"
     End Function
 
     ' Same as Low Stock Alerts: enough to reach twice the restock level.
@@ -426,70 +446,79 @@ Public Class InventoryReportsPanelBuilder
     End Sub
 
     ' ── 1. STOCK ON HAND ──────────────────────────────────────────────────────
+    ' Opening -> in -> out -> closing for each item over the period. Status
+    ' and value are taken at the closing figure.
     Private Shared Function BuildStockOnHand() As ReportPrinter.ReportDoc
         Dim doc As New ReportPrinter.ReportDoc With {
-            .Title = "Stock on Hand", .PeriodLabel = "As of", .PeriodValue = AsOfText(),
+            .Title = "Stock on Hand", .PeriodLabel = "Period", .PeriodValue = PeriodText(),
             .Columns = New List(Of ReportPrinter.Column) From {
-                ReportPrinter.Col("SKU", 1.0F),
-                ReportPrinter.Col("Product", 2.3F),
-                ReportPrinter.Col("Category", 1.1F),
-                ReportPrinter.Col("Qty", 0.7F, ReportPrinter.ColumnKind.Number),
-                ReportPrinter.Col("Restock Lvl", 0.9F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("SKU", 1.15F),
+                ReportPrinter.Col("Product", 2.0F),
+                ReportPrinter.Col("Category", 0.95F),
+                ReportPrinter.Col("Opening", 0.9F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("In", 0.55F, ReportPrinter.ColumnKind.SignedNumber),
+                ReportPrinter.Col("Out", 0.55F, ReportPrinter.ColumnKind.SignedNumber),
+                ReportPrinter.Col("Closing", 0.9F, ReportPrinter.ColumnKind.Number),
                 ReportPrinter.Col("Status", 0.8F),
-                ReportPrinter.Col("Unit Price", 1.1F, ReportPrinter.ColumnKind.Money),
-                ReportPrinter.Col("Stock Value", 1.3F, ReportPrinter.ColumnKind.Money)
+                ReportPrinter.Col("Value", 1.3F, ReportPrinter.ColumnKind.Money)
             }
         }
         doc.Rows.Add(ReportPrinter.TableHeader())
         Dim items = LoadProducts(onlyToRestock:=False)
-        Dim totQty As Integer = 0
+        Dim totOpen As Integer = 0, totIn As Integer = 0, totOut As Integer = 0, totClose As Integer = 0
         Dim totValue As Decimal = 0D
         For Each p In items
-            Dim value As Decimal = p.Qty * p.UnitPrice
-            doc.Rows.Add(ReportPrinter.TableRow(p.Sku, p.Name, p.Category, Num(p.Qty), Num(p.Restock),
-                                                StatusOf(p), Money(p.UnitPrice), Money(value)))
-            totQty += p.Qty
+            Dim value As Decimal = Math.Max(0, p.Closing) * p.UnitPrice
+            doc.Rows.Add(ReportPrinter.TableRow(p.Sku, p.Name, p.Category, Num(p.Opening),
+                                                InventoryMovements.Signed(p.UnitsIn),
+                                                InventoryMovements.Signed(p.UnitsOut),
+                                                Num(p.Closing), StatusOf(p.Closing, p.Restock), Money(value)))
+            totOpen += p.Opening : totIn += p.UnitsIn : totOut += p.UnitsOut : totClose += p.Closing
             totValue += value
         Next
         If items.Count = 0 Then AddEmptyRow(doc, "No active items in this category.")
         doc.Rows.Add(ReportPrinter.TableTotal("TOTAL", Num(items.Count) & If(items.Count = 1, " item", " items"),
-                                              "", Num(totQty), "", "", "", Money(totValue)))
+                                              "", Num(totOpen), InventoryMovements.Signed(totIn),
+                                              InventoryMovements.Signed(totOut), Num(totClose), "", Money(totValue)))
         Return doc
     End Function
 
     ' ── 2. ITEMS TO RESTOCK ───────────────────────────────────────────────────
+    ' What needs ordering now, with how much of each item went out in the
+    ' period -- the movement rate that tells how much to order.
     Private Shared Function BuildRestock() As ReportPrinter.ReportDoc
         Dim doc As New ReportPrinter.ReportDoc With {
-            .Title = "Items to Restock", .PeriodLabel = "As of", .PeriodValue = AsOfText(),
+            .Title = "Items to Restock", .PeriodLabel = "Period", .PeriodValue = PeriodText(),
             .Columns = New List(Of ReportPrinter.Column) From {
-                ReportPrinter.Col("SKU", 1.0F),
-                ReportPrinter.Col("Product", 2.3F),
-                ReportPrinter.Col("Category", 1.1F),
-                ReportPrinter.Col("Qty", 0.7F, ReportPrinter.ColumnKind.Number),
-                ReportPrinter.Col("Restock Lvl", 0.9F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("SKU", 1.15F),
+                ReportPrinter.Col("Product", 1.9F),
+                ReportPrinter.Col("Category", 0.95F),
+                ReportPrinter.Col("Qty", 0.55F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("Restock", 0.9F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("Out in Period", 1.25F, ReportPrinter.ColumnKind.Number),
                 ReportPrinter.Col("Short", 0.7F, ReportPrinter.ColumnKind.Number),
-                ReportPrinter.Col("Order Qty", 0.9F, ReportPrinter.ColumnKind.Number),
-                ReportPrinter.Col("Est. Value", 1.3F, ReportPrinter.ColumnKind.Money)
+                ReportPrinter.Col("Order", 0.75F, ReportPrinter.ColumnKind.Number),
+                ReportPrinter.Col("Est. Value", 1.25F, ReportPrinter.ColumnKind.Money)
             }
         }
         doc.Rows.Add(ReportPrinter.TableHeader())
         Dim items = LoadProducts(onlyToRestock:=True)
-        Dim totShort As Integer = 0, totOrder As Integer = 0
+        Dim totShort As Integer = 0, totOrder As Integer = 0, totOutPeriod As Integer = 0
         Dim totValue As Decimal = 0D
         For Each p In items
             Dim shortBy As Integer = Math.Max(0, p.Restock - p.Qty)
             Dim order As Integer = SuggestedQty(p)
             Dim value As Decimal = order * p.UnitPrice
+            Dim wentOut As Integer = -p.UnitsOut
             doc.Rows.Add(ReportPrinter.TableRow(p.Sku, p.Name, p.Category, Num(p.Qty), Num(p.Restock),
-                                                Num(shortBy), Num(order), Money(value)))
-            totShort += shortBy : totOrder += order : totValue += value
+                                                Num(wentOut), Num(shortBy), Num(order), Money(value)))
+            totShort += shortBy : totOrder += order : totValue += value : totOutPeriod += wentOut
         Next
         If items.Count = 0 Then AddEmptyRow(doc, "Nothing needs restocking right now.")
         doc.Rows.Add(ReportPrinter.TableTotal("TOTAL", Num(items.Count) & If(items.Count = 1, " item", " items"),
-                                              "", "", "", Num(totShort), Num(totOrder), Money(totValue)))
+                                              "", "", "", Num(totOutPeriod), Num(totShort), Num(totOrder), Money(totValue)))
         Return doc
     End Function
-
     ' ── 3. STOCK MOVEMENTS ────────────────────────────────────────────────────
     Private Shared Function MovementFilter(adjustmentsOnly As Boolean) As InventoryMovements.Filter
         Return New InventoryMovements.Filter With {
@@ -657,7 +686,7 @@ Public Class InventoryReportsPanelBuilder
         footer.Controls.Add(New Label With {
             .Text = If(_loadFailed, "Nothing to show.",
                        Num(Math.Max(0, dataRows - If(IsEmptyReport(doc), 1, 0))) & " row(s)   " & ChrW(8226) &
-                       "   Save as Excel, Save as PDF or Print for the full report with signatures"),
+                       "   PDF or Print shows the full report with signatures"),
             .Font = New Font("Segoe UI", 9.5F), .ForeColor = FaintText, .AutoSize = True,
             .Location = New Point(22, 11), .BackColor = Color.Transparent
         })
@@ -710,20 +739,12 @@ Public Class InventoryReportsPanelBuilder
     ' =========================================================================
     '  OUTPUT — built fresh each time, so it never prints stale figures
     ' =========================================================================
-    Private Shared Sub PrintReport()
+    ' The preview logs REPORT_EXPORT once the report is printed or saved.
+    Private Shared Sub PreviewReport(action As ReportPrinter.PreviewAction)
         Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
         If _loadFailed Then Return
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           Left(doc.Title & " (Print) - " & doc.PeriodValue, 250))
         ReportPrinter.Preview(doc, companyName:=ReportPrinter.CompanyName(),
-                              preparedBy:=Session.CurrentFullName)
-    End Sub
-
-    Private Shared Sub SaveReport(format As ReportExport.ExportFormat, owner As Control)
-        Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
-        If _loadFailed Then Return
-        ReportExport.SaveWithDialog(doc, format, ReportPrinter.CompanyName(), Session.CurrentFullName,
-                                    owner.FindForm())
+                              preparedBy:=Session.CurrentFullName, action:=action)
     End Sub
 
     Private Shared Function MakeActionButton(text As String, width As Integer,

@@ -241,7 +241,7 @@ Public Class ProcurementDashPanelBuilder
         }
         Dim lblSubtitle As New Label With {
             .Text = SubtitleText(), .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 58)
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(30, 64)
         }
         AddHandler region.Resize,
             Sub()
@@ -303,6 +303,7 @@ Public Class ProcurementDashPanelBuilder
             .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
         Return card
     End Function
 

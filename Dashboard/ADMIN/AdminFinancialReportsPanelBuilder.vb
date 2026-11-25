@@ -10,15 +10,13 @@ Imports MySql.Data.MySqlClient
 '  The Accountant role keeps the detailed working panels (income statement,
 '  ledger, payables); this screen is the roll-up, not a second ledger.
 '
-'  EXPORT reuses Modules/ReportPrinter.vb — the app's only export mechanism.
-'  It is print-based: build a ReportPrinter.ReportDoc, then Preview() opens a
-'  formal print-preview window with a Print button (PrintDialog -> PrintDocument).
-'  There is no CSV writer or PDF library in this codebase; users produce a PDF
-'  by choosing a "Print to PDF" printer in the standard dialog.
+'  EXPORT reuses Modules/ReportPrinter.vb: build a ReportPrinter.ReportDoc,
+'  then Preview() opens the formal preview window. The PDF button previews
+'  and then saves a PDF (ReportExport); the Print button previews and prints.
 '
 '  LAYOUT:
 '    TopRegion (Dock = Top, 128px):
-'      ├─ TitleBar  (72px) : title + "Read-only" pill + Export + Refresh
+'      ├─ TitleBar  (72px) : title + "Read-only" pill + PDF + Print
 '      └─ FilterBar (56px) : From / To date range
 '    Host (Dock = Fill, AutoScroll):
 '      ├─ Summary cards (6, in two rows of three)
@@ -308,19 +306,25 @@ Public Class AdminFinancialReportsPanelBuilder
         }
         RoundLabel(pill, 12)
 
-        Dim btnExport As Button = MakePillButton("Export / Print", 130, MintPrimary, Color.White, True)
-        AddHandler btnExport.Click, Sub() ExportReport()
+        ' PDF and Print, each opening a preview first (same as every report screen).
+        Dim btnPrint As Button = MakePillButton("Print", 100, MintDark, Color.White, True)
+        Dim btnPdf As Button = MakePillButton("PDF", 100, MintPrimary, Color.White, True)
+        AddHandler btnPrint.Click, Sub() ExportReport(ReportPrinter.PreviewAction.Print)
+        AddHandler btnPdf.Click, Sub() ExportReport(ReportPrinter.PreviewAction.SavePdf)
 
         AddHandler titleBar.Resize,
             Sub()
-                btnExport.Left = titleBar.Width - btnExport.Width - SIDE_PAD
-                btnExport.Top = (titleBar.Height - btnExport.Height) \ 2
-                pill.Left = btnExport.Left - pill.Width - 10
+                btnPrint.Left = titleBar.Width - btnPrint.Width - SIDE_PAD
+                btnPrint.Top = (titleBar.Height - btnPrint.Height) \ 2
+                btnPdf.Left = btnPrint.Left - btnPdf.Width - 8
+                btnPdf.Top = btnPrint.Top
+                pill.Left = btnPdf.Left - pill.Width - 10
                 pill.Top = (titleBar.Height - pill.Height) \ 2
             End Sub
 
         titleBar.Controls.Add(pill)
-        titleBar.Controls.Add(btnExport)
+        titleBar.Controls.Add(btnPdf)
+        titleBar.Controls.Add(btnPrint)
 
         ' ── Date range ───────────────────────────────────────────────────────
         Dim filterBar As New Panel With {
@@ -737,7 +741,7 @@ Public Class AdminFinancialReportsPanelBuilder
     '  row-label caption is now a parameter (it used to be hardcoded to
     '  "ACCOUNT" in DrawRow, which is why these tables previously ran headless).
     ' =========================================================================
-    Private Shared Sub ExportReport()
+    Private Shared Sub ExportReport(action As ReportPrinter.PreviewAction)
         Try
             Dim doc As New ReportPrinter.ReportDoc()
             doc.Title = "Financial Summary"
@@ -801,16 +805,14 @@ Public Class AdminFinancialReportsPanelBuilder
             ReportPrinter.Preview(doc,
                                   companyName:=StoreSettings.StoreName,
                                   preparedBy:=If(String.IsNullOrWhiteSpace(Session.CurrentFullName),
-                                                 "Administrator", Session.CurrentFullName))
+                                                 "Administrator", Session.CurrentFullName),
+                                  action:=action)
+            ' REPORT_EXPORT is logged by the preview once it is printed or saved
+            ' (it used to be logged here even when the preview was just closed).
         Catch ex As Exception
             AppModal.Show("Could not build the report for export: " & ErrorLog.ForUser(ex),
                           "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-            Return
         End Try
-
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           "Financial report " & _fromDate.ToString("yyyy-MM-dd") &
-                           " to " & _toDate.ToString("yyyy-MM-dd"))
     End Sub
 
     ' =========================================================================

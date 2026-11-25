@@ -305,6 +305,7 @@ Public Class SalesPanelBuilder
             End Select
 
             card.Controls.AddRange({lTitle, lValue, lSub})
+            TextFit.FitWidth(lValue, card)
             statRow.Controls.Add(card, i, 0)
         Next
 
@@ -396,15 +397,15 @@ Public Class SalesPanelBuilder
                     If active Then
                         b.BackColor = MintPrimary
                         b.ForeColor = Color.White
-                        b.Font = New Font("Segoe UI Semibold", 9.5F)
+                        b.Font = Theme.Semibold(9.5F)
                     ElseIf hover Then
                         b.BackColor = Color.FromArgb(210, 240, 235)
                         b.ForeColor = MintDark
-                        b.Font = New Font("Segoe UI", 9.5F)
+                        b.Font = Theme.Regular(9.5F)
                     Else
                         b.BackColor = Color.FromArgb(220, 235, 232)
                         b.ForeColor = SubText
-                        b.Font = New Font("Segoe UI", 9.5F)
+                        b.Font = Theme.Regular(9.5F)
                     End If
                     b.Invalidate()
                 End Sub

@@ -99,6 +99,19 @@ Public Module Theme
         End SyncLock
     End Function
 
+    ' Semibold + Bold (active nav item, selected tab). Cached like the others:
+    ' nav SetActive used to build ~11 new Fonts per click, never disposed.
+    Private ReadOnly _semiboldBold As New Dictionary(Of Single, Font)
+    Public Function SemiboldBold(size As Single) As Font
+        SyncLock _semiboldBold
+            Dim f As Font = Nothing
+            If _semiboldBold.TryGetValue(size, f) Then Return f
+            f = New Font(FamilySemibold, size, FontStyle.Bold)
+            _semiboldBold(size) = f
+            Return f
+        End SyncLock
+    End Function
+
     Public Function Semibold(size As Single) As Font
         SyncLock _semibold
             Dim f As Font = Nothing

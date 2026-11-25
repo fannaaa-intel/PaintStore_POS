@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Globalization
 Imports System.Windows.Forms
@@ -19,10 +19,10 @@ Imports MySql.Data.MySqlClient
 '  Search (reference, supplier, product, person), a From / To date range and a
 '  Type filter narrow it. Clicking a row that belongs to a PO opens the PO with
 '  its items; a request row opens the request. The same filtered list can be
-'  printed or saved as Excel / PDF (with the report signature block).
+'  previewed, then printed or saved as PDF (with the report signature block).
 '
 '  LAYOUT (same frame as Inventory ▸ Transaction History):
-'    TitleBar (72)  : title + Save as Excel / Save as PDF / Print
+'    TitleBar (72)  : title + PDF / Print (each opens a preview first)
 '    FilterBar (56) : search, From / To, Type
 '    SummaryStrip   : Transactions, Purchase Orders, Paid to Suppliers, Deliveries
 '    Table card     : column header, rows, pager
@@ -437,20 +437,18 @@ Public Class ProcurementReportsPanelBuilder
             .Location = New Point(SIDE_PAD, 16)
         })
 
+        ' PDF and Print each open a preview first.
         Dim btnPrint As Button = MakeActionButton("Print", 100, MintDark, MintDeep)
-        Dim btnPdf As Button = MakeActionButton("Save as PDF", 130, MintDark, MintDeep)
-        Dim btnExcel As Button = MakeActionButton("Save as Excel", 140, MintPrimary, MintDeep)
-        AddHandler btnPrint.Click, Sub() PrintReport()
-        AddHandler btnPdf.Click, Sub() SaveReport(ReportExport.ExportFormat.Pdf, btnPdf)
-        AddHandler btnExcel.Click, Sub() SaveReport(ReportExport.ExportFormat.Excel, btnExcel)
+        Dim btnPdf As Button = MakeActionButton("PDF", 100, MintPrimary, MintDeep)
+        AddHandler btnPrint.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.Print)
+        AddHandler btnPdf.Click, Sub() PreviewReport(ReportPrinter.PreviewAction.SavePdf)
         AddHandler titleBar.Resize,
             Sub()
                 Dim cy As Integer = (titleBar.Height - btnPrint.Height) \ 2 + 2
                 btnPrint.Location = New Point(titleBar.Width - btnPrint.Width - SIDE_PAD, cy)
                 btnPdf.Location = New Point(btnPrint.Left - btnPdf.Width - 10, cy)
-                btnExcel.Location = New Point(btnPdf.Left - btnExcel.Width - 10, cy)
             End Sub
-        titleBar.Controls.AddRange({btnExcel, btnPdf, btnPrint})
+        titleBar.Controls.AddRange({btnPdf, btnPrint})
 
         ' ── Filter bar ──────────────────────────────────────────────────────
         Dim filterBar As New Panel With {.Height = 56, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
@@ -633,6 +631,7 @@ Public Class ProcurementReportsPanelBuilder
             .AutoSize = True, .Location = New Point(20, 38), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
+        TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,
@@ -994,20 +993,12 @@ Public Class ProcurementReportsPanelBuilder
         Return doc
     End Function
 
-    Private Shared Sub PrintReport()
+    ' The preview logs REPORT_EXPORT once the report is printed or saved.
+    Private Shared Sub PreviewReport(action As ReportPrinter.PreviewAction)
         Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
         If doc Is Nothing Then Return
-        ActivityLog.Record("REPORT_EXPORT", "report", Nothing,
-                           Left(doc.Title & " (Print) - " & doc.PeriodValue, 250))
         ReportPrinter.Preview(doc, companyName:=ReportPrinter.CompanyName(),
-                              preparedBy:=Session.CurrentFullName)
-    End Sub
-
-    Private Shared Sub SaveReport(format As ReportExport.ExportFormat, owner As Control)
-        Dim doc As ReportPrinter.ReportDoc = BuildReportDoc()
-        If doc Is Nothing Then Return
-        ReportExport.SaveWithDialog(doc, format, ReportPrinter.CompanyName(), Session.CurrentFullName,
-                                    owner.FindForm())
+                              preparedBy:=Session.CurrentFullName, action:=action)
     End Sub
 
     ' =========================================================================

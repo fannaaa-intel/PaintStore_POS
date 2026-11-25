@@ -120,10 +120,8 @@ Public Class HomePanelBuilder
             Using conn = Db.GetConnection()
                 conn.Open()
                 ' Low stock items
-                Using cmd As New MySqlCommand(
-                    "SELECT COUNT(*) FROM products WHERE stock_qty <= reorder_level AND stock_qty >= 0", conn)
-                    lowStockCount = CInt(cmd.ExecuteScalar())
-                End Using
+                ' Same rule and same count as the Inventory badge (deleted items excluded).
+                lowStockCount = Math.Max(0, LowStockAlert.CountLowStock())
                 ' Today's sales total
                 Using cmd As New MySqlCommand(
                     "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn)
@@ -290,6 +288,7 @@ Public Class HomePanelBuilder
                 .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100)
             }
             card.Controls.AddRange({lTitle, lValue, lSub})
+            TextFit.FitWidth(lValue, card)
 
             ' Capture stat labels for later update
             Select Case capI
@@ -355,8 +354,8 @@ Public Class HomePanelBuilder
         Dim qaTiles() As (title As String, sub1 As String, iconPath As String, fallback As String, iconBg As Color) = {
     ("New Transaction", "Start transaction", "transaction.png", "+", Color.Transparent),
     ("Inventory", "View stock", "inventory.png", "▦", Color.Transparent),
-    ("Sales History", "Units today", "recent.png", "◑", Color.Transparent),
-    ("Cash Drawer", DateTime.Now.ToString("MMM dd, yyyy"), "coins.png", "≡", Color.Transparent)
+    ("Sales History", "Today's sales", "recent.png", "◑", Color.Transparent),
+    ("Cash Drawer", "Count and close", "coins.png", "≡", Color.Transparent)
 }
 
         For Each qt In qaTiles
@@ -402,6 +401,9 @@ Public Class HomePanelBuilder
             }
 
             tile.Controls.AddRange({tileIconBox, tileName, tileSub, chev})
+            ' On a 1280px laptop the tiles are ~150px wide: "New Transaction"
+            ' was cut to "New Transacti". The name now steps down to fit.
+            TextFit.FitWidth(tileName, tile, 26, 9.0F)
             AddHandler tile.Resize,
                 Sub()
                     chev.Left = tile.Width - chev.Width - 10
@@ -701,10 +703,7 @@ Public Class HomePanelBuilder
                 Dim newHeld As Integer = 0
                 Using conn2 = Db.GetConnection()
                     conn2.Open()
-                    Using cmd As New MySqlCommand(
-                        "SELECT COUNT(*) FROM products WHERE stock_qty <= reorder_level AND stock_qty >= 0", conn2)
-                        newLowStock = CInt(cmd.ExecuteScalar())
-                    End Using
+                    newLowStock = Math.Max(0, LowStockAlert.CountLowStock())
                     Using cmd As New MySqlCommand(
                         "SELECT COALESCE(SUM(total),0) FROM sales WHERE DATE(sale_datetime)=CURDATE() AND status IN ('Completed','Partially Refunded') AND user_id=@uid", conn2)
                         cmd.Parameters.AddWithValue("@uid", Session.CurrentUserId)

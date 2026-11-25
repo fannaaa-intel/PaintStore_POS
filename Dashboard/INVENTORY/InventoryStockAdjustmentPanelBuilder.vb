@@ -16,9 +16,12 @@ Imports MySql.Data.MySqlClient
 '  products.stock_qty, both inside a single transaction so they can never
 '  drift apart.
 '
-'  NOTE: New purchased goods must ONLY enter stock via Procurement → Receive PO.
-'  This screen can never create a 'Purchase' movement — it is for reconciliation
-'  only, not receiving.
+'  NOTE: Replenishment of existing items enters stock ONLY via Procurement →
+'  Receive PO → Incoming Stock. This screen never writes a 'Purchase' movement.
+'  The one exception is a brand-new product (no stock history yet): its first
+'  count is entered here under "New Stock" and saved as its opening stock
+'  ('Initial' / 'newitem'). Add Item no longer takes a quantity -- owner's
+'  revision, Nov 2026.
 '
 '  This is the destination for the "Adjust" link on the Stock Levels screen: that
 '  link calls INVENTORY_STAFF.OpenStockAdjustmentFor(productId), which loads this
@@ -66,6 +69,10 @@ Public Class InventoryStockAdjustmentPanelBuilder
     Private Const ReasonReceive As String = "receive"
     Private Const ReasonCorrection As String = "correction"
     Private Const ReasonDamage As String = "damage"
+    ' First count of a brand-new product (owner's revision, Nov 2026: a new
+    ' item reaches the shelf through Stock Adjustment, not the Add Item form).
+    ' Stored as movement_type 'Initial' / reference_type 'newitem' = Opening stock.
+    Private Const ReasonNewStock As String = "newitem"
 
     ' Quantity entry mode (only Change remains; Set Total was removed — stock can only
     ' be reconciled to physical counts, never set to an arbitrary number).
@@ -82,6 +89,9 @@ Public Class InventoryStockAdjustmentPanelBuilder
         Public UnitPrice As Decimal
         Public StockQty As Integer
         Public ReorderLevel As Integer
+        ' True while the product has no stock_movements at all: only then is
+        ' the New Stock reason offered.
+        Public IsNew As Boolean
 
         Public ReadOnly Property IsPaint As Boolean
             Get
@@ -238,14 +248,18 @@ Public Class InventoryStockAdjustmentPanelBuilder
     End Sub
 
     Private Shared Function BuildHeader() As Panel
-        Dim region As New Panel With {.Height = 104, .BackColor = MintBg, .Padding = New Padding(24, 0, 24, 0)}
+        Dim region As New Panel With {.Height = 108, .BackColor = MintBg, .Padding = New Padding(24, 0, 24, 0)}
         Dim lblTitle As New Label With {
             .Text = "Stock Adjustment", .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 14)
         }
+        ' Placed under the title's real height (a 26pt label is ~48px), not at a
+        ' fixed y that let the title paint over it.
         Dim lblSub As New Label With {
-            .Text = "Reconcile stock counts and record losses " & ChrW(8226) & " every change is logged",
-            .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 62)
+            .Text = "Reconcile stock counts, enter a new item's first stock, record losses " &
+                    ChrW(8226) & " every change is logged",
+            .Font = New Font("Segoe UI", 12), .ForeColor = SubText, .AutoSize = True,
+            .Location = New Point(26, 14 + lblTitle.PreferredHeight + 2)
         }
 
         region.Controls.AddRange({lblTitle, lblSub})
@@ -268,7 +282,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.sku, p.name, c.name AS cname, p.color_hex, p.image_path, " &
-                    " p.unit_price, p.stock_qty, p.reorder_level " &
+                    " p.unit_price, p.stock_qty, p.reorder_level, " &
+                    " (NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.product_id = p.product_id)) AS is_new " &
                     "FROM products p JOIN categories c ON p.category_id = c.category_id " &
                     "WHERE p.product_id = @id AND p.is_active = 1", conn)
                     cmd.Parameters.AddWithValue("@id", productId)
@@ -283,7 +298,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
                                 .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .StockQty = SafeInt(rdr("stock_qty")),
-                                .ReorderLevel = SafeInt(rdr("reorder_level"))
+                                .ReorderLevel = SafeInt(rdr("reorder_level")),
+                                .IsNew = SafeInt(rdr("is_new")) = 1
                             }
                         End If
                     End Using
@@ -303,7 +319,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
                 conn.Open()
                 Using cmd As New MySqlCommand(
                     "SELECT p.product_id, p.sku, p.name, c.name AS cname, p.color_hex, p.image_path, " &
-                    " p.unit_price, p.stock_qty, p.reorder_level " &
+                    " p.unit_price, p.stock_qty, p.reorder_level, " &
+                    " (NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.product_id = p.product_id)) AS is_new " &
                     "FROM products p JOIN categories c ON p.category_id = c.category_id " &
                     "WHERE p.is_active = 1 AND (p.name LIKE @t OR p.sku LIKE @t) " &
                     "ORDER BY p.name ASC LIMIT 12", conn)
@@ -319,7 +336,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
                                 .ImagePath = If(IsDBNull(rdr("image_path")), "", rdr("image_path").ToString()),
                                 .UnitPrice = If(IsDBNull(rdr("unit_price")), 0D, Convert.ToDecimal(rdr("unit_price"))),
                                 .StockQty = SafeInt(rdr("stock_qty")),
-                                .ReorderLevel = SafeInt(rdr("reorder_level"))
+                                .ReorderLevel = SafeInt(rdr("reorder_level")),
+                                .IsNew = SafeInt(rdr("is_new")) = 1
                             })
                         End While
                     End Using
@@ -383,6 +401,19 @@ Public Class InventoryStockAdjustmentPanelBuilder
                             cmd.Parameters.AddWithValue("@pid", productId)
                             avail = Convert.ToInt32(cmd.ExecuteScalar())
                         End Using
+
+                        ' New Stock is only for an item that has never been stocked;
+                        ' re-checked here in case another PC got there first.
+                        If refType = ReasonNewStock Then
+                            Using cmd As New MySqlCommand(
+                                "SELECT COUNT(*) FROM stock_movements WHERE product_id = @pid", conn, txn)
+                                cmd.Parameters.AddWithValue("@pid", productId)
+                                If Convert.ToInt32(cmd.ExecuteScalar()) > 0 Then
+                                    Throw New Exception("This item already has stock history, so its first " &
+                                                        "stock has been entered. Use Correction instead.")
+                                End If
+                            End Using
+                        End If
 
                         If avail + qtyChange < 0 Then
                             Throw New Exception("This change would drop stock below zero." & Environment.NewLine &
@@ -469,10 +500,11 @@ Public Class InventoryStockAdjustmentPanelBuilder
         If CommitAdjustment(selected.Id, delta, movementType, refType, note) Then
             ' Re-pull the product so the UI shows the committed number, then reset.
             selected = LoadProduct(selected.Id)
-            If qtyBox IsNot Nothing Then qtyBox.Text = ""
-            If noteBox IsNot Nothing Then ClearNote()
             BuildTargetCard()
+            ' Rebuilt so New Stock drops away once the first count is in.
+            BuildForm()
             BuildHistory()
+            RefreshFormEnabled()
             UpdatePreview()
             AppModal.Show("Stock updated. New quantity: " & newQty & ".",
                           "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
@@ -489,6 +521,8 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' Damage / Loss: always removes stock (force negative magnitude).
         If activeReason = ReasonDamage Then Return -Math.Abs(raw)
+        ' New Stock: the first count of a new item can only add.
+        If activeReason = ReasonNewStock Then Return Math.Abs(raw)
         ' Correction: accept the signed value as-is so a recount can go up or down.
         Return raw
     End Function
@@ -504,8 +538,10 @@ Public Class InventoryStockAdjustmentPanelBuilder
     End Function
 
     Private Shared Function MovementTypeForReason(reason As String) As String
-        ' Inventory adjustments are always Adjustments — new purchased stock enters
-        ' only through the Procurement → Receive PO flow, never from here.
+        ' A new item's first count is its opening stock. Everything else is an
+        ' Adjustment -- replenishment of existing items still enters only
+        ' through Procurement -> Receive PO -> Incoming Stock.
+        If reason = ReasonNewStock Then Return "Initial"
         Return "Adjustment"
     End Function
 
@@ -513,6 +549,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
         Select Case reason
             Case ReasonCorrection : Return "Correction"
             Case ReasonDamage : Return "Damage / Loss"
+            Case ReasonNewStock : Return "New Stock"
             Case Else : Return "Adjustment"
         End Select
     End Function
@@ -660,14 +697,16 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
             AddHandler card.Resize,
                 Sub()
-                    lblQtyVal.Left = card.Width - lblQtyVal.Width - 24
-                    lblQtyVal.Top = 28
+                    ' Stacked from the measured heights: the 28pt figure is ~50px
+                    ' tall, so a fixed "restock at" row at 76 was painted under it.
                     lblQtyCap.Left = card.Width - lblQtyCap.Width - 24
-                    lblQtyCap.Top = 14
+                    lblQtyCap.Top = 12
+                    lblQtyVal.Left = card.Width - lblQtyVal.Width - 22
+                    lblQtyVal.Top = lblQtyCap.Bottom - 4
                     lblReorder.Left = card.Width - lblReorder.Width - 24
-                    lblReorder.Top = 76
+                    lblReorder.Top = lblQtyVal.Bottom - 6
                     btnChange.Left = card.Width - btnChange.Width - 24
-                    btnChange.Top = 100
+                    btnChange.Top = lblReorder.Bottom + 4
                 End Sub
             targetHost.Height = 140
         End If
@@ -779,7 +818,20 @@ Public Class InventoryStockAdjustmentPanelBuilder
     '  ADJUSTMENT FORM
     ' =========================================================================
     Private Shared Sub BuildForm()
+        ' Dispose the previous form: Controls.Clear alone leaks every window
+        ' handle in it, once per product picked.
+        For Each old As Control In formHost.Controls.Cast(Of Control).ToList()
+            old.Dispose()
+        Next
         formHost.Controls.Clear()
+
+        ' A product that has never been stocked starts on New Stock; any other
+        ' product cannot use it.
+        If selected IsNot Nothing AndAlso selected.IsNew Then
+            activeReason = ReasonNewStock
+        ElseIf activeReason = ReasonNewStock Then
+            activeReason = ReasonCorrection
+        End If
 
         Dim card As New BufferedPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg}
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
@@ -804,6 +856,9 @@ Public Class InventoryStockAdjustmentPanelBuilder
         }
         AddHandler card.Resize, Sub() reasonRow.Width = card.Width - 36
         reasonCards.Clear()
+        If selected IsNot Nothing AndAlso selected.IsNew Then
+            reasonRow.Controls.Add(MakeReasonCard("New Stock", "First count, new item", ReasonNewStock, Theme.Forest))
+        End If
         reasonRow.Controls.Add(MakeReasonCard("Correction", "Recount: + or −", ReasonCorrection, MintPrimary))
         reasonRow.Controls.Add(MakeReasonCard("Damage / Loss", "Stock written off", ReasonDamage, NegativeClr))
         card.Controls.Add(reasonRow)
@@ -872,7 +927,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' ---- Live preview ----
         Dim previewWrap As New BufferedPanel With {
-            .Location = New Point(20, 326), .Size = New Size(400, 62), .BackColor = TileBg,
+            .Location = New Point(20, 326), .Size = New Size(400, 70), .BackColor = TileBg,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
         AddHandler previewWrap.Paint,
@@ -887,11 +942,11 @@ Public Class InventoryStockAdjustmentPanelBuilder
             End Sub
         lblPreview = New Label With {
             .Text = "—", .Font = New Font("Segoe UI", 16, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(18, 10), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(18, 6), .BackColor = Color.Transparent
         }
         lblPreviewSub = New Label With {
             .Text = "Select a product to begin", .Font = New Font("Segoe UI", 9.5F),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(20, 38), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(20, 42), .BackColor = Color.Transparent
         }
         previewWrap.Controls.AddRange({lblPreview, lblPreviewSub})
         AddHandler card.Resize, Sub() previewWrap.Width = card.Width - 40
@@ -899,13 +954,13 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
         ' ---- Actions ----
         btnSave = MakePrimaryButton("Save Adjustment")
-        btnSave.Location = New Point(20, 406)
+        btnSave.Location = New Point(20, 412)
         btnSave.Anchor = AnchorStyles.Left Or AnchorStyles.Top
         AddHandler btnSave.Click, Sub() OnSaveClicked()
         card.Controls.Add(btnSave)
 
         Dim btnCancel As Panel = MakeSecondaryButton("Clear")
-        btnCancel.Location = New Point(196, 406)
+        btnCancel.Location = New Point(196, 412)
         AddHandler btnCancel.Click,
             Sub()
                 If qtyBox IsNot Nothing Then qtyBox.Text = ""
@@ -1017,18 +1072,21 @@ Public Class InventoryStockAdjustmentPanelBuilder
 
     Private Shared Sub UpdateModeHint()
         If lblModeHint Is Nothing Then Return
-        If activeReason = ReasonDamage Then
-            lblModeHint.Text = "Enter how many to remove"
-        Else
-            lblModeHint.Text = "Signed: +3 adds, -2 removes"
-        End If
+        Select Case activeReason
+            Case ReasonDamage : lblModeHint.Text = "Enter how many to remove"
+            Case ReasonNewStock : lblModeHint.Text = "Enter how many arrived"
+            Case Else : lblModeHint.Text = "Signed: +3 adds, -2 removes"
+        End Select
 
         If lblReasonInfo IsNot Nothing Then
-            If activeReason = ReasonDamage Then
-                lblReasonInfo.Text = "Always removes stock — enter the quantity to write off."
-            Else
-                lblReasonInfo.Text = "Reconcile to your physical count — positive adds, negative removes."
-            End If
+            Select Case activeReason
+                Case ReasonDamage
+                    lblReasonInfo.Text = "Always removes stock — enter the quantity to write off."
+                Case ReasonNewStock
+                    lblReasonInfo.Text = "This item has never been stocked — this count becomes its opening stock."
+                Case Else
+                    lblReasonInfo.Text = "Reconcile to your physical count — positive adds, negative removes."
+            End Select
         End If
     End Sub
 
@@ -1177,6 +1235,7 @@ Public Class InventoryStockAdjustmentPanelBuilder
             Case ReasonReceive : Return "Received stock"
             Case ReasonCorrection : Return "Correction"
             Case ReasonDamage : Return "Damage / loss"
+            Case ReasonNewStock : Return "Opening stock"
             Case "void" : Return "Void of sale"
             Case "return" : Return "Return"
         End Select

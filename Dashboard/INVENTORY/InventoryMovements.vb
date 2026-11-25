@@ -108,7 +108,7 @@ Public NotInheritable Class InventoryMovements
         End Select
     End Function
 
-    ' "+5" / "-3" / "0", ASCII signs so Excel reads it back as a number.
+    ' "+5" / "-3" / "0" (ASCII signs).
     Public Shared Function Signed(n As Integer) As String
         If n > 0 Then Return "+" & n.ToString("N0", CultureInfo.InvariantCulture)
         Return n.ToString("N0", CultureInfo.InvariantCulture)

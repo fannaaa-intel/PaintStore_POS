@@ -285,7 +285,7 @@ Public Class InventoryLowStockPanelBuilder
         }
         lblSubtitle = New Label With {
             .Text = SubtitleText(), .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 58)
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 64)
         }
         region.Controls.AddRange({lblTitle, lblSubtitle})
 

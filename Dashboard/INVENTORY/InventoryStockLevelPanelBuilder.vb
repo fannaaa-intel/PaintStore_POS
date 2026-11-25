@@ -38,7 +38,7 @@ Imports MySql.Data.MySqlClient
 '     Out      : stock_qty <= 0
 '     Critical : stock_qty <= reorder_level   (and > 0)
 '     Low      : stock_qty > reorder_level but <= reorder_level * 1.25
-'     Healthy  : above that
+'     Normal   : above that (shown as "Normal"; was "Healthy")
 '
 '  Each row carries an "Adjust" link that opens Stock Adjustment with that
 '  product already selected, via INVENTORY_STAFF.OpenStockAdjustmentFor.
@@ -348,7 +348,7 @@ Public Class InventoryStockLevelPanelBuilder
             Case TierOut : Return "Out"
             Case TierCritical : Return "Critical"
             Case TierLow : Return "Low"
-            Case Else : Return "Healthy"
+            Case Else : Return "Normal"
         End Select
     End Function
 
@@ -368,7 +368,7 @@ Public Class InventoryStockLevelPanelBuilder
         }
         lblSubtitle = New Label With {
             .Text = SubtitleText(), .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 58)
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(26, 64)
         }
         region.Controls.AddRange({lblTitle, lblSubtitle})
 
@@ -534,7 +534,7 @@ Public Class InventoryStockLevelPanelBuilder
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim kpiDef() As (title As String, tier As String, clr As Color, sub1 As String, badge As String) = {
-            ("Healthy", TierHealthy, HealthyClr, "Comfortable stock", "OK"),
+            ("Normal", TierHealthy, HealthyClr, "Comfortable stock", "OK"),
             ("Low", TierLow, LowClr, "Near restock level", "Low"),
             ("Critical", TierCritical, CriticalClr, "At or below restock level", "Crit"),
             ("Out of Stock", TierOut, OutClr, "Zero on hand", "Out")
@@ -1116,7 +1116,7 @@ Public Class InventoryStockLevelPanelBuilder
             Case TierLow
                 Return ("Low", Color.FromArgb(170, 130, 0), Color.FromArgb(251, 244, 222))
             Case Else
-                Return ("Healthy", Color.FromArgb(0, 130, 90), Color.FromArgb(227, 247, 238))
+                Return ("Normal", Color.FromArgb(0, 130, 90), Color.FromArgb(227, 247, 238))
         End Select
     End Function
 

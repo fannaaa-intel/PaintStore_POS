@@ -733,15 +733,15 @@ Public Class AdminProcurementOverviewPanelBuilder
                     If active Then
                         tab.BackColor = MintPrimary
                         tab.ForeColor = Color.White
-                        tab.Font = New Font("Segoe UI Semibold", 9.5F)
+                        tab.Font = Theme.Semibold(9.5F)
                     ElseIf hover Then
                         tab.BackColor = Color.FromArgb(210, 240, 235)
                         tab.ForeColor = MintDark
-                        tab.Font = New Font("Segoe UI", 9.5F)
+                        tab.Font = Theme.Regular(9.5F)
                     Else
                         tab.BackColor = Color.FromArgb(220, 235, 232)
                         tab.ForeColor = SubText
-                        tab.Font = New Font("Segoe UI", 9.5F)
+                        tab.Font = Theme.Regular(9.5F)
                     End If
                     tab.Invalidate()
                 End Sub

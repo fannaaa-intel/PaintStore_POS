@@ -217,7 +217,7 @@ Public Class InventoryPutAwayPanelBuilder
                        count & If(count = 1, " order has", " orders have") &
                        " stock waiting to be stocked in"),
             .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(30, 56)
+            .AutoSize = True, .Location = New Point(30, 60)
         }
 
         region.Controls.AddRange({lblTitle, lblSub})

@@ -183,7 +183,7 @@ Public Class ProcurementSuppliersPanelBuilder
             .Text = If(count = 0, "No suppliers yet",
                        If(count = 1, "1 supplier registered", count & " suppliers registered")),
             .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(30, 58), .BackColor = Color.Transparent
+            .AutoSize = True, .Location = New Point(30, 62), .BackColor = Color.Transparent
         }
 
         Dim btnAdd As New Button With {

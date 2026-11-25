@@ -19,6 +19,20 @@ Public Module LowStockAlert
 
     Private ReadOnly BadgeRed As Color = Color.FromArgb(211, 47, 47)
 
+    ' THE low-stock rule, for every screen: an item needs restocking once it
+    ' is at, or within 25% above, its restock level (out of stock included).
+    ' The Inventory dashboard, Item List and POS home used "at or below" while
+    ' this badge used the 25% margin, so the badge could say 1 while the
+    ' dashboard said 0 (fixed Nov 2026).
+    Public Function NeedsRestock(qty As Integer, restockLevel As Integer) As Boolean
+        Return qty * 100 <= restockLevel * 125
+    End Function
+
+    ' The same rule in SQL; prefix is a table alias with its dot ("p.") or "".
+    Public Function NeedsRestockSql(Optional prefix As String = "") As String
+        Return "(" & prefix & "stock_qty * 100 <= " & prefix & "reorder_level * 125)"
+    End Function
+
     ' Products that need restocking. Returns -1 when the database cannot be
     ' read, so callers can hide the badge instead of showing a wrong 0.
     Public Function CountLowStock() As Integer

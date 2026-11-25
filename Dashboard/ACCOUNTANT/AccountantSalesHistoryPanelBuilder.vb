@@ -466,6 +466,7 @@ Public Class AccountantSalesHistoryPanelBuilder
             .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
         Return card
     End Function
 

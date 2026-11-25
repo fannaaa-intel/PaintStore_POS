@@ -1,4 +1,4 @@
-<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()> _
+﻿<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()> _
 Partial Class ADMIN_STAFF
     Inherits System.Windows.Forms.Form
 
@@ -184,7 +184,7 @@ Partial Class ADMIN_STAFF
         Me.ClientSize = New System.Drawing.Size(1924, 853)
         Me.Controls.Add(Me.Nav)
         Me.Name = "ADMIN_STAFF"
-        Me.Text = "ADMIN_STAFF"
+        Me.Text = "Paint Store POS - Admin"
         Me.WindowState = System.Windows.Forms.FormWindowState.Maximized
         Me.Nav.ResumeLayout(False)
         Me.ResumeLayout(False)

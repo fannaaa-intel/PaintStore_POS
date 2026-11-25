@@ -1,4 +1,4 @@
-Imports System.Drawing
+﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Windows.Forms
 Imports System.Linq
@@ -468,6 +468,7 @@ Public Class AccountantPayablesPanelBuilder
             .Location = New Point(22, 100), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
+        TextFit.FitWidth(lblVal, card)
         Return card
     End Function
 

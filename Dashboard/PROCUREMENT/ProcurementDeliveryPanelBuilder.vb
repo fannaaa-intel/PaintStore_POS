@@ -138,7 +138,7 @@ Public Class ProcurementDeliveryPanelBuilder
             .Text = active & If(active = 1, " active order", " active orders") &
                     If(overdue > 0, "   " & ChrW(8226) & "   " & overdue & " overdue", ""),
             .Font = New Font("Segoe UI", 11), .ForeColor = If(overdue > 0, NegativeClr, SubText),
-            .AutoSize = True, .Location = New Point(30, 58)
+            .AutoSize = True, .Location = New Point(30, 64)
         }
         AddHandler region.Resize,
             Sub()

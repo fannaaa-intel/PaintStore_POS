@@ -118,7 +118,7 @@ Partial Class INVENTORY_STAFF
         Me.ClientSize = New System.Drawing.Size(1924, 853)
         Me.Controls.Add(Me.Nav)
         Me.Name = "INVENTORY_STAFF"
-        Me.Text = "INVENTORY_STAFF"
+        Me.Text = "Paint Store POS - Inventory"
         Me.WindowState = System.Windows.Forms.FormWindowState.Maximized
         Me.Nav.ResumeLayout(False)
         Me.ResumeLayout(False)

@@ -152,7 +152,7 @@ Public Class SettingsPanelBuilder
             Dim tabId As SettingsTab = t.tab
             Dim b As New Button With {
                 .Text = t.caption, .FlatStyle = FlatStyle.Flat, .Cursor = Cursors.Hand,
-                .Font = New Font("Segoe UI Semibold", 10), .Height = 38,
+                .Font = Theme.Semibold(10), .Height = 38,
                 .Margin = New Padding(3, 0, 5, 0)
             }
             b.Width = TextRenderer.MeasureText(b.Text, b.Font).Width + 36
@@ -162,11 +162,35 @@ Public Class SettingsPanelBuilder
             _tabButtons(tabId) = b
             strip.Controls.Add(b)
         Next
+        ' The Admin's seven tabs need ~1,080px at full size; on a 1280 or 1366
+        ' laptop the last one ran off the edge. Tighten the padding (and then
+        ' the type) until the row fits the strip.
+        Dim fitTabs As Action =
+            Sub()
+                Dim avail As Integer = strip.ClientSize.Width - strip.Padding.Horizontal
+                If avail <= 0 Then Return
+                For Each spec In {(36, 10.0F), (24, 10.0F), (18, 9.5F), (12, 9.0F)}
+                    Dim f As Font = Theme.Semibold(spec.Item2)
+                    Dim total As Integer = 0
+                    For Each b As Button In _tabButtons.Values
+                        total += TextRenderer.MeasureText(b.Text, f).Width + spec.Item1 + b.Margin.Horizontal
+                    Next
+                    If total <= avail OrElse spec.Item1 = 12 Then
+                        For Each b As Button In _tabButtons.Values
+                            b.Font = f
+                            b.Width = TextRenderer.MeasureText(b.Text, f).Width + spec.Item1
+                        Next
+                        Exit For
+                    End If
+                Next
+            End Sub
+        AddHandler strip.Resize, Sub() fitTabs()
 
         _container.Controls.Add(_host)
         _container.Controls.Add(strip)
         _container.Controls.Add(titleBar)
         _container.ResumeLayout()
+        fitTabs()
         ShowTab(_tab)
     End Sub
 
@@ -627,20 +651,22 @@ Public Class SettingsPanelBuilder
             .Text = "Folder:  " & _backupFolder, .Font = New Font("Segoe UI Semibold", 9.5F),
             .ForeColor = MintDark, .AutoSize = False, .AutoEllipsis = True,
             .Location = New Point(24, 110), .Size = New Size(500, 22), .BackColor = Color.Transparent}
-        Dim btnNow As Button = MakeButton("Back Up Now", True, 140)
+        ' Admin: Back Up / Change Folder / Restore.  Inventory: Back Up only --
+        ' restoring replaces all data, so it stays with the Admin (owner's
+        ' decision, Sept 2026; button names from the Nov 2026 revision).
+        Dim btnNow As Button = MakeButton("Back Up", True, 120)
         Dim btnFolder As Button = MakeButton("Change Folder", False, 130)
-        Dim btnOpen As Button = MakeButton("Open Folder", False, 120)
-        Dim btnFile As Button = MakeButton("Restore from File...", False, 170)
+        Dim btnFile As Button = MakeButton("Restore", False, 110)
+        btnFolder.Visible = canRestore
         btnFile.Visible = canRestore
-        card.Controls.AddRange({lblInfo, lblFolder, btnNow, btnFolder, btnOpen, btnFile})
+        card.Controls.AddRange({lblInfo, lblFolder, btnNow, btnFolder, btnFile})
         AddHandler card.Resize,
             Sub()
                 lblInfo.Width = Math.Max(200, card.Width - 48)
                 btnNow.Location = New Point(card.Width - btnNow.Width - 24, 104)
                 btnFolder.Location = New Point(btnNow.Left - btnFolder.Width - 8, 104)
-                btnOpen.Location = New Point(btnFolder.Left - btnOpen.Width - 8, 104)
-                btnFile.Location = New Point(btnOpen.Left - btnFile.Width - 8, 104)
-                lblFolder.Width = Math.Max(120, If(canRestore, btnFile.Left, btnOpen.Left) - 36)
+                btnFile.Location = New Point(btnFolder.Left - btnFile.Width - 8, 104)
+                lblFolder.Width = Math.Max(120, If(canRestore, btnFile.Left, btnNow.Left) - 36)
             End Sub
 
         AddHandler btnNow.Click,
@@ -665,16 +691,6 @@ Public Class SettingsPanelBuilder
                     End If
                 End Using
             End Sub
-        AddHandler btnOpen.Click,
-            Sub()
-                Try
-                    Directory.CreateDirectory(_backupFolder)
-                    Process.Start("explorer.exe", """" & _backupFolder & """")
-                Catch ex As Exception
-                    AppModal.Show("Could not open the folder: " & ErrorLog.ForUser(ex), "Backup",
-                                  MessageBoxButtons.OK, MessageBoxIcon.Error)
-                End Try
-            End Sub
         AddHandler btnFile.Click,
             Sub()
                 Using dlg As New OpenFileDialog With {
@@ -687,7 +703,7 @@ Public Class SettingsPanelBuilder
         Dim list As FlowLayoutPanel = NewRowList(card)
         Dim files As List(Of FileInfo) = Backup.ListBackups(_backupFolder)
         If files.Count = 0 Then
-            list.Controls.Add(EmptyRow("No backups in this folder yet. Press Back Up Now."))
+            list.Controls.Add(EmptyRow("No backups in this folder yet. Press Back Up."))
         End If
         For Each fi In files
             Dim f As FileInfo = fi
@@ -811,7 +827,7 @@ Public Class SettingsPanelBuilder
 
     ' =========================================================================
     '  REPORT SIGNATORIES (accountant, admin) - the names in the signature
-    '  block at the foot of every printed, PDF and Excel report.
+    '  block at the foot of every printed and PDF report.
     ' =========================================================================
     Private Shared Sub BuildSignatoriesTab()
         Dim scroll As Panel = NewScrollHost()
@@ -822,7 +838,8 @@ Public Class SettingsPanelBuilder
 
         card.Controls.Add(New Label With {
             .Text = "These names are printed at the bottom of every report you print or save as " &
-                    "PDF or Excel. Leave a name blank to get an empty line to sign by hand.",
+                    "PDF. Leave a name blank to get an empty line to sign by hand. " &
+                    "(Inventory reports have no Checked by line.)",
             .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = False,
             .Size = New Size(820, 40), .Location = New Point(24, 52), .BackColor = Color.Transparent})
 
@@ -849,7 +866,8 @@ Public Class SettingsPanelBuilder
         ' Prepared by is always whoever generates the report.
         addCaption("Prepared by")
         card.Controls.Add(New Label With {
-            .Text = "Filled in automatically: " & Session.CurrentFullName & "  (" & Session.CurrentRole & ")" &
+            .Text = "Filled in automatically: " & Session.CurrentFullName & "  (" &
+                    ReportSignatories.PositionTitle(Session.CurrentRole) & ")" &
                     " - or whoever is signed in when the report is made.",
             .Font = New Font("Segoe UI", 10), .ForeColor = SubText, .AutoSize = True,
             .Location = New Point(24, y + 30), .BackColor = Color.Transparent})

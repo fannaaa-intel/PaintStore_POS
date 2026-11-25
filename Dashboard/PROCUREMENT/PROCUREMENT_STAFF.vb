@@ -405,7 +405,7 @@ Public Class PROCUREMENT_STAFF
             btn.Image = padded
         End If
 
-        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+        btn.Font = Theme.Semibold(12)
         btn.ForeColor = Color.FromArgb(90, 105, 102)
         btn.TextImageRelation = TextImageRelation.ImageBeforeText
         btn.ImageAlign = ContentAlignment.MiddleLeft
@@ -427,13 +427,13 @@ Public Class PROCUREMENT_STAFF
             If TypeOf ctrl Is Button AndAlso ctrl IsNot logout Then
                 ctrl.BackColor = NavBg
                 ctrl.ForeColor = Color.FromArgb(90, 105, 102)
-                ctrl.Font = New Font("Segoe UI Semibold", 12, FontStyle.Regular)
+                ctrl.Font = Theme.Semibold(12)
                 ctrl.Tag = ""
             End If
         Next
         btn.BackColor = MintLight
         btn.ForeColor = MintDarkTop
-        btn.Font = New Font("Segoe UI Semibold", 12, FontStyle.Bold)
+        btn.Font = Theme.SemiboldBold(12)
         btn.Tag = "active"
 
         If _btnStockLevel IsNot Nothing Then
@@ -505,7 +505,7 @@ Public Class PROCUREMENT_STAFF
     Private Sub ApplyModernButton(btn As Button)
         btn.FlatStyle = FlatStyle.Flat
         btn.FlatAppearance.BorderSize = 0
-        btn.Font = New Font("Segoe UI Semibold", 10, FontStyle.Bold)
+        btn.Font = Theme.SemiboldBold(10)
         btn.ForeColor = Color.White
         btn.Cursor = Cursors.Hand
 

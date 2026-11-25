@@ -2,9 +2,9 @@ Imports MySql.Data.MySqlClient
 
 ' =============================================================================
 '  ReportSignatories  —  the names printed in the signature block at the foot
-'  of every generated report (print, PDF and Excel).
+'  of every generated report (print and PDF).
 '
-'    Prepared by   the signed-in user, with their role as the position
+'    Prepared by   the signed-in user, with their job title (PositionTitle)
 '    Checked by    set in Settings > Report Signatories
 '    Approved by   set in Settings > Report Signatories
 '
@@ -103,15 +103,35 @@ Public Module ReportSignatories
         End Try
     End Function
 
-    ' The three signers for a report generated now, by the signed-in user.
-    Public Function ForReport() As List(Of Signer)
+    ' The signers for a report generated now, by the signed-in user.
+    ' includeChecked = False leaves the Checked by line out (Inventory reports
+    ' are signed by the clerk who prepared them and the approver only).
+    Public Function ForReport(Optional includeChecked As Boolean = True) As List(Of Signer)
         Dim s As Settings = Load()
-        Return New List(Of Signer) From {
+        Dim list As New List(Of Signer) From {
             New Signer With {.Caption = "Prepared by", .Name = If(Session.CurrentFullName, ""),
-                             .Position = If(Session.CurrentRole, "")},
-            New Signer With {.Caption = "Checked by", .Name = s.CheckedName, .Position = s.CheckedPosition},
-            New Signer With {.Caption = "Approved by", .Name = s.ApprovedName, .Position = s.ApprovedPosition}
+                             .Position = PositionTitle(Session.CurrentRole)}
         }
+        If includeChecked Then
+            list.Add(New Signer With {.Caption = "Checked by", .Name = s.CheckedName, .Position = s.CheckedPosition})
+        End If
+        list.Add(New Signer With {.Caption = "Approved by", .Name = s.ApprovedName, .Position = s.ApprovedPosition})
+        Return list
+    End Function
+
+    ' The job title printed under the preparer's name. The role names in the
+    ' database ("Inventory", "Admin") read like module names on a signed
+    ' document, so each is shown as the position the person actually holds.
+    Public Function PositionTitle(role As String) As String
+        Select Case If(role, "").Trim().ToLowerInvariant()
+            Case "admin" : Return "Store Manager"
+            Case "inventory" : Return "Inventory Clerk"
+            Case "accountant" : Return "Accountant"
+            Case "procurement" : Return "Procurement Officer"
+            Case "cashier" : Return "Cashier"
+            Case "" : Return ""
+            Case Else : Return role.Trim()
+        End Select
     End Function
 
     Private Function Text(v As Object) As String
