@@ -1034,7 +1034,9 @@ Public Class InventoryItemListPanelBuilder
         ' WinForms does not offset absolute children by a container's Padding, so
         ' setting it only inflated the scroll range. The breathing room below the
         ' header comes from the starting y instead.
-        Dim body As New Panel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .AutoScroll = True, .Padding = New Padding(0)}
+        ' QuietScrollPanel: still scrolls with the wheel on a short screen, but
+        ' never shows a scrollbar beside the form.
+        Dim body As New QuietScrollPanel With {.Dock = DockStyle.Fill, .BackColor = CardBg, .AutoScroll = True, .Padding = New Padding(0)}
 
         Dim y As Integer = 20
         Dim L As Integer = 28
