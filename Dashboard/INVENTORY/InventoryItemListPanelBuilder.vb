@@ -146,7 +146,7 @@ Public Class InventoryItemListPanelBuilder
     ' ── CONTROL REFERENCES ───────────────────────────────────────────────────────
     ' Fixed row pitch — shared by real rows and the blank filler rows painted
     ' beneath them, so the ruling stays continuous down the whole table.
-    Private Const ROW_HEIGHT As Integer = 64
+    Private Shared ReadOnly ROW_HEIGHT As Integer = Theme.Dense(64, 54)
 
     Private Shared containerRef As Panel
     Private Shared rowsHost As Panel
@@ -313,10 +313,10 @@ Public Class InventoryItemListPanelBuilder
     '  TOP REGION
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
-        Dim region As New Panel With {.Height = 306, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {.Height = 306 - Theme.KpiSaved - Theme.Dense(0, 22), .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
-            .Text = "Item List", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .Text = "Item List", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
         lblSubtitle = New Label With {
@@ -387,7 +387,7 @@ Public Class InventoryItemListPanelBuilder
 
         ' ---- KPI ROW ----
         Dim kpiRow As New TableLayoutPanel With {
-            .Left = 24, .Top = 92, .Height = 140, .ColumnCount = 4, .RowCount = 1,
+            .Left = 24, .Top = 92, .Height = Theme.KpiH, .ColumnCount = 4, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -414,15 +414,15 @@ Public Class InventoryItemListPanelBuilder
 
             Dim lblK As New Label With {
                 .Text = kd.title, .Font = New Font("Segoe UI", 11),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
             }
             Dim lblV As New Label With {
-                .Text = "0", .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-                .ForeColor = kd.clr, .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
+                .Text = "0", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
+                .ForeColor = kd.clr, .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
             }
             Dim lblS As New Label With {
                 .Text = kd.sub1, .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
+                .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
             }
             card.Controls.AddRange({lblK, lblV, lblS})
 
@@ -436,7 +436,7 @@ Public Class InventoryItemListPanelBuilder
                 AddHandler card.Resize,
                     Sub()
                         badge.Left = card.Width - badge.Width - 14
-                        badge.Top = 14
+                        badge.Top = Theme.KpiCaptionTop
                     End Sub
             End If
 
@@ -461,7 +461,7 @@ Public Class InventoryItemListPanelBuilder
 
         ' ---- CATEGORY CHIPS ----
         Dim chipFlow As New FlowLayoutPanel With {
-            .Left = 22, .Top = 248, .Height = 44, .AutoSize = False, .WrapContents = False,
+            .Left = 22, .Top = 92 + Theme.KpiH + Theme.Dense(16, 10), .Height = 44, .AutoSize = False, .WrapContents = False,
             .BackColor = Color.Transparent, .Padding = New Padding(0),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -817,14 +817,14 @@ Public Class InventoryItemListPanelBuilder
         ' Col 0 — media thumbnail + name + sku
         Dim cProduct As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         Dim thumb As Panel = BuildRowThumb(it)
-        thumb.Location = New Point(2, 13)
+        thumb.Location = New Point(2, (ROW_HEIGHT - 38) \ 2)
         Dim lblName As New Label With {
             .Text = it.Name, .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(52, 13), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(52, ROW_HEIGHT \ 2 - 19), .BackColor = Color.Transparent
         }
         Dim lblSku As New Label With {
             .Text = it.Sku, .Font = New Font("Segoe UI", 8.5F),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(52, 34), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(52, ROW_HEIGHT \ 2 + 2), .BackColor = Color.Transparent
         }
         cProduct.Controls.AddRange({thumb, lblName, lblSku})
         AddHandler cProduct.Resize, Sub() TextFit.Clamp(lblName, cProduct.Width - lblName.Left - 10)
@@ -833,11 +833,11 @@ Public Class InventoryItemListPanelBuilder
         Dim cTypeSize As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         Dim lblType As New Label With {
             .Text = If(it.PaintType = "", it.CategoryName, it.PaintType), .Font = New Font("Segoe UI", 10),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(0, 14), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(0, ROW_HEIGHT \ 2 - 18), .BackColor = Color.Transparent
         }
         Dim lblSize As New Label With {
             .Text = If(it.SizeLabel = "", ChrW(8212).ToString(), it.SizeLabel), .Font = New Font("Segoe UI", 8.5F),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, 34), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(0, ROW_HEIGHT \ 2 + 2), .BackColor = Color.Transparent
         }
         cTypeSize.Controls.AddRange({lblType, lblSize})
 
@@ -996,7 +996,7 @@ Public Class InventoryItemListPanelBuilder
             Sub(s, e)
                 If header.Width <= 0 Then Return
                 Using lg As New LinearGradientBrush(header.ClientRectangle, MintDark, MintDeep, 25.0F)
-                    e.Graphics.FillRectangle(lg, header.ClientRectangle)
+                    e.Graphics.FillBackground(lg, header.ClientRectangle)
                 End Using
             End Sub
         Dim titleText As String = If(viewOnly, "Product Details", If(editing, "Edit Item", "Add Item"))

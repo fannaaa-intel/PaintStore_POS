@@ -954,7 +954,12 @@ Public Class CashPanelBuilder
 
         Dim hint As String
         If _lblVariance IsNot Nothing Then
-            If variance = 0D Then
+            If counted = 0D AndAlso expected <> 0D Then
+                ' Nothing counted yet: a big red "-P6,395.00" read as cash
+                ' missing before the cashier had even started counting.
+                _lblVariance.Text = "—"
+                _lblVariance.ForeColor = Color.FromArgb(190, 215, 208)
+            ElseIf variance = 0D Then
                 _lblVariance.Text = "✓  ₱ 0.00"
                 _lblVariance.ForeColor = OkGreen
             ElseIf variance > 0D Then

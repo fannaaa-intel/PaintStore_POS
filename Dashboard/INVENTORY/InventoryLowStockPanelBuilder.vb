@@ -78,8 +78,8 @@ Public Class InventoryLowStockPanelBuilder
     Private Const RColActionW As Integer = 180   ' widened: holds "Request" + "Receive" side-by-side
     Private Const RColValueW As Integer = 110
     Private Const RColStatusW As Integer = 90
-    Private Const RColQtyW As Integer = 120
-    Private Const RColCatW As Integer = 130
+    Private Const RColQtyW As Integer = 104
+    Private Const RColCatW As Integer = 112
     Private Const RColGap As Integer = 20
 
     Private Shared Function ColX(width As Integer) As (cat As Integer, qty As Integer, status As Integer, value As Integer, action As Integer)
@@ -277,10 +277,10 @@ Public Class InventoryLowStockPanelBuilder
     '  TOP REGION  (title + KPIs + Refresh + Copy order list)
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
-        Dim region As New Panel With {.Height = 240, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {.Height = 240 - (124 - Theme.Dense(124, Theme.KpiH)), .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
-            .Text = "Low Stock Alerts", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .Text = "Low Stock Alerts", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
         lblSubtitle = New Label With {
@@ -365,7 +365,7 @@ Public Class InventoryLowStockPanelBuilder
 
         ' ---- KPI row: items to reorder / units short / estimated value ----
         Dim kpiRow As New TableLayoutPanel With {
-            .Left = 24, .Top = 96, .Height = 124, .ColumnCount = 3, .RowCount = 1,
+            .Left = 24, .Top = 96, .Height = Theme.Dense(124, Theme.KpiH), .ColumnCount = 3, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -411,15 +411,15 @@ Public Class InventoryLowStockPanelBuilder
 
         Dim lblCap As New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
-            .Text = value, .Font = New Font("Segoe UI", 24, FontStyle.Bold),
-            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, 40), .BackColor = Color.Transparent
+            .Text = value, .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
+            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, Theme.Dense(40, Theme.KpiValueTop)), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = sub1, .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 88), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.Dense(88, Theme.KpiSubTop)), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         card.Tag = lblVal   ' caller reads this to get the live-update reference
@@ -519,26 +519,37 @@ Public Class InventoryLowStockPanelBuilder
 
         Dim width As Integer = rowsHost.ClientSize.Width - 4
 
-        ' One header strip for the whole table.
-        Dim headerStrip As Panel = BuildTableHeader()
-        headerStrip.Location = New Point(0, 4)
-        headerStrip.Width = width
-        headerStrip.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
-        rowsHost.Controls.Add(headerStrip)
-
-        ' Card that holds all the rows.
         ' 78px: at 64 the 42px thumbnail plus the two-line name/SKU stack left
         ' almost no breathing room top or bottom and the row read as cramped.
-        Dim rowH As Integer = 78
+        ' A short screen uses 60px with a smaller thumbnail instead, so more
+        ' than five items fit.
+        Dim rowH As Integer = Theme.Dense(78, 60)
+
+        ' The column header now sits INSIDE the card, above a rule, like every
+        ' other table in the app (it used to float on the page background).
+        Dim headerStrip As Panel = BuildTableHeader()
+        Const HEADER_TOP As Integer = 6
+        Dim rowsTop As Integer = HEADER_TOP + headerStrip.Height + 2
         Dim card As New BufferedPanel With {
-            .Height = items.Count * rowH + 12, .BackColor = CardBg
+            .Height = rowsTop + items.Count * rowH + 6, .BackColor = CardBg
         }
         AddHandler card.Paint, Sub(s, e) PaintCard(CType(s, Panel), e)
-        card.Location = New Point(0, 4 + headerStrip.Height + 6)
+        card.Location = New Point(0, 4)
         card.Width = width
         card.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
 
-        Dim y As Integer = 6
+        headerStrip.Location = New Point(0, HEADER_TOP)
+        headerStrip.Width = card.Width
+        headerStrip.Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
+        AddHandler headerStrip.Paint,
+            Sub(s, e)
+                Using pen As New Pen(RowDivider, 1)
+                    e.Graphics.DrawLine(pen, 20, headerStrip.Height - 1, headerStrip.Width - 20, headerStrip.Height - 1)
+                End Using
+            End Sub
+        card.Controls.Add(headerStrip)
+
+        Dim y As Integer = rowsTop
         For Each it In sorted
             Dim row As Panel = BuildItemRow(it, rowH)
             row.Location = New Point(0, y)
@@ -588,7 +599,7 @@ Public Class InventoryLowStockPanelBuilder
         AddHandler row.MouseLeave, Sub() row.BackColor = Color.Transparent
 
         ' PRODUCT thumbnail + name + SKU
-        Const ThumbSize As Integer = 50
+        Dim ThumbSize As Integer = If(height < 70, 40, 50)
         Dim thumb As Panel = BuildThumb(it, ThumbSize)
         thumb.Location = New Point(ColProductX, (height - ThumbSize) \ 2)
         row.Controls.Add(thumb)

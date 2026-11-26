@@ -142,7 +142,7 @@ Public Class AdminUserPanelBuilder
     Private Shared _tileStrip As Panel
 
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 64
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(64, 54)
     Private Const SEARCH_PLACEHOLDER As String = "Search by name or username…"
 
     ' One ToolTip for the whole panel; a per-row instance would leak a
@@ -503,7 +503,7 @@ Public Class AdminUserPanelBuilder
     ' value 26pt bold at (20,36), sub-label 10pt at (22,100), 12px between
     ' cards. Matching it exactly is the point - a card that is nearly the same
     ' size reads as a mistake, not as a variation.
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
 
     Private Shared Function BuildTileStrip() As Panel
         Dim bar As New Panel With {
@@ -560,23 +560,24 @@ Public Class AdminUserPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(22, 14),
+            .Location = New Point(22, Theme.KpiCaptionTop),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(20, 36),
+            .Location = New Point(20, Theme.KpiValueTop),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText,
-            .AutoSize = True,
-            .Location = New Point(22, 100),
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop),
             .BackColor = Color.Transparent
         })
 
@@ -1943,7 +1944,7 @@ Public Class AdminUserPanelBuilder
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(Color.FromArgb(249, 252, 251))
-                    g.FillRectangle(bg, b.ClientRectangle)
+                    g.FillBackground(bg, b.ClientRectangle)
                 End Using
                 Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
                 Using br As New SolidBrush(b.BackColor)
@@ -2328,7 +2329,7 @@ Public Class AdminUserPanelBuilder
                     Dim g = e.Graphics
                     g.SmoothingMode = SmoothingMode.AntiAlias
                     Using bg As New SolidBrush(CardBg)
-                        g.FillRectangle(bg, bb.ClientRectangle)
+                        g.FillBackground(bg, bb.ClientRectangle)
                     End Using
                     Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
                     Using br As New SolidBrush(bb.BackColor)

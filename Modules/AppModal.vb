@@ -58,7 +58,7 @@ Public Module AppModal
 
         ' 1) Erase the control's square corners into the card background.
         Using bgBrush As New SolidBrush(CardBg)
-            g.FillRectangle(bgBrush, bb.ClientRectangle)
+            g.FillBackground(bgBrush, bb.ClientRectangle)
         End Using
 
         Dim rect = bb.ClientRectangle

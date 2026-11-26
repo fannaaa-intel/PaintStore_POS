@@ -391,7 +391,7 @@ Public Class AdminFinancialReportsPanelBuilder
     ' Two rows of 140px cards, the house KPI height used across the Admin
     ' screens. The cards carry Padding(6) margins, so each row needs 140+12:
     ' at the old 232 the cards were only 104 tall and the sub-label rode high.
-    Private Const SUMMARY_CARD_H As Integer = 140
+    Private Shared ReadOnly SUMMARY_CARD_H As Integer = Theme.KpiH
 
     Private Shared Function BuildSummaryCards() As Panel
         Dim wrap As New Panel With {
@@ -441,23 +441,24 @@ Public Class AdminFinancialReportsPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(22, 14),
+            .Location = New Point(22, Theme.KpiCaptionTop),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(20, 36),
+            .Location = New Point(20, Theme.KpiValueTop),
             .BackColor = Color.Transparent
         })
         card.Controls.Add(New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText,
-            .AutoSize = True,
-            .Location = New Point(22, 100),
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop),
             .BackColor = Color.Transparent
         })
         Return card

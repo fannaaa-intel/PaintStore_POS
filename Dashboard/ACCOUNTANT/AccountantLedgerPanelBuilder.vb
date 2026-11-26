@@ -474,13 +474,13 @@ Public Class AccountantLedgerPanelBuilder
 
         Dim kpiBar As Panel = BuildKpiBar()
         kpiBar.Dock = DockStyle.Top
-        kpiBar.Height = 165
+        kpiBar.Height = 165 - Theme.KpiSaved
 
         Dim topRegion As New Panel With {
             .BackColor = MintBg,
             .AutoSize = False,
             .Dock = DockStyle.Top,
-            .Height = 72 + 56 + 165
+            .Height = 72 + 56 + 165 - Theme.KpiSaved
         }
 
         ' Add order: later-added docks closer to the parent edge (topmost),
@@ -666,7 +666,7 @@ Public Class AccountantLedgerPanelBuilder
         Dim cashCount As Integer = _visibleTxns.Where(Function(t) t.SourceKey = "Cash").Count()
 
         Dim bar As New Panel With {
-            .Height = 165,
+            .Height = 165 - Theme.KpiSaved,
             .BackColor = Color.Transparent,
             .Padding = New Padding(SIDE_PAD, 16, SIDE_PAD, 0)
         }
@@ -684,10 +684,10 @@ Public Class AccountantLedgerPanelBuilder
         kpiRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim kpiDef() As (caption As String, value As String, clr As Color, sub1 As String, srcKey As String) = {
-            ("Total Entries", totalCount.ToString("N0"), MintPrimary, "All entries, " & AccountantPeriod.Text(), "all"),
-            ("Sales & Returns", posCount.ToString("N0"), MintDeep, "Completed sales & processed returns", "POS"),
+            ("Total Entries", totalCount.ToString("N0"), MintPrimary, "All entries in this period", "all"),
+            ("Sales & Returns", posCount.ToString("N0"), MintDeep, "Sales and processed returns", "POS"),
             ("Purchase Orders", procCount.ToString("N0"), Color.FromArgb(30, 90, 180), "Received purchase orders", "Procurement"),
-            ("Cash Movements", cashCount.ToString("N0"), Color.FromArgb(140, 80, 0), "Pay-ins, pay-outs, drops & refunds", "Cash")
+            ("Cash Movements", cashCount.ToString("N0"), Color.FromArgb(140, 80, 0), "Cash in/out, drops & refunds", "Cash")
         }
 
         For i As Integer = 0 To 3
@@ -732,15 +732,15 @@ Public Class AccountantLedgerPanelBuilder
                 .Font = New Font("Segoe UI", 11),
                 .ForeColor = SubText,
                 .AutoSize = True,
-                .Location = New Point(22, 14),
+                .Location = New Point(22, Theme.KpiCaptionTop),
                 .BackColor = Color.Transparent
             }
             Dim lblVal As New Label With {
                 .Text = kd.value,
-                .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+                .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
                 .ForeColor = kd.clr,
                 .AutoSize = True,
-                .Location = New Point(20, 36),
+                .Location = New Point(20, Theme.KpiValueTop),
                 .BackColor = Color.Transparent
             }
             Dim lblSub As New Label With {
@@ -748,8 +748,9 @@ Public Class AccountantLedgerPanelBuilder
                 .UseMnemonic = False,
                 .Font = New Font("Segoe UI", 10),
                 .ForeColor = SubText,
-                .AutoSize = True,
-                .Location = New Point(22, 100),
+                .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+                .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+                .Location = New Point(22, Theme.KpiSubTop),
                 .BackColor = Color.Transparent
             }
             card.Controls.AddRange({lblCap, lblVal, lblSub})
@@ -790,23 +791,24 @@ Public Class AccountantLedgerPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(22, 14),
+            .Location = New Point(22, Theme.KpiCaptionTop),
             .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(20, 36),
+            .Location = New Point(20, Theme.KpiValueTop),
             .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText,
-            .AutoSize = True,
-            .Location = New Point(22, 100),
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop),
             .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})

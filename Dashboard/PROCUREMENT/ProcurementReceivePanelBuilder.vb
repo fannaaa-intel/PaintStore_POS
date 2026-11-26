@@ -220,6 +220,15 @@ Public Class ProcurementReceivePanelBuilder
         }
         card.Controls.AddRange({lblPo, lblSupplier, lblMeta})
 
+        ' Late deliveries stand out here too, so the oldest are received first.
+        If po.HasExpected AndAlso po.ExpectedDate.Date < Date.Today Then
+            Dim days As Integer = (Date.Today - po.ExpectedDate.Date).Days
+            lblMeta.Text = "Overdue " & days & If(days = 1, " day", " days") & "  (expected " &
+                           po.ExpectedDate.ToString("MMM d, yyyy") & ")   " & ChrW(8226) & "   " &
+                           po.ItemCount & If(po.ItemCount = 1, " item", " items")
+            lblMeta.ForeColor = Theme.Danger
+        End If
+
         ' ── Status badge — solid fill, TOP-RIGHT ─────────────────────────────────
         Dim badgeBack As Color
         Select Case po.Status

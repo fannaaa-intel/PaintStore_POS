@@ -325,7 +325,7 @@ Public Class AccountantIncomePanelBuilder
         region.Controls.Add(pillBar)
         region.Controls.Add(titleBar)
 
-        region.Height = 72 + 52 + 165
+        region.Height = 72 + 52 + kpiBar.Height
         Return region
     End Function
 
@@ -492,7 +492,7 @@ Public Class AccountantIncomePanelBuilder
         End If
 
         Dim bar As New Panel With {
-            .Height = 165,
+            .Height = 165 - Theme.KpiSaved,
             .BackColor = Color.Transparent,
             .Padding = New Padding(SIDE_PAD, 16, SIDE_PAD, 0)
         }
@@ -539,19 +539,20 @@ Public Class AccountantIncomePanelBuilder
             .Text = caption,
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr, .AutoSize = True,
-            .Location = New Point(20, 36), .BackColor = Color.Transparent
+            .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         TextFit.FitWidth(lblVal, card)

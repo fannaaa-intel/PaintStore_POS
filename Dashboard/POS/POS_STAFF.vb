@@ -151,6 +151,8 @@ Public Class POS_STAFF
                 End If
             End Sub
 
+        ScreenHost.MakeNavButton(btnHamburger)
+
         AddHandler btnHamburger.Click, AddressOf ToggleNav
         Nav.Controls.Add(btnHamburger)
         btnHamburger.BringToFront()
@@ -666,6 +668,7 @@ Public Class POS_STAFF
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
+        ScreenHost.MakeNavButton(btn)
         btn.Parent = Nav
 
         Dim iconPath As String = ""

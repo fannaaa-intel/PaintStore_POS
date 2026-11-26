@@ -1124,7 +1124,7 @@ Public Class SettingsPanelBuilder
         g.SmoothingMode = SmoothingMode.AntiAlias
         Using bg As New SolidBrush(If(b.Parent IsNot Nothing AndAlso TypeOf b.Parent Is FlowLayoutPanel,
                                       MintBg, CardBg))
-            g.FillRectangle(bg, b.ClientRectangle)
+            g.FillBackground(bg, b.ClientRectangle)
         End Using
         Dim rect = b.ClientRectangle : rect.Inflate(-1, -1)
         Using br As New SolidBrush(b.BackColor)

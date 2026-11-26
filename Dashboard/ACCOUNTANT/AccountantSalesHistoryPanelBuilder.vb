@@ -231,7 +231,7 @@ Public Class AccountantSalesHistoryPanelBuilder
         Dim region As New Panel With {
             .BackColor = MintBg,
             .AutoSize = False,
-            .Height = 289
+            .Height = 289 - Theme.KpiSaved
         }
 
         ' ── Zone 1: Title bar (72px) — title left, search + refresh right ─────
@@ -393,7 +393,7 @@ Public Class AccountantSalesHistoryPanelBuilder
         Dim totalDiscount As Decimal = _visibleRows.Sum(Function(r) r.Discount)
 
         Dim bar As New Panel With {
-            .Height = 165,
+            .Height = 165 - Theme.KpiSaved,
             .BackColor = Color.Transparent,
             .Padding = New Padding(SIDE_PAD, 16, SIDE_PAD, 0)
         }
@@ -446,23 +446,24 @@ Public Class AccountantSalesHistoryPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(22, 14),
+            .Location = New Point(22, Theme.KpiCaptionTop),
             .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(20, 36),
+            .Location = New Point(20, Theme.KpiValueTop),
             .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText,
-            .AutoSize = True,
-            .Location = New Point(22, 100),
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop),
             .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
@@ -493,7 +494,7 @@ Public Class AccountantSalesHistoryPanelBuilder
                 Dim w = hdr.Width
                 labels(0).Left = 24
                 labels(1).Left = CInt(w * 0.13)
-                labels(2).Left = CInt(w * 0.26)
+                labels(2).Left = CInt(w * 0.28)
                 labels(3).Left = CInt(w * 0.46)
                 labels(4).Left = CInt(w * 0.58)
                 labels(5).Left = CInt(w * 0.68)
@@ -663,7 +664,9 @@ Public Class AccountantSalesHistoryPanelBuilder
 
                 lblNo.Left = 24 : lblNo.Top = midY
                 lblDate.Left = CInt(w * 0.13) : lblDate.Top = (height - lblDate.Height) \ 2
-                lblCashier.Left = CInt(w * 0.26) : lblCashier.Top = (height - lblCashier.Height) \ 2
+                lblCashier.Left = CInt(w * 0.28)
+                TextFit.Clamp(lblCashier, CInt(w * 0.46) - lblCashier.Left - 12)
+                lblCashier.Top = (height - lblCashier.Height) \ 2
                 lblPayment.Left = CInt(w * 0.46) : lblPayment.Top = (height - lblPayment.Height) \ 2
                 lblSubtotal.Left = CInt(w * 0.58) : lblSubtotal.Top = (height - lblSubtotal.Height) \ 2
                 lblDiscount.Left = CInt(w * 0.68) : lblDiscount.Top = (height - lblDiscount.Height) \ 2

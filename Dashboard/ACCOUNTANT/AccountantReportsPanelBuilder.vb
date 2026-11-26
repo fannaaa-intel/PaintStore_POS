@@ -242,7 +242,7 @@ Public Class AccountantReportsPanelBuilder
                 Dim bb = CType(s, Button)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(bb.Parent.BackColor)
-                    e.Graphics.FillRectangle(bg, bb.ClientRectangle)
+                    e.Graphics.FillBackground(bg, bb.ClientRectangle)
                 End Using
                 Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
                 Using br As New SolidBrush(bb.BackColor)

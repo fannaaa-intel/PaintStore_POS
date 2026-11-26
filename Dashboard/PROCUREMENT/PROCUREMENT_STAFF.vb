@@ -131,6 +131,8 @@ Public Class PROCUREMENT_STAFF
                 End If
             End Sub
 
+        ScreenHost.MakeNavButton(btnHamburger)
+
         AddHandler btnHamburger.Click, AddressOf ToggleNav
         Nav.Controls.Add(btnHamburger)
         btnHamburger.BringToFront()
@@ -370,6 +372,7 @@ Public Class PROCUREMENT_STAFF
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
+        ScreenHost.MakeNavButton(btn)
         ' Remember the caption before anything can clear it, so the collapsed rail
         ' can put it back (and show it as a tooltip meanwhile).
         navCaptions(btn) = btn.Text

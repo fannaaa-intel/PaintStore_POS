@@ -332,7 +332,9 @@ Public Class MovementChart
         Next
         Dim totIn As Integer = _days.Sum(Function(d) d.UnitsIn)
         Dim totOut As Integer = _days.Sum(Function(d) d.UnitsOut)
-        Dim totals As String = "In " & Signed(totIn) & "   Out " & Signed(totOut)
+        ' Plain unit counts: the legend already says which way they went, and
+        ' "Out -293" read like a negative amount.
+        Dim totals As String = "In " & Math.Abs(totIn).ToString("N0") & "   Out " & Math.Abs(totOut).ToString("N0")
         TextRenderer.DrawText(g, totals, Theme.Semibold(9.5F), New Rectangle(0, 6, Width - 4, 20),
                               DashChartColors.Ink, TextFormatFlags.Right Or TextFormatFlags.NoPrefix)
 

@@ -331,7 +331,7 @@ Public Class ProcurementQuotationsPanelBuilder
         Dim xs(5) As Integer
         xs(0) = COL_PAD
         xs(1) = xs(0) + ColumnW(0, w) + 12
-        xs(2) = xs(1) + COL_SUPPLIER + 12
+        xs(2) = xs(1) + ColumnW(1, w) + 12
         xs(3) = xs(2) + COL_DATES + 12
         xs(4) = xs(3) + COL_STATUS + 12
         xs(5) = xs(4) + COL_TOTAL + 12
@@ -347,7 +347,14 @@ Public Class ProcurementQuotationsPanelBuilder
                 Dim flex As Integer = w - fixedW
                 If flex < 180 Then flex = 180
                 Return flex
-            Case 1 : Return COL_SUPPLIER
+            Case 1
+                ' On a 1366 laptop the columns needed ~60px more than the card
+                ' had, which pushed the action buttons past its right edge.
+                ' The supplier column gives up the shortfall (never below 150).
+                Dim fixedW As Integer = COL_SUPPLIER + COL_DATES + COL_STATUS +
+                                        COL_TOTAL + COL_ACTION + 12 * 5 + COL_PAD * 2
+                Dim shortfall As Integer = Math.Max(0, 180 - (w - fixedW))
+                Return Math.Max(150, COL_SUPPLIER - shortfall)
             Case 2 : Return COL_DATES
             Case 3 : Return COL_STATUS
             Case 4 : Return COL_TOTAL
@@ -431,8 +438,8 @@ Public Class ProcurementQuotationsPanelBuilder
 
                 lblNo.SetBounds(xs(0), 14, w0, 20)
                 lblReq.SetBounds(xs(0), 34, w0, 18)
-                lblSup.SetBounds(xs(1), 14, COL_SUPPLIER, 20)
-                lblBy.SetBounds(xs(1), 34, COL_SUPPLIER, 18)
+                lblSup.SetBounds(xs(1), 14, ColumnW(1, w), 20)
+                lblBy.SetBounds(xs(1), 34, ColumnW(1, w), 18)
                 lblCreated.SetBounds(xs(2), 14, COL_DATES, 20)
                 lblValid.SetBounds(xs(2), 34, COL_DATES, 18)
                 badge.Location = New Point(xs(3), (ROW_H - badge.Height) \ 2)

@@ -79,19 +79,19 @@ Public Class AdminSalesOverviewPanelBuilder
     Private Const ALL_STATUS As String = "All statuses"
     Private Const SEARCH_PLACEHOLDER As String = "Search sale no. or cashier…"
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 76
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(76, 56)
     ' Matches the house KPI band used by Users / Suppliers / Categories:
     ' 140px of card, caption 11pt at (22,14), value 26pt bold at (20,36),
     ' sub-label 10pt at (22,100), 12px between cards. A card that is nearly
     ' the same size as the rest of the system reads as a mistake.
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
 
     Private Const MAX_PAGE_SIZE As Integer = 50
     ' Fixed chrome above and below the row viewport:
     '   topRegion 128 + summary (140+12) + spacers 16+16 + card padding 2
     '   + colHeader 44 + pagerBar 52 + bottomPad 12
     ' Keep this in step with SUMMARY_H or the table misjudges its viewport.
-    Private Const CHROME_H As Integer = 422
+    Private Shared ReadOnly CHROME_H As Integer = 422 - Theme.KpiSaved
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
 
     Private Shared _container As Panel
@@ -643,16 +643,16 @@ Public Class AdminSalesOverviewPanelBuilder
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText,
             .AutoSize = True,
-            .Location = New Point(22, 14),
+            .Location = New Point(22, Theme.KpiCaptionTop),
             .BackColor = Color.Transparent
         })
 
         valueLabel = New Label With {
             .Text = "—",
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr,
             .AutoSize = True,
-            .Location = New Point(20, 36),
+            .Location = New Point(20, Theme.KpiValueTop),
             .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
@@ -662,8 +662,9 @@ Public Class AdminSalesOverviewPanelBuilder
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText,
-            .AutoSize = True,
-            .Location = New Point(22, 100),
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop),
             .BackColor = Color.Transparent
         })
         Return card

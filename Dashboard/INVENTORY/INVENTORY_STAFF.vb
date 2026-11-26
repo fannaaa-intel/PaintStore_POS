@@ -132,6 +132,8 @@ Public Class INVENTORY_STAFF
                 End If
             End Sub
 
+        ScreenHost.MakeNavButton(btnHamburger)
+
         AddHandler btnHamburger.Click, AddressOf ToggleNav
         Nav.Controls.Add(btnHamburger)
         btnHamburger.BringToFront()
@@ -252,7 +254,7 @@ Public Class INVENTORY_STAFF
     ' One notice per login, after the dashboard is on screen, when anything
     ' needs restocking. "Yes" opens Low Stock Alerts.
     Private Sub INVENTORY_STAFF_Shown(sender As Object, e As EventArgs) Handles MyBase.Shown
-        If LowStockAlert.ShowLoginNotice(_lowStockCount) Then lowStock.PerformClick()
+        If LowStockAlert.ShowLoginNotice(_lowStockCount) Then ScreenHost.Press(lowStock)
     End Sub
 
     ' Stacks the MENU buttons from y=128. Eight buttons at the usual 58px pitch
@@ -372,6 +374,7 @@ Public Class INVENTORY_STAFF
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
+        ScreenHost.MakeNavButton(btn)
         ' Remember the caption before anything can clear it, so the collapsed rail
         ' can put it back (and show it as a tooltip meanwhile).
         navCaptions(btn) = btn.Text

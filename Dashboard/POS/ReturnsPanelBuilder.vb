@@ -1477,7 +1477,10 @@ Public Class ReturnsPanelBuilder
             If _lastRtnFee > 0 Then _
                 lines.Add(New ReceiptPrinter.RLine("Restocking fee (" & _lastRtnFeePct.ToString("0.##") & "%)",
                                                    "− ₱ " & _lastRtnFee.ToString("N2")))
-            lines.Add(New ReceiptPrinter.RLine("REFUND", "₱ " & _lastRtnTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
+            lines.Add(ReceiptPrinter.DoubleDivider())
+            lines.Add(ReceiptPrinter.Total("REFUND", "₱ " & _lastRtnTotal.ToString("N2")))
+            lines.Add(ReceiptPrinter.DoubleDivider())
+            lines.Add(ReceiptPrinter.Barcode(_lastRtnNo))
         ElseIf _saleId > 0 AndAlso _items IsNot Nothing AndAlso _items.Any(Function(i) i.SelectedQty > 0) Then
             ' Draft preview of the current selection (not yet processed).
             Dim sel = _items.Where(Function(i) i.SelectedQty > 0).ToList()
@@ -1495,7 +1498,9 @@ Public Class ReturnsPanelBuilder
             lines.Add(ReceiptPrinter.Divider())
             lines.Add(New ReceiptPrinter.RLine("Subtotal", "₱ " & subtotal.ToString("N2")))
             If fee > 0 Then lines.Add(New ReceiptPrinter.RLine("Restocking fee", "− ₱ " & fee.ToString("N2")))
-            lines.Add(New ReceiptPrinter.RLine("REFUND", "₱ " & (subtotal - fee).ToString("N2"), ReceiptPrinter.LineStyle.Bold))
+            lines.Add(ReceiptPrinter.DoubleDivider())
+            lines.Add(ReceiptPrinter.Total("REFUND", "₱ " & (subtotal - fee).ToString("N2")))
+            lines.Add(ReceiptPrinter.DoubleDivider())
         Else
             AppModal.Show("Process a refund or select items first.",
                             "Nothing to Print", MessageBoxButtons.OK, MessageBoxIcon.Information)

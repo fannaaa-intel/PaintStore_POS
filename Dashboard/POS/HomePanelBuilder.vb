@@ -46,6 +46,38 @@ Public Class HomePanelBuilder
 
     Private Shared ReadOnly IconCache As New Dictionary(Of String, Image)
 
+    ' All four Quick Action titles share one size: the largest (13pt down to
+    ' 9pt) at which the longest title fits the tile. Fitting each title on its
+    ' own left "New Transaction" visibly smaller than its neighbours.
+    Private Shared Sub FitTileNames(names As List(Of Label), avail As Integer)
+        If names.Count = 0 OrElse avail <= 0 Then Return
+        Dim size As Single = 13.0F
+        Do While size > 9.0F
+            Dim widest As Integer = 0
+            Using probe As New Font("Segoe UI", size, FontStyle.Bold)
+                For Each l In names
+                    widest = Math.Max(widest, TextRenderer.MeasureText(l.Text, probe).Width)
+                Next
+            End Using
+            If widest <= avail Then Exit Do
+            size -= 0.5F
+        Loop
+        For Each l In names
+            If l.IsDisposed Then Continue For
+            If Math.Abs(l.Font.Size - size) > 0.01F Then l.Font = TileFont(size)
+        Next
+    End Sub
+
+    Private Shared ReadOnly _tileFonts As New Dictionary(Of Single, Font)
+    Private Shared Function TileFont(size As Single) As Font
+        Dim f As Font = Nothing
+        If Not _tileFonts.TryGetValue(size, f) Then
+            f = New Font("Segoe UI", size, FontStyle.Bold)
+            _tileFonts(size) = f
+        End If
+        Return f
+    End Function
+
     Private Shared Function GetIcon(path As String) As Image
         If String.IsNullOrEmpty(path) OrElse Not IO.File.Exists(path) Then Return Nothing
         If Not IconCache.ContainsKey(path) Then
@@ -352,12 +384,13 @@ Public Class HomePanelBuilder
         qaGrid.RowStyles.Add(New RowStyle(SizeType.Percent, 50))
 
         Dim qaTiles() As (title As String, sub1 As String, iconPath As String, fallback As String, iconBg As Color) = {
-    ("New Transaction", "Start transaction", "transaction.png", "+", Color.Transparent),
-    ("Inventory", "View stock", "inventory.png", "▦", Color.Transparent),
+    ("New Sale", "Start a sale", "transaction.png", "+", Color.Transparent),
+    ("Price Check", "Stock & prices", "inventory.png", "▦", Color.Transparent),
     ("Sales History", "Today's sales", "recent.png", "◑", Color.Transparent),
-    ("Cash Drawer", "Count and close", "coins.png", "≡", Color.Transparent)
+    ("Cash Drawer", "Count & close", "coins.png", "≡", Color.Transparent)
 }
 
+        Dim qaNames As New List(Of Label)
         For Each qt In qaTiles
             Dim capQt = qt
             Dim tile As New BufferedPanel With {
@@ -392,22 +425,27 @@ Public Class HomePanelBuilder
                 .Text = capQt.title, .Font = New Font("Segoe UI", 13, FontStyle.Bold),
                 .ForeColor = MintDark, .AutoSize = True, .Location = New Point(14, 60)
             }
+            ' Fixed width with "..." so the caption never runs under the chevron
+            ' ("Start transaction ›" used to overlap on a 1366 laptop).
             Dim tileSub As New Label With {
                 .Text = capQt.sub1, .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(14, 82)
+                .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True,
+                .Height = 20, .Location = New Point(14, 82), .UseMnemonic = False
             }
             Dim chev As New Label With {
                 .Text = "›", .Font = New Font("Segoe UI", 16), .ForeColor = SubText, .AutoSize = True
             }
 
             tile.Controls.AddRange({tileIconBox, tileName, tileSub, chev})
-            ' On a 1280px laptop the tiles are ~150px wide: "New Transaction"
-            ' was cut to "New Transacti". The name now steps down to fit.
-            TextFit.FitWidth(tileName, tile, 26, 9.0F)
+            qaNames.Add(tileName)
             AddHandler tile.Resize,
                 Sub()
                     chev.Left = tile.Width - chev.Width - 10
                     chev.Top = tile.Height - chev.Height - 8
+                    tileSub.Width = Math.Max(30, chev.Left - tileSub.Left - 2)
+                    ' The chevron sits level with the title's lower half, so the
+                    ' title has to stop short of it, not just of the tile edge.
+                    FitTileNames(qaNames, chev.Left - tileName.Left - 6)
                 End Sub
             AddHandler tile.MouseEnter, Sub() tile.BackColor = Color.FromArgb(220, 242, 235)
             AddHandler tile.MouseLeave, Sub() tile.BackColor = TileBg
@@ -886,9 +924,9 @@ Public Class HomePanelBuilder
                     Dim frm = TryCast(nCard.FindForm(), POS_STAFF)
                     If frm Is Nothing Then Return
                     Select Case navDest
-                        Case "inventory" : frm.transaction.PerformClick()
-                        Case "sales" : frm.sales.PerformClick()
-                        Case "transaction" : frm.transaction.PerformClick()
+                        Case "inventory" : ScreenHost.Press(frm.transaction)
+                        Case "sales" : ScreenHost.Press(frm.sales)
+                        Case "transaction" : ScreenHost.Press(frm.transaction)
                     End Select
                 Catch
                 End Try
@@ -1172,10 +1210,10 @@ Public Class HomePanelBuilder
             Dim frm = TryCast(host.FindForm(), POS_STAFF)
             If frm Is Nothing Then Return
             Select Case section
-                Case "New Transaction" : frm.transaction.PerformClick()
-                Case "Inventory" : frm.transaction.PerformClick()
-                Case "Sales History" : frm.sales.PerformClick()
-                Case "Cash Drawer" : frm.Reports.PerformClick()
+                Case "New Sale" : ScreenHost.Press(frm.transaction)
+                Case "Price Check" : ScreenHost.Press(frm.transaction)
+                Case "Sales History" : ScreenHost.Press(frm.sales)
+                Case "Cash Drawer" : ScreenHost.Press(frm.Reports)
                 Case Else
                     AppModal.Show(section & " isn't available from the cashier dashboard yet.",
                                   section, MessageBoxButtons.OK, MessageBoxIcon.Information)

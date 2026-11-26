@@ -2212,7 +2212,7 @@ Public Class ProcurementSuppliersPanelBuilder
         ' The panel's own background is the page colour, so the shadow has
         ' something to fall on instead of a white square.
         Using bg As New SolidBrush(MintBg)
-            e.Graphics.FillRectangle(bg, panel.ClientRectangle)
+            e.Graphics.FillBackground(bg, panel.ClientRectangle)
         End Using
         PanelRenderer.Draw(panel, e, True, True)
     End Sub

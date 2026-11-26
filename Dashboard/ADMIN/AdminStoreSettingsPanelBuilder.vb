@@ -82,7 +82,7 @@ Public Class AdminStoreSettingsPanelBuilder
     Private Shared Sub LoadSettingsRow()
         _settingsFailed = False
         ' Defaults mirror StoreSettings' fallbacks.
-        _sName = "PAINT STORE POS"
+        _sName = "Rainbow Paint Center"
         _sTagline = "Sales Receipt"
         _sAddress = "" : _sContact = "" : _sTin = ""
         _sVatRate = 12D
@@ -99,6 +99,12 @@ Public Class AdminStoreSettingsPanelBuilder
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             _sName = SafeStr(rdr("store_name"))
+                            ' The old seed value is shown as the store's real
+                            ' name, the same name the receipts print.
+                            If _sName.Trim() = "" OrElse
+                               String.Equals(_sName.Trim(), "PAINT STORE POS", StringComparison.OrdinalIgnoreCase) Then
+                                _sName = "Rainbow Paint Center"
+                            End If
                             _sTagline = SafeStr(rdr("store_tagline"))
                             _sAddress = SafeStr(rdr("store_address"))
                             _sContact = SafeStr(rdr("store_contact"))
@@ -862,7 +868,7 @@ Public Class AdminStoreSettingsPanelBuilder
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(CardBg)
-                    g.FillRectangle(bg, bb.ClientRectangle)
+                    g.FillBackground(bg, bb.ClientRectangle)
                 End Using
                 Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
                 Using br As New SolidBrush(bb.BackColor)

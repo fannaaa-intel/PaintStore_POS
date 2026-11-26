@@ -233,10 +233,10 @@ Public Class ProcurementDashPanelBuilder
     '  TOP REGION  (title + 4 KPI cards)
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
-        Dim region As New Panel With {.Height = 256, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {.Height = 256 - Theme.KpiSaved, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
-            .Text = "Dashboard", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .Text = "Dashboard", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
         Dim lblSubtitle As New Label With {
@@ -251,7 +251,7 @@ Public Class ProcurementDashPanelBuilder
 
         ' ---- KPI row: 4 cards ----
         Dim kpiRow As New TableLayoutPanel With {
-            .Left = 24, .Top = 96, .Height = 140, .ColumnCount = 4, .RowCount = 1,
+            .Left = 24, .Top = 96, .Height = Theme.KpiH, .ColumnCount = 4, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -292,15 +292,15 @@ Public Class ProcurementDashPanelBuilder
 
         Dim lblCap As New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
-            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
+            .Text = value, .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
+            .ForeColor = valueClr, .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = sub1, .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         TextFit.FitWidth(lblVal, card)

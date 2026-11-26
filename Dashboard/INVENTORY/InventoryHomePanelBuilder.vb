@@ -245,13 +245,16 @@ Public Class InventoryHomePanelBuilder
 
         ' ── 2. STAT ROW ──────────────────────────────────────────────────────
         Dim statRow As New TableLayoutPanel With {
-            .Top = topBar.Bottom + GAP, .Left = 0, .Height = 140,
+            .Top = topBar.Bottom + GAP, .Left = 0, .Height = Theme.KpiH,
             .ColumnCount = 4, .RowCount = 1, .BackColor = Color.Transparent,
             .CellBorderStyle = TableLayoutPanelCellBorderStyle.None
         }
         For i = 0 To 3
             statRow.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 25))
         Next
+        ' Without a row style the row sized itself to the cards' default 100px,
+        ' so in a shorter row the cards' bottom edge was cut off.
+        statRow.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
 
         Dim statData() As (title As String, value As Integer, subtitle As String, badge As String, valColor As Color, target As String) = {
             ("Total Products", data.Total, "Active items", "Items", MintDark, ""),
@@ -271,16 +274,16 @@ Public Class InventoryHomePanelBuilder
 
             Dim lTitle As New Label With {
                 .Text = sd.title, .Font = New Font("Segoe UI", 11),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14)
+                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop)
             }
             Dim lValue As New Label With {
                 .Text = If(data.Failed, "—", sd.value.ToString("N0")),
-                .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-                .ForeColor = sd.valColor, .AutoSize = True, .Location = New Point(20, 36)
+                .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
+                .ForeColor = sd.valColor, .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop)
             }
             Dim lSub As New Label With {
                 .Text = sd.subtitle, .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100)
+                .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop)
             }
             Dim badge As New Label With {
                 .Text = sd.badge, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
@@ -291,7 +294,7 @@ Public Class InventoryHomePanelBuilder
             AddHandler card.Resize,
                 Sub()
                     badge.Left = card.Width - badge.Width - 14
-                    badge.Top = 14
+                    badge.Top = Theme.KpiCaptionTop
                 End Sub
 
             Dim capStatus As String = sd.target
@@ -325,7 +328,10 @@ Public Class InventoryHomePanelBuilder
         If lowCount = 0 Then
             lowSub = "Nothing at or near its restock level"
         ElseIf lowCount > data.LowItems.Count Then
-            lowSub = "Worst " & data.LowItems.Count & " of " & lowCount & "  ·  bar = on hand, line = restock level"
+            ' The chart shows as many of the worst as fit the card, which can be
+            ' fewer than were loaded ("Worst 8 of 12" over seven rows), so the
+            ' total is stated and "View all" lists every one.
+            lowSub = lowCount & " items, worst first  ·  bar = on hand, line = restock level"
         Else
             lowSub = lowCount & If(lowCount = 1, " item", " items") & "  ·  bar = on hand, line = restock level"
         End If
@@ -413,7 +419,7 @@ Public Class InventoryHomePanelBuilder
             Dim frm = TryCast(host.FindForm(), INVENTORY_STAFF)
             If frm Is Nothing Then Return
             Select Case target
-                Case "lowStock" : frm.lowStock.PerformClick()
+                Case "lowStock" : ScreenHost.Press(frm.lowStock)
                 Case "history" : frm.OpenHistory()
             End Select
         Catch ex As Exception

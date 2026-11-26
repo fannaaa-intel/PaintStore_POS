@@ -1,4 +1,5 @@
 Imports System.Collections.Generic
+Imports System.Reflection
 Imports System.Windows.Forms
 
 ' =============================================================================
@@ -34,6 +35,36 @@ Public Module ScreenHost
             End Try
         End If
         DisposeAll(old)
+    End Sub
+
+    ' =========================================================================
+    '  SIDEBAR BUTTONS
+    '
+    '  A sidebar button kept keyboard focus after it was clicked. A focused flat
+    '  button becomes the form's "default" button, and WinForms then draws a
+    '  dark 1px frame round it even with BorderSize = 0 -- the box that showed
+    '  round "Dashboard" after switching screens. It also meant Enter (a barcode
+    '  scanner ends every scan with one) clicked that nav button again and
+    '  reloaded the screen. Sidebar buttons are mouse targets, so they no longer
+    '  take focus at all.
+    '
+    '  Button.PerformClick does nothing on a control that cannot take focus, so
+    '  code that opens a screen "as if its nav button were clicked" uses Press.
+    ' =========================================================================
+    Private ReadOnly SetStyleMethod As MethodInfo =
+        GetType(Control).GetMethod("SetStyle", BindingFlags.Instance Or BindingFlags.NonPublic)
+    Private ReadOnly OnClickMethod As MethodInfo =
+        GetType(Control).GetMethod("OnClick", BindingFlags.Instance Or BindingFlags.NonPublic)
+
+    Public Sub MakeNavButton(btn As Button)
+        If btn Is Nothing Then Return
+        SetStyleMethod.Invoke(btn, New Object() {ControlStyles.Selectable, False})
+        btn.TabStop = False
+    End Sub
+
+    Public Sub Press(btn As Button)
+        If btn Is Nothing OrElse btn.IsDisposed OrElse Not btn.Enabled Then Return
+        OnClickMethod.Invoke(btn, New Object() {EventArgs.Empty})
     End Sub
 
     Private Sub DisposeAll(controls As List(Of Control))

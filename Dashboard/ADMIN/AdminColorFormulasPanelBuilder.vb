@@ -362,7 +362,7 @@ Public Class AdminColorFormulasPanelBuilder
     ' =========================================================================
     '  SUMMARY TILES
     ' =========================================================================
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
 
     Private Shared Function BuildTileStrip() As Panel
         Dim bar As New Panel With {
@@ -409,13 +409,13 @@ Public Class AdminColorFormulasPanelBuilder
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         card.Controls.Add(New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent})
+            .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent})
         card.Controls.Add(New Label With {
-            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
-            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent})
+            .Text = value, .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent})
         card.Controls.Add(New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent})
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent})
         Return card
     End Function
 

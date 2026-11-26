@@ -657,6 +657,9 @@ Public Class ProcurementDeliveryPanelBuilder
     ' =========================================================================
     Private Shared Function GroupOf(po As DeliveryPO) As String
         If po.Status = "Received" Then Return "Delivered"
+        ' A Draft has not been sent to the supplier yet, so it cannot be an
+        ' overdue delivery (it used to head the Overdue list).
+        If po.Status = "Draft" Then Return "Upcoming"
         If Not po.HasExpected Then Return "Upcoming"
         Dim days As Integer = CInt((po.ExpectedDate.Date - DateTime.Today).TotalDays)
         If days < 0 Then Return "Overdue"

@@ -184,11 +184,19 @@ Public Class LogIn
         End If
         curY += 56
 
+        ' Same name the receipts print (Admin > Store Settings; default
+        ' "Rainbow Paint Center").
+        Dim storeName As String = "Rainbow Paint Center"
+        Try
+            storeName = StoreSettings.StoreName
+        Catch
+        End Try
         Dim lblStore As New Label With {
-            .Text = "Rainbow Paint Store",
+            .Text = storeName, .UseMnemonic = False,
+            .AutoSize = False, .AutoEllipsis = True,
+            .Size = New Size(splitX - pad * 2, 32),
             .Font = New Font("Segoe UI", 15, FontStyle.Bold),
             .ForeColor = TextOnDark,
-            .AutoSize = True,
             .BackColor = Color.Transparent,
             .Location = New Point(pad, curY)
         }
@@ -312,6 +320,20 @@ Public Class LogIn
         loginCard.Controls.Add(lnkForgot)
         lnkForgot.Location = New Point(padL + fieldW - lnkForgot.PreferredWidth, curY)
         AddHandler lnkForgot.LinkClicked, Sub() ShowForgotPassword()
+
+        ' Caps Lock warning: the commonest reason a correct password "fails",
+        ' and each failure counts toward the lockout.
+        Dim lblCaps As New Label With {
+            .Text = "Caps Lock is on", .Font = New Font("Segoe UI Semibold", 9),
+            .ForeColor = Theme.Warning, .AutoSize = True, .BackColor = Color.Transparent,
+            .Location = New Point(padL + 2, curY), .Visible = False
+        }
+        loginCard.Controls.Add(lblCaps)
+        Dim updateCaps As Action =
+            Sub() lblCaps.Visible = txtPass.Focused AndAlso Control.IsKeyLocked(Keys.CapsLock)
+        AddHandler txtPass.GotFocus, Sub() updateCaps()
+        AddHandler txtPass.Leave, Sub() lblCaps.Visible = False
+        AddHandler txtPass.KeyUp, Sub() updateCaps()
         curY += 30
 
         ' ===== SIGN IN BUTTON =====

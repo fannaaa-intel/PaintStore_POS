@@ -298,7 +298,7 @@ Public Module PaymentMethodModal
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality
-                Using bg As New SolidBrush(CardBg) : g.FillRectangle(bg, b.ClientRectangle) : End Using
+                Using bg As New SolidBrush(CardBg) : g.FillBackground(bg, b.ClientRectangle) : End Using
                 Dim rect = b.ClientRectangle : rect.Width -= 1 : rect.Height -= 1
                 Using path As GraphicsPath = RoundedPath(rect, 7)
                     Using br As New SolidBrush(b.BackColor) : g.FillPath(br, path) : End Using

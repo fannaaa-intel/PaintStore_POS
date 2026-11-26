@@ -780,7 +780,8 @@ Public Class TransactionPanelBuilder
         Dim lblName As New Label With {
             .Text = p.Name, .Font = New Font("Segoe UI Semibold", 10.5F),
             .ForeColor = If(outOfStock, MutedFore, MintDark), .AutoSize = False,
-            .BackColor = Color.Transparent, .Location = New Point(60, 16), .Size = New Size(260, 22)}
+            .BackColor = Color.Transparent, .Location = New Point(60, 16), .Size = New Size(260, 22),
+            .AutoEllipsis = True, .UseMnemonic = False}
         ' SKU is searchable, so it is shown on the row too -- same "   .   "
         ' separator and 8.5pt SubText treatment as the rest of the subtitle,
         ' and simply omitted when the product has no SKU.
@@ -790,10 +791,11 @@ Public Class TransactionPanelBuilder
         Dim lblSub As New Label With {
             .Text = subTxt, .Font = New Font("Segoe UI", 8.5F),
             .ForeColor = If(outOfStock, MutedFore, SubText), .AutoSize = False,
-            .BackColor = Color.Transparent, .Location = New Point(60, 40), .Size = New Size(330, 16)}
+            .BackColor = Color.Transparent, .Location = New Point(60, 40), .Size = New Size(330, 16),
+            .AutoEllipsis = True, .UseMnemonic = False}
 
         Dim lblPrice As New Label With {
-            .Text = "P " & p.UnitPrice.ToString("N2"), .Font = New Font("Segoe UI Semibold", 10.5F),
+            .Text = "₱" & p.UnitPrice.ToString("N2"), .Font = New Font("Segoe UI Semibold", 10.5F),
             .ForeColor = If(outOfStock, MutedFore, Color.FromArgb(50, 70, 65)), .AutoSize = False,
             .TextAlign = ContentAlignment.MiddleRight, .BackColor = Color.Transparent}
 
@@ -1061,10 +1063,10 @@ Public Class TransactionPanelBuilder
         Dim vat As Decimal = t.vat
         Dim grand As Decimal = t.total
         If _lblItems IsNot Nothing Then _lblItems.Text = items.ToString()
-        If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "P " & subtotal.ToString("N2")
-        If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- P " & disc.ToString("N2")
-        If _lblVat IsNot Nothing Then _lblVat.Text = "P " & vat.ToString("N2")
-        If _lblGrandTotal IsNot Nothing Then _lblGrandTotal.Text = "P " & grand.ToString("N2")
+        If _lblSubtotal IsNot Nothing Then _lblSubtotal.Text = "₱" & subtotal.ToString("N2")
+        If _lblDiscount IsNot Nothing Then _lblDiscount.Text = "- ₱" & disc.ToString("N2")
+        If _lblVat IsNot Nothing Then _lblVat.Text = "₱" & vat.ToString("N2")
+        If _lblGrandTotal IsNot Nothing Then _lblGrandTotal.Text = "₱" & grand.ToString("N2")
 
         ' HOLD and DISCOUNT only mean something with a cart behind them. Greying
         ' them out shows that up front rather than answering a click with a
@@ -1106,7 +1108,7 @@ Public Class TransactionPanelBuilder
          .Location = New Point(textX, 10), .Size = New Size(220, 22)}
 
         Dim lblUnit As New Label With {
-    .Text = "P " & line.UnitPrice.ToString("N2") & "  ×  " & line.Qty & "  =  P " & (line.UnitPrice * line.Qty).ToString("N2"),
+    .Text = "₱" & line.UnitPrice.ToString("N2") & "  ×  " & line.Qty & "  =  ₱" & (line.UnitPrice * line.Qty).ToString("N2"),
         .Font = New Font("Segoe UI", 8.5F),
         .ForeColor = SubText, .AutoSize = False,
         .BackColor = Color.Transparent,
@@ -1996,7 +1998,7 @@ Public Class TransactionPanelBuilder
 
         Dim pct As Decimal = If(subtotal > 0, Math.Round(discount * 100D / subtotal, 1), 100D)
         Dim approval = AdminApprovalModal.Show("Approve Discount",
-            "P " & discount.ToString("N2") & " off a P " & subtotal.ToString("N2") & " cart (" &
+            "₱" & discount.ToString("N2") & " off a ₱" & subtotal.ToString("N2") & " cart (" &
             pct.ToString("0.#") & "%). Over " & StoreSettings.PromoApprovalPct.ToString("0") &
             "% needs an Admin.",
             "Approve discount")
@@ -2015,7 +2017,7 @@ Public Class TransactionPanelBuilder
         Using f As New Form With {.Text = "Apply Discount", .FormBorderStyle = FormBorderStyle.FixedDialog,
                 .StartPosition = FormStartPosition.CenterParent, .MaximizeBox = False, .MinimizeBox = False,
                 .ClientSize = New Size(340, 360), .BackColor = CardBg, .Font = New Font("Segoe UI", 9.5F)}
-            Dim lblSub As New Label With {.Text = "Subtotal:  P " & subtotal.ToString("N2"), .Location = New Point(18, 16), .AutoSize = True, .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintDark}
+            Dim lblSub As New Label With {.Text = "Subtotal:  ₱" & subtotal.ToString("N2"), .Location = New Point(18, 16), .AutoSize = True, .Font = New Font("Segoe UI Semibold", 10), .ForeColor = MintDark}
             Dim lblType As New Label With {.Text = "Type", .Location = New Point(18, 52), .AutoSize = True, .ForeColor = SubText}
             Dim cboType As New ComboBox With {.Location = New Point(18, 72), .Width = 140, .DropDownStyle = ComboBoxStyle.DropDownList}
             cboType.Items.AddRange({"None", "Senior", "PWD", "Promo"})
@@ -2048,7 +2050,7 @@ Public Class TransactionPanelBuilder
                         Return StoreSettings.ComputeSaleTotals(subtotal, 0D, t).discount
                     End If
                     Dim v As Decimal = 0
-                    Decimal.TryParse(txtVal.Text.Replace("P", "").Replace(",", "").Trim(), v)
+                    Decimal.TryParse(txtVal.Text.Replace("P", "").Replace(ChrW(8369), "").Replace(",", "").Trim(), v)
                     If v < 0 Then v = 0
                     Dim amt As Decimal = If(rdoPct.Checked, subtotal * v / 100D, v)
                     If amt > subtotal Then amt = subtotal
@@ -2067,7 +2069,7 @@ Public Class TransactionPanelBuilder
                     txtVal.Enabled = Not exempt
                     If exempt Then rdoPct.Checked = True : txtVal.Text = "20"
                     Dim amt As Decimal = resolve()
-                    lblPreview.Text = "Discount:  P " & amt.ToString("N2") &
+                    lblPreview.Text = "Discount:  ₱" & amt.ToString("N2") &
                                       If(exempt, "   (VAT exempt)", "")
                 End Sub
 
@@ -2234,7 +2236,7 @@ Public Class TransactionPanelBuilder
             Return
         End If
         Dim chosenId As Long = PromptPickSale("Retrieve Held Sale",
-            held.Select(Function(h) (h.id, h.no & "   P " & h.total.ToString("N2") & "   " & h.dt.ToString("MMM d, h:mm tt"))).ToList())
+            held.Select(Function(h) (h.id, h.no & "   ₱" & h.total.ToString("N2") & "   " & h.dt.ToString("MMM d, h:mm tt"))).ToList())
         If chosenId <= 0 Then Return
 
         ' The held row carries the discount that was in force when it was parked;
@@ -2387,7 +2389,7 @@ Public Class TransactionPanelBuilder
             Return
         End If
         Dim chosenId As Long = PromptPickSale("Void Sale",
-            candidates.Select(Function(c) (c.id, c.no & "   [" & c.status & "]   P " & c.total.ToString("N2") & "   " & c.dt.ToString("MMM d, h:mm tt"))).ToList())
+            candidates.Select(Function(c) (c.id, c.no & "   [" & c.status & "]   ₱" & c.total.ToString("N2") & "   " & c.dt.ToString("MMM d, h:mm tt"))).ToList())
         If chosenId <= 0 Then Return
         Dim chosen = candidates.First(Function(c) c.id = chosenId)
         ' A held sale never took money or stock, so dropping it only needs a
@@ -2395,7 +2397,7 @@ Public Class TransactionPanelBuilder
         Dim approval As AdminApprovalModal.Result = Nothing
         If chosen.status = "Completed" Then
             approval = AdminApprovalModal.Show("Void Sale " & chosen.no,
-                "P " & chosen.total.ToString("N2") & " will be reversed and the stock restored. " &
+                "₱" & chosen.total.ToString("N2") & " will be reversed and the stock restored. " &
                 "An Admin must approve this. It cannot be undone.", "Approve void")
             If approval Is Nothing Then Return
         ElseIf AppModal.Show("Void held sale " & chosen.no & "?" & Environment.NewLine & "This cannot be undone.",
@@ -2512,10 +2514,22 @@ Public Class TransactionPanelBuilder
     '  PRINT RECEIPT
     ' =========================================================================
     Private Shared Sub PrintReceipt()
+        If String.IsNullOrEmpty(_lastSaleNo) Then
+            AppModal.Show("No completed sale to reprint yet. Take a payment first and the receipt will print automatically.",
+                "Reprint Receipt", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return
+        End If
+
+        ' Laid out like a real 80mm thermal receipt: store header, receipt
+        ' details, itemised lines, a large TOTAL, payment and change, the VAT
+        ' breakdown, "sold to" lines, then a scannable barcode of the receipt
+        ' number (the Returns screen looks a sale up by it).
+        Dim peso As String = ChrW(8369)
+        Dim money = Function(v As Decimal) v.ToString("N2")
         Dim lines As New List(Of ReceiptPrinter.RLine)
+
+        ' ── Store header ─────────────────────────────────────────────────────
         lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreName, , ReceiptPrinter.LineStyle.Title))
-        lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreTagline, , ReceiptPrinter.LineStyle.Muted))
-        ' Optional header lines — only emitted when the setting is filled in.
         If StoreSettings.StoreAddress <> "" Then
             lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreAddress, , ReceiptPrinter.LineStyle.Muted))
         End If
@@ -2523,68 +2537,102 @@ Public Class TransactionPanelBuilder
             lines.Add(New ReceiptPrinter.RLine(StoreSettings.StoreContact, , ReceiptPrinter.LineStyle.Muted))
         End If
         If StoreSettings.StoreTin <> "" Then
-            lines.Add(New ReceiptPrinter.RLine("TIN: " & StoreSettings.StoreTin, , ReceiptPrinter.LineStyle.Muted))
-        End If
-        lines.Add(ReceiptPrinter.Divider())
-        If Not String.IsNullOrEmpty(_lastSaleNo) Then
-            lines.Add(New ReceiptPrinter.RLine("Receipt:", _lastSaleNo))
-            lines.Add(New ReceiptPrinter.RLine("Date:", _lastSaleAt.ToString("MMM d, yyyy h:mm tt")))
-            lines.Add(New ReceiptPrinter.RLine("Cashier:", Session.CurrentFullName))
-            lines.Add(New ReceiptPrinter.RLine("Payment:", _lastSalePay))
-            lines.Add(ReceiptPrinter.Divider())
-            For Each it In _lastSaleLines
-                lines.Add(New ReceiptPrinter.RLine(it.name, "", ReceiptPrinter.LineStyle.Bold))
-                lines.Add(New ReceiptPrinter.RLine("  " & it.qty.ToString() & " x P " & it.price.ToString("N2"), "P " & it.line.ToString("N2")))
-            Next
-            lines.Add(ReceiptPrinter.Divider())
-            lines.Add(New ReceiptPrinter.RLine("Subtotal", "P " & _lastSaleSubtotal.ToString("N2")))
-            If _lastSaleDiscount > 0 Then
-                Dim discLabel As String = If(_lastSaleVatExempt, _lastSaleDiscType & " Disc (20%)", "Discount")
-                lines.Add(New ReceiptPrinter.RLine(discLabel, "- P " & _lastSaleDiscount.ToString("N2")))
-            End If
-
-            ' BIR requires the sale broken into VATable / VAT-exempt / zero-rated
-            ' with the VAT shown separately -- a single "VAT" line is not a valid
-            ' receipt. An exempt sale reports its base under VAT-Exempt Sales and
-            ' zero VAT; a normal sale reports the same figures under VATable Sales.
-            If _lastSaleVatExempt Then
-                lines.Add(New ReceiptPrinter.RLine("VAT-Exempt Sales", "P " & _lastSaleNetSales.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("VAT", "P 0.00"))
-            Else
-                lines.Add(New ReceiptPrinter.RLine("VATable Sales", "P " & _lastSaleNetSales.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, "P " & _lastSaleVat.ToString("N2")))
-            End If
-            lines.Add(New ReceiptPrinter.RLine("TOTAL", "P " & _lastSaleTotal.ToString("N2"), ReceiptPrinter.LineStyle.Bold))
-
-            ' The cardholder name and ID must appear on the receipt for the
-            ' discount to be claimable, so they print on every exempt sale.
-            If _lastSaleVatExempt Then
-                lines.Add(ReceiptPrinter.Divider())
-                lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " Name:", _lastSaleExemptName))
-                lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " ID No:", _lastSaleExemptId))
-                lines.Add(New ReceiptPrinter.RLine("Signature:", "____________"))
-            End If
-            ' Same content match the payment prompt uses, so a method named
-            ' "CASH" or "Cash on Hand" still prints Tendered and Change.
-            If _lastSalePay IsNot Nothing AndAlso
-               _lastSalePay.IndexOf("cash", StringComparison.OrdinalIgnoreCase) >= 0 Then
-                lines.Add(New ReceiptPrinter.RLine("Tendered", "P " & _lastSaleTendered.ToString("N2")))
-                lines.Add(New ReceiptPrinter.RLine("Change", "P " & _lastSaleChange.ToString("N2")))
-            End If
-            If Not String.IsNullOrEmpty(_lastSaleChequeAcct) Then
-                lines.Add(New ReceiptPrinter.RLine("Account Name:", _lastSaleChequeAcct))
-                lines.Add(New ReceiptPrinter.RLine("Check No:", _lastSaleRef))
-            ElseIf Not String.IsNullOrEmpty(_lastSaleRef) Then
-                lines.Add(New ReceiptPrinter.RLine("Ref No:", _lastSaleRef))
-            End If
-        Else
-            AppModal.Show("No completed sale to reprint yet. Take a payment first and the receipt will print automatically.",
-                "Reprint Receipt", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            Return
+            lines.Add(New ReceiptPrinter.RLine("VAT REG TIN: " & StoreSettings.StoreTin, , ReceiptPrinter.LineStyle.Muted))
         End If
         lines.Add(ReceiptPrinter.Spacer())
-        lines.Add(New ReceiptPrinter.RLine("Thank you for your purchase!", , ReceiptPrinter.LineStyle.Muted))
-        ReceiptPrinter.Preview("Sales Receipt", lines)
+        lines.Add(ReceiptPrinter.DoubleDivider())
+        lines.Add(ReceiptPrinter.Center(StoreSettings.StoreTagline.ToUpperInvariant()))
+        lines.Add(ReceiptPrinter.DoubleDivider())
+
+        ' ── Receipt details ──────────────────────────────────────────────────
+        lines.Add(New ReceiptPrinter.RLine("Receipt No:", _lastSaleNo))
+        lines.Add(New ReceiptPrinter.RLine("Date:", _lastSaleAt.ToString("MMM dd, yyyy")))
+        lines.Add(New ReceiptPrinter.RLine("Time:", _lastSaleAt.ToString("hh:mm:ss tt")))
+        lines.Add(New ReceiptPrinter.RLine("Cashier:", Session.CurrentFullName))
+        lines.Add(New ReceiptPrinter.RLine("Register:", "01"))
+        lines.Add(ReceiptPrinter.Divider())
+
+        ' ── Items ────────────────────────────────────────────────────────────
+        lines.Add(New ReceiptPrinter.RLine("ITEM", "AMOUNT", ReceiptPrinter.LineStyle.Bold))
+        lines.Add(ReceiptPrinter.Divider())
+        Dim units As Integer = 0
+        For Each it In _lastSaleLines
+            lines.Add(New ReceiptPrinter.RLine(it.name))
+            lines.Add(New ReceiptPrinter.RLine("   " & it.qty.ToString() & " x " & money(it.price), money(it.line)))
+            units += it.qty
+        Next
+        lines.Add(ReceiptPrinter.Divider())
+        lines.Add(New ReceiptPrinter.RLine(_lastSaleLines.Count & If(_lastSaleLines.Count = 1, " item", " items") &
+                                           ", " & units & If(units = 1, " unit", " units")))
+        lines.Add(New ReceiptPrinter.RLine("Subtotal", money(_lastSaleSubtotal)))
+        If _lastSaleDiscount > 0 Then
+            Dim discLabel As String = If(_lastSaleVatExempt, _lastSaleDiscType & " Discount (20%)",
+                                         If(_lastSaleDiscType = "Promo", "Promo Discount", "Discount"))
+            lines.Add(New ReceiptPrinter.RLine(discLabel, "-" & money(_lastSaleDiscount)))
+        End If
+
+        ' ── Total ────────────────────────────────────────────────────────────
+        lines.Add(ReceiptPrinter.DoubleDivider())
+        lines.Add(ReceiptPrinter.Total("TOTAL", peso & " " & money(_lastSaleTotal)))
+        lines.Add(ReceiptPrinter.DoubleDivider())
+
+        ' ── Payment ──────────────────────────────────────────────────────────
+        ' Same content match the payment prompt uses, so a method named
+        ' "CASH" or "Cash on Hand" still prints Tendered and Change.
+        Dim payName As String = If(String.IsNullOrEmpty(_lastSalePay), "Payment", _lastSalePay)
+        Dim isCash As Boolean = payName.IndexOf("cash", StringComparison.OrdinalIgnoreCase) >= 0
+        If isCash Then
+            lines.Add(New ReceiptPrinter.RLine(payName & " Tendered", money(_lastSaleTendered)))
+            lines.Add(New ReceiptPrinter.RLine("CHANGE", money(_lastSaleChange), ReceiptPrinter.LineStyle.Bold))
+        Else
+            lines.Add(New ReceiptPrinter.RLine(payName, money(_lastSaleTotal)))
+        End If
+        If Not String.IsNullOrEmpty(_lastSaleChequeAcct) Then
+            lines.Add(New ReceiptPrinter.RLine("Account Name:", _lastSaleChequeAcct))
+            lines.Add(New ReceiptPrinter.RLine("Check No:", _lastSaleRef))
+        ElseIf Not String.IsNullOrEmpty(_lastSaleRef) Then
+            lines.Add(New ReceiptPrinter.RLine("Ref No:", _lastSaleRef))
+        End If
+        lines.Add(ReceiptPrinter.Divider())
+
+        ' ── VAT breakdown ────────────────────────────────────────────────────
+        ' BIR requires the sale broken into VATable / VAT-exempt / zero-rated
+        ' with the VAT shown separately -- a single "VAT" line is not a valid
+        ' receipt. An exempt sale reports its base under VAT-Exempt Sales and
+        ' zero VAT; a normal sale reports the same figures under VATable Sales.
+        If _lastSaleVatExempt Then
+            lines.Add(New ReceiptPrinter.RLine("VATable Sales", money(0D)))
+            lines.Add(New ReceiptPrinter.RLine("VAT-Exempt Sales", money(_lastSaleNetSales)))
+            lines.Add(New ReceiptPrinter.RLine("Zero-Rated Sales", money(0D)))
+            lines.Add(New ReceiptPrinter.RLine("VAT Amount", money(0D)))
+        Else
+            lines.Add(New ReceiptPrinter.RLine("VATable Sales", money(_lastSaleNetSales)))
+            lines.Add(New ReceiptPrinter.RLine("VAT-Exempt Sales", money(0D)))
+            lines.Add(New ReceiptPrinter.RLine("Zero-Rated Sales", money(0D)))
+            lines.Add(New ReceiptPrinter.RLine(StoreSettings.VatLabel, money(_lastSaleVat)))
+        End If
+        lines.Add(ReceiptPrinter.Divider())
+
+        ' ── Customer ─────────────────────────────────────────────────────────
+        ' The cardholder name and ID must appear on the receipt for the
+        ' discount to be claimable, so they print on every exempt sale.
+        If _lastSaleVatExempt Then
+            lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " Name:", _lastSaleExemptName))
+            lines.Add(New ReceiptPrinter.RLine(_lastSaleDiscType & " ID No:", _lastSaleExemptId))
+            lines.Add(New ReceiptPrinter.RLine("Signature:", "__________________"))
+        Else
+            lines.Add(New ReceiptPrinter.RLine("Sold to:", "__________________"))
+            lines.Add(New ReceiptPrinter.RLine("Address:", "__________________"))
+            lines.Add(New ReceiptPrinter.RLine("TIN:", "__________________"))
+        End If
+
+        ' ── Footer ───────────────────────────────────────────────────────────
+        lines.Add(ReceiptPrinter.Barcode(_lastSaleNo))
+        lines.Add(ReceiptPrinter.Spacer())
+        lines.Add(ReceiptPrinter.Center("THANK YOU FOR SHOPPING!"))
+        lines.Add(New ReceiptPrinter.RLine("Please keep this receipt for returns and exchanges.", ,
+                                           ReceiptPrinter.LineStyle.Muted))
+        ReceiptPrinter.Preview("Sales Receipt", lines, receiptNo:=_lastSaleNo)
     End Sub
 
 End Class

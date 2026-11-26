@@ -42,7 +42,7 @@ Public Class ADMIN_STAFF
     ' Clears BOTH pinned buttons at the foot of the rail: My Account starts at
     ' Nav.Height - 168, so the scrolling list has to stop above that or its
     ' last item slides underneath.
-    Private Const NAV_LIST_BOTTOM_GAP As Integer = 178
+    Private ReadOnly NAV_LIST_BOTTOM_GAP As Integer = Theme.Dense(178, 146)
 
     ' ===========================================================================
     ' FORM LOAD
@@ -145,6 +145,8 @@ Public Class ADMIN_STAFF
                         TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
                 End If
             End Sub
+
+        ScreenHost.MakeNavButton(btnHamburger)
 
         AddHandler btnHamburger.Click, AddressOf ToggleNav
         Nav.Controls.Add(btnHamburger)
@@ -274,8 +276,8 @@ Public Class ADMIN_STAFF
         _btnSettings.Parent = Nav
         _btnSettings.Left = 14
         _btnSettings.Width = Nav.Width - 28
-        _btnSettings.Height = 48
-        _btnSettings.Top = Nav.Height - 168
+        _btnSettings.Height = Theme.Dense(48, 40)
+        _btnSettings.Top = Nav.Height - Theme.Dense(168, 140)
         _btnSettings.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
         RoundButton(_btnSettings, 12)
         AddHandler _btnSettings.Click,
@@ -292,8 +294,8 @@ Public Class ADMIN_STAFF
         logout.Parent = Nav
         logout.Left = 14
         logout.Width = Nav.Width - 28
-        logout.Height = 48
-        logout.Top = Nav.Height - 110
+        logout.Height = Theme.Dense(48, 40)
+        logout.Top = Nav.Height - Theme.Dense(110, 94)
         logout.Anchor = AnchorStyles.Bottom Or AnchorStyles.Left
         RoundButton(logout, 12)
 
@@ -305,8 +307,8 @@ Public Class ADMIN_STAFF
         AdminDashPanelBuilder.NavigateTo =
             Sub(key As String)
                 Select Case key
-                    Case "inventory" : inventoryOverview.PerformClick()
-                    Case "procurement" : procurementOverview.PerformClick()
+                    Case "inventory" : ScreenHost.Press(inventoryOverview)
+                    Case "procurement" : ScreenHost.Press(procurementOverview)
                     Case "requests"
                         ' Straight to the purchase requests waiting for approval.
                         SetActive(procurementOverview)
@@ -354,6 +356,18 @@ Public Class ADMIN_STAFF
         Dim pitch As Integer = If(compact, 44, 54)
         Dim secGap As Integer = If(compact, 4, 10)
 
+        ' Dense: even the 40px rows needed ~650px, so at 1366x768 the last four
+        ' screens (Inventory Overview onward) sat below "More". Share the height
+        ' that is actually there between the rows instead (never under 30px).
+        Dim compactNeed As Integer = 8 + _navSections.Count * (22 + 4) + btnCount * 44 + 12
+        If compactNeed > NavList.ClientSize.Height Then
+            hdrStep = 20
+            secGap = 2
+            Dim room As Integer = NavList.ClientSize.Height - 8 - 12 - _navSections.Count * (hdrStep + secGap)
+            pitch = Math.Max(30, Math.Min(44, room \ btnCount))
+            btnH = pitch - 2
+        End If
+
         NavList.SuspendLayout()
         ' Child positions are relative to the scrolled view; lay out from the top.
         Dim scrollY As Integer = NavList.AutoScrollPosition.Y
@@ -380,7 +394,11 @@ Public Class ADMIN_STAFF
         If _navMore Is Nothing OrElse NavList Is Nothing Then Return
         _navMore.Left = 14
         _navMore.Top = NavList.Bottom - _navMore.Height
-        _navMore.Visible = navIsOpen AndAlso NavList.HasMoreBelow
+        ' Only while a menu item is actually cut off: the trailing spacer alone
+        ' kept "More" showing when every screen was already in view.
+        Dim lastBtn As Control = activityLogNav
+        Dim hidden As Boolean = lastBtn IsNot Nothing AndAlso lastBtn.Bottom > NavList.ClientSize.Height
+        _navMore.Visible = navIsOpen AndAlso NavList.HasMoreBelow AndAlso hidden
         If _navMore.Visible Then _navMore.BringToFront()
     End Sub
 
@@ -514,6 +532,7 @@ Public Class ADMIN_STAFF
     ' STYLE HELPERS
     ' ===========================================================================
     Private Sub StyleButton(btn As Button)
+        ScreenHost.MakeNavButton(btn)
         ' Remember the caption before anything can clear it, so the collapsed rail
         ' can put it back (and show it as a tooltip meanwhile).
         navCaptions(btn) = btn.Text
@@ -592,6 +611,9 @@ Public Class ADMIN_STAFF
         btn.ForeColor = MintDarkTop
         btn.Font = Theme.SemiboldBold(12)
         btn.Tag = "active"
+        ' A screen opened from a dashboard tile can sit below the fold of the
+        ' menu; bring its highlighted button into view.
+        If btn.Parent Is NavList Then NavList.ScrollControlIntoView(btn)
     End Sub
 
     Private Sub RoundButton(btn As Button, radius As Integer)

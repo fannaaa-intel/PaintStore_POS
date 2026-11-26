@@ -142,7 +142,7 @@ Public Class InventoryStockLevelPanelBuilder
     Private Shared containerRef As Panel
     ' Fixed row pitch — shared by real rows and the blank filler rows painted
     ' beneath them, so the ruling stays continuous down the whole table.
-    Private Const ROW_HEIGHT As Integer = 64
+    Private Shared ReadOnly ROW_HEIGHT As Integer = Theme.Dense(64, 54)
 
     Private Shared rowsHost As Panel
     Private Shared lblSubtitle As Label
@@ -360,10 +360,10 @@ Public Class InventoryStockLevelPanelBuilder
     '  TOP REGION
     ' =========================================================================
     Private Shared Function BuildTopRegion() As Panel
-        Dim region As New Panel With {.Height = 430, .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
+        Dim region As New Panel With {.Height = Theme.Dense(430, 302), .BackColor = MintBg, .Padding = New Padding(24, 22, 24, 0)}
 
         Dim lblTitle As New Label With {
-            .Text = "Stock Levels", .Font = New Font("Segoe UI", 24, FontStyle.Bold),
+            .Text = "Stock Levels", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(24, 18)
         }
         lblSubtitle = New Label With {
@@ -431,14 +431,14 @@ Public Class InventoryStockLevelPanelBuilder
         ' ---- KPI / HEALTH-TIER FILTER ROW ----
         Dim kpiRow As TableLayoutPanel = BuildKpiRow()
         kpiRow.Left = 24
-        kpiRow.Top = 250
+        kpiRow.Top = summaryRow.Bottom + Theme.Dense(16, 12)
         AddHandler region.Resize, Sub() kpiRow.Width = region.Width - 48
         kpiRow.Width = region.Width - 48
         region.Controls.Add(kpiRow)
 
         ' ---- CATEGORY CHIPS ----
         Dim chipFlow As New FlowLayoutPanel With {
-            .Left = 22, .Top = 392, .Height = 44, .AutoSize = False, .WrapContents = False,
+            .Left = 22, .Top = kpiRow.Bottom + 10, .Height = 44, .AutoSize = False, .WrapContents = False,
             .BackColor = Color.Transparent, .Padding = New Padding(0),
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -479,15 +479,15 @@ Public Class InventoryStockLevelPanelBuilder
         AddHandler unitsCard.Paint, Sub(s, e) PaintStatCard(CType(s, Panel), e)
         Dim lblUnitsCap As New Label With {
             .Text = "Total Stock Units", .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         lblTotalUnits = New Label With {
-            .Text = "0", .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Text = "0", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .Location = New Point(20, 40), .BackColor = Color.Transparent
         }
         Dim lblUnitsSub As New Label With {
             .Text = "On hand across catalog", .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         unitsCard.Controls.AddRange({lblUnitsCap, lblTotalUnits, lblUnitsSub})
 
@@ -498,7 +498,7 @@ Public Class InventoryStockLevelPanelBuilder
         AddHandler valueCard.Paint, Sub(s, e) PaintStatCard(CType(s, Panel), e)
         Dim lblValueCap As New Label With {
             .Text = "Inventory Value", .Font = New Font("Segoe UI", 11),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         lblTotalValue = New Label With {
             .Text = Peso & "0.00", .Font = New Font("Segoe UI", 22, FontStyle.Bold),
@@ -506,14 +506,43 @@ Public Class InventoryStockLevelPanelBuilder
         }
         Dim lblValueSub As New Label With {
             .Text = "Qty " & ChrW(215) & " unit price", .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         valueCard.Controls.AddRange({lblValueCap, lblTotalValue, lblValueSub})
 
         band.Controls.Add(unitsCard, 0, 0)
         band.Controls.Add(valueCard, 1, 0)
+
+        ' Short screen: this band becomes a one-line strip ("Total Stock Units
+        ' 1,235"), so the product table gets the height instead of two full
+        ' rows of cards (only 3 products were visible at 1366x768).
+        If Theme.Compact Then
+            band.Height = 50
+            InlineStat(unitsCard, lblUnitsCap, lblTotalUnits, lblUnitsSub)
+            InlineStat(valueCard, lblValueCap, lblTotalValue, lblValueSub)
+        End If
         Return band
     End Function
+
+    ' Caption and figure side by side on one line; the note moves to a tooltip.
+    Private Shared ReadOnly InlineValueFont As New Font("Segoe UI", 15, FontStyle.Bold)
+    Private Shared Sub InlineStat(card As Panel, cap As Label, value As Label, note As Label)
+        note.Visible = False
+        value.Font = InlineValueFont
+        Dim place As Action =
+            Sub()
+                cap.Top = (card.Height - cap.PreferredHeight) \ 2
+                value.Left = cap.Left + cap.PreferredWidth + 12
+                value.Top = (card.Height - value.PreferredHeight) \ 2
+            End Sub
+        AddHandler card.Resize, Sub() place()
+        AddHandler value.TextChanged, Sub() place()
+        place()
+        Dim tip As New ToolTip()
+        tip.SetToolTip(card, note.Text)
+        tip.SetToolTip(cap, note.Text)
+        AddHandler card.Disposed, Sub() tip.Dispose()
+    End Sub
 
     Private Shared Sub PaintStatCard(panel As Panel, e As PaintEventArgs)
         PanelRenderer.Draw(panel, e, True)
@@ -524,7 +553,7 @@ Public Class InventoryStockLevelPanelBuilder
     ' =========================================================================
     Private Shared Function BuildKpiRow() As TableLayoutPanel
         Dim kpiRow As New TableLayoutPanel With {
-            .Height = 132, .ColumnCount = 4, .RowCount = 1,
+            .Height = Theme.Dense(132, Theme.KpiH), .ColumnCount = 4, .RowCount = 1,
             .BackColor = Color.Transparent, .CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
             .Anchor = AnchorStyles.Left Or AnchorStyles.Right Or AnchorStyles.Top
         }
@@ -551,15 +580,15 @@ Public Class InventoryStockLevelPanelBuilder
 
             Dim lblK As New Label With {
                 .Text = kd.title, .Font = New Font("Segoe UI", 11),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
             }
             Dim lblV As New Label With {
-                .Text = "0", .Font = New Font("Segoe UI", 26, FontStyle.Bold),
-                .ForeColor = kd.clr, .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
+                .Text = "0", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
+                .ForeColor = kd.clr, .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
             }
             Dim lblS As New Label With {
                 .Text = kd.sub1, .Font = New Font("Segoe UI", 10),
-                .ForeColor = SubText, .AutoSize = True, .Location = New Point(22, 92), .BackColor = Color.Transparent
+                .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.Dense(92, Theme.KpiSubTop)), .BackColor = Color.Transparent
             }
             card.Controls.AddRange({lblK, lblV, lblS})
 
@@ -573,7 +602,7 @@ Public Class InventoryStockLevelPanelBuilder
                 AddHandler card.Resize,
                     Sub()
                         badge.Left = card.Width - badge.Width - 14
-                        badge.Top = 14
+                        badge.Top = Theme.KpiCaptionTop
                     End Sub
             End If
 
@@ -766,7 +795,11 @@ Public Class InventoryStockLevelPanelBuilder
     End Function
 
     Private Shared Sub AddColumnStyles(tlp As TableLayoutPanel)
-        Dim pct() As Single = {28, 13, 13, 16, 11, 12, 7}
+        ' Procurement shows "24 on order" in the last column, which needs more
+        ' than the 7% an "Adjust" link does (it ran into the line value).
+        Dim pct() As Single = If(forProcurementView,
+                                 New Single() {26, 12, 12, 15, 10, 13, 12},
+                                 New Single() {28, 13, 13, 16, 11, 12, 7})
         For Each p In pct
             tlp.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, p))
         Next
@@ -938,14 +971,14 @@ Public Class InventoryStockLevelPanelBuilder
         ' Col 0 — media thumbnail + name + sku
         Dim cProduct As New Panel With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
         Dim thumb As Panel = BuildRowThumb(it)
-        thumb.Location = New Point(2, 13)
+        thumb.Location = New Point(2, (ROW_HEIGHT - 38) \ 2)
         Dim lblName As New Label With {
             .Text = it.Name, .Font = New Font("Segoe UI", 10.5F, FontStyle.Bold),
-            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(52, 13), .BackColor = Color.Transparent
+            .ForeColor = MintDark, .AutoSize = True, .Location = New Point(52, ROW_HEIGHT \ 2 - 19), .BackColor = Color.Transparent
         }
         Dim lblSku As New Label With {
             .Text = it.Sku, .Font = New Font("Segoe UI", 8.5F),
-            .ForeColor = SubText, .AutoSize = True, .Location = New Point(52, 34), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = True, .Location = New Point(52, ROW_HEIGHT \ 2 + 2), .BackColor = Color.Transparent
         }
         cProduct.Controls.AddRange({thumb, lblName, lblSku})
         AddHandler cProduct.Resize, Sub() TextFit.Clamp(lblName, cProduct.Width - lblName.Left - 10)

@@ -793,7 +793,7 @@ Public Class SalesPanelBuilder
         ' moves off "Sales History" and onto "New Transaction" (SetActive runs there).
         Dim frm = TryCast(_container.FindForm(), POS_STAFF)
         If frm IsNot Nothing Then
-            frm.transaction.PerformClick()
+            ScreenHost.Press(frm.transaction)
             Return
         End If
 

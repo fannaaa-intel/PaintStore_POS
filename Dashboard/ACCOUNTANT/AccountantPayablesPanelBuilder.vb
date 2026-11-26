@@ -340,7 +340,7 @@ Public Class AccountantPayablesPanelBuilder
         region.Controls.Add(pillBar)
         region.Controls.Add(titleBar)
 
-        region.Height = 72 + 52 + 165
+        region.Height = 72 + 52 + kpiBar.Height
         Return region
     End Function
 
@@ -362,7 +362,7 @@ Public Class AccountantPayablesPanelBuilder
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(MintBg)
-                    g.FillRectangle(bg, bb.ClientRectangle)
+                    g.FillBackground(bg, bb.ClientRectangle)
                 End Using
                 Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
                 Using br As New SolidBrush(bb.BackColor)
@@ -408,7 +408,7 @@ Public Class AccountantPayablesPanelBuilder
         End If
 
         Dim bar As New Panel With {
-            .Height = 165,
+            .Height = 165 - Theme.KpiSaved,
             .BackColor = Color.Transparent,
             .Padding = New Padding(SIDE_PAD, 16, SIDE_PAD, 0)
         }
@@ -453,19 +453,20 @@ Public Class AccountantPayablesPanelBuilder
             .Text = caption,
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr, .AutoSize = True,
-            .Location = New Point(20, 36), .BackColor = Color.Transparent
+            .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         TextFit.FitWidth(lblVal, card)
@@ -758,7 +759,10 @@ Public Class AccountantPayablesPanelBuilder
             Sub()
                 Dim w = p.Width
                 lblPo.Left = 24 : lblPo.Top = (height - lblPo.Height) \ 2
-                lblSupplier.Left = CInt(w * ColX(1)) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
+                lblSupplier.Left = CInt(w * ColX(1))
+                ' Long supplier names ran into the Ordered date ("...Valley ov 04").
+                TextFit.Clamp(lblSupplier, CInt(w * ColX(2)) - lblSupplier.Left - 14)
+                lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 lblOrdered.Left = CInt(w * ColX(2)) : lblOrdered.Top = (height - lblOrdered.Height) \ 2
                 lblExpected.Left = CInt(w * ColX(3)) : lblExpected.Top = (height - lblExpected.Height) \ 2
                 delivery.Left = CInt(w * ColX(4)) : delivery.Top = (height - delivery.Height) \ 2

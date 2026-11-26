@@ -338,9 +338,9 @@ Public Class AccountantDashPanelBuilder
         ' is taller than that under Windows display scaling.
         titleBar.Height = Math.Max(If(shortScreen, 52, 72), lblTitle.PreferredHeight + 2 * lblTitle.Top)
         pillBar.Height = Math.Max(52, period.Height + 18)
-        Dim kpiText As Integer = New Font("Segoe UI", 11).Height + New Font("Segoe UI", 26, FontStyle.Bold).Height +
+        Dim kpiText As Integer = New Font("Segoe UI", 11).Height + New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold).Height +
                                  New Font("Segoe UI", 10).Height
-        kpiBar.Height = Math.Max(If(shortScreen, 140, 165), kpiText + 14 + 4 + 18 + kpiBar.Padding.Vertical)
+        kpiBar.Height = Math.Max(If(shortScreen, 140, 165) - Theme.KpiSaved, kpiText + 14 + 4 + 18 + kpiBar.Padding.Vertical)
         region.Height = titleBar.Height + pillBar.Height + kpiBar.Height
 
         Return region
@@ -355,19 +355,20 @@ Public Class AccountantDashPanelBuilder
             .Text = caption,
             .Font = New Font("Segoe UI", 11),
             .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         }
         Dim lblVal As New Label With {
             .Text = value,
-            .Font = New Font("Segoe UI", 26, FontStyle.Bold),
+            .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold),
             .ForeColor = valueClr, .AutoSize = True,
-            .Location = New Point(20, 36), .BackColor = Color.Transparent
+            .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         Dim lblSub As New Label With {
             .Text = subLabel,
             .Font = New Font("Segoe UI", 10),
-            .ForeColor = SubText, .AutoSize = True,
-            .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .ForeColor = SubText, .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20),
+            .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right,
+            .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.AddRange({lblCap, lblVal, lblSub})
         TextFit.FitWidth(lblVal, card)
@@ -380,7 +381,7 @@ Public Class AccountantDashPanelBuilder
             Sub()
                 If card.Width <= 0 Then Return
                 Dim maxW As Integer = card.Width - 40
-                Dim size As Single = 26
+                Dim size As Single = Theme.KpiValueSize
                 Do While size > 12
                     Using f As New Font("Segoe UI", size, FontStyle.Bold)
                         If TextRenderer.MeasureText(value, f).Width <= maxW Then Exit Do
@@ -613,14 +614,11 @@ Public Class AccountantDashPanelBuilder
         card.Controls.Add(header)
 
         Dim colHdr As New Panel With {.Height = 34, .Dock = DockStyle.Top, .BackColor = Color.Transparent}
-        Dim chPo As New Label With {.Text = "PO NO.", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
-        Dim chSup As New Label With {.Text = "SUPPLIER", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent}
+        Dim chPo As New Label With {.Text = "PO NO. / SUPPLIER", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .Location = New Point(18, 9), .BackColor = Color.Transparent}
         Dim chStat As New Label With {.Text = "STATUS", .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold), .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent, .Anchor = AnchorStyles.Top Or AnchorStyles.Right}
-        colHdr.Controls.AddRange({chPo, chSup, chStat})
+        colHdr.Controls.AddRange({chPo, chStat})
         AddHandler colHdr.Resize,
             Sub()
-                chSup.Left = CInt(colHdr.Width * 0.42)
-                chSup.Top = 9
                 chStat.Left = colHdr.Width - chStat.Width - 18
                 chStat.Top = 9
             End Sub
@@ -686,20 +684,19 @@ Public Class AccountantDashPanelBuilder
             .Font = New Font("Segoe UI", 13, FontStyle.Bold),
             .ForeColor = MintDark, .AutoSize = True, .BackColor = Color.Transparent
         }
+        ' The card is about a quarter of the screen wide: a separate Supplier
+        ' column got ~50px ("Nippo...") and the "Partially Received" pill ran
+        ' over it. The supplier now shares the second line with the date.
         Dim lblDate As New Label With {
-            .Text = po.OrderDate.ToString("MMM dd, yyyy"),
-            .Font = New Font("Segoe UI", 10.5F),
-            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent
-        }
-        Dim lblSupplier As New Label With {
-            .Text = po.Supplier,
-            .Font = New Font("Segoe UI", 12),
-            .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
+            .Text = po.Supplier & "  " & ChrW(183) & "  " & po.OrderDate.ToString("MMM dd"),
+            .Font = New Font("Segoe UI", 9.5F),
+            .ForeColor = FaintText, .AutoSize = True, .BackColor = Color.Transparent,
+            .UseMnemonic = False
         }
 
         Dim badgeInfo = GetPoBadge(po.Status)
         Dim badge As New Label With {
-            .Text = po.Status,
+            .Text = If(po.Status = "Partially Received", "Partial", po.Status),
             .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
             .ForeColor = badgeInfo.fore,
             .BackColor = badgeInfo.back,
@@ -709,16 +706,20 @@ Public Class AccountantDashPanelBuilder
         }
         RoundLabel(badge, 8)
 
-        row.Controls.AddRange({lblPo, lblDate, lblSupplier, badge})
+        row.Controls.AddRange({lblPo, lblDate, badge})
+        If badge.Text <> po.Status Then
+            Dim tip As New ToolTip()
+            tip.SetToolTip(badge, po.Status)
+            AddHandler row.Disposed, Sub() tip.Dispose()
+        End If
 
         AddHandler row.Resize,
             Sub()
                 Dim w As Integer = row.Width
-                lblPo.Left = 14 : lblPo.Top = 10
-                lblDate.Left = 14 : lblDate.Top = 32
-                TextFit.Clamp(lblSupplier, w - badge.Width - 14 - CInt(w * 0.42) - 12)
-                lblSupplier.Left = CInt(w * 0.42) : lblSupplier.Top = (height - lblSupplier.Height) \ 2
                 badge.Left = w - badge.Width - 14 : badge.Top = (height - badge.Height) \ 2
+                lblPo.Left = 14 : lblPo.Top = 8
+                lblDate.Left = 14 : lblDate.Top = 33
+                TextFit.Clamp(lblDate, badge.Left - lblDate.Left - 12)
             End Sub
 
         PropagateHover(row)

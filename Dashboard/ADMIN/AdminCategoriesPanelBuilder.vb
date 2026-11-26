@@ -52,7 +52,7 @@ Public Class AdminCategoriesPanelBuilder
 
     ' ── STATE ─────────────────────────────────────────────────────────────────
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 64
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(64, 54)
     Private Const HDR_H As Integer = 44
     Private Const PAD_TOP As Integer = 4
     Private Const PAD_BOTTOM As Integer = 12
@@ -241,7 +241,7 @@ Public Class AdminCategoriesPanelBuilder
     ' =========================================================================
     '  SUMMARY TILES  —  the shape of the catalogue at a glance
     ' =========================================================================
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
 
     Private Shared Function BuildTileStrip() As Panel
         Dim bar As New Panel With {
@@ -291,13 +291,13 @@ Public Class AdminCategoriesPanelBuilder
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         card.Controls.Add(New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent})
+            .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent})
         card.Controls.Add(New Label With {
-            .Text = value, .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
-            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent})
+            .Text = value, .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent})
         card.Controls.Add(New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 100), .BackColor = Color.Transparent})
+            .AutoSize = False, .AutoEllipsis = True, .Size = New Size(164, 20), .Anchor = AnchorStyles.Left Or AnchorStyles.Top Or AnchorStyles.Right, .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent})
         If badgeText <> "" Then
             Dim badge As New Label With {
                 .Text = badgeText, .Font = New Font("Segoe UI", 9, FontStyle.Bold),

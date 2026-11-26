@@ -6,15 +6,22 @@
 '  The POS sale path reads VAT configuration from here on every recalculation,
 '  so the row is loaded once and cached. Call Reload() after saving settings.
 '
-'  IMPORTANT: the fallback defaults below are exactly the values the POS had
-'  hardcoded before this module existed (name "PAINT STORE POS", tagline
+'  The store is Rainbow Paint Center: that is the default name, and the old
+'  "PAINT STORE POS" seed value in store_settings is read as it too.
+'
+'  IMPORTANT: the VAT defaults below are exactly the values the POS had
+'  hardcoded before this module existed (tagline
 '  "Sales Receipt", 12% VAT-inclusive). If the table is missing or unreadable,
 '  every figure the POS computes is identical to the pre-settings behaviour —
 '  a broken settings read can never change sale math.
 ' =============================================================================
 Public Module StoreSettings
 
-    Private Const DEF_NAME As String = "PAINT STORE POS"
+    Private Const DEF_NAME As String = "Rainbow Paint Center"
+    ' What the settings row was seeded with before the store had a name of
+    ' its own. Read as the real name so every laptop still carrying the seed
+    ' prints "Rainbow Paint Center"; any other saved name is used as-is.
+    Private Const LEGACY_PLACEHOLDER As String = "PAINT STORE POS"
     Private Const DEF_TAGLINE As String = "Sales Receipt"
     Private Const DEF_VAT_INCLUSIVE As Boolean = True
     Private ReadOnly DEF_VAT_RATE As Decimal = 12D
@@ -266,6 +273,9 @@ Public Module StoreSettings
                     Using rdr = cmd.ExecuteReader()
                         If rdr.Read() Then
                             _storeName = TextOr(rdr("store_name"), DEF_NAME)
+                            If String.Equals(_storeName.Trim(), LEGACY_PLACEHOLDER, StringComparison.OrdinalIgnoreCase) Then
+                                _storeName = DEF_NAME
+                            End If
                             _storeTagline = TextOr(rdr("store_tagline"), DEF_TAGLINE)
                             _storeAddress = TextOr(rdr("store_address"), "")
                             _storeContact = TextOr(rdr("store_contact"), "")

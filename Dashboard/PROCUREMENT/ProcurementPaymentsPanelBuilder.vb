@@ -38,11 +38,11 @@ Public Class ProcurementPaymentsPanelBuilder
 
     Private Const SEARCH_PLACEHOLDER As String = "Search payment no., P.O., supplier, invoice…"
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 62
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(62, 52)
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
     Private Const MAX_PAGE_SIZE As Integer = 50
     Private Const EXPORT_LIMIT As Integer = 5000
-    Private Const CHROME_H As Integer = 422
+    Private Shared ReadOnly CHROME_H As Integer = 422 - Theme.KpiSaved
 
     Private Const X_PAY As Single = 0.12F
     Private Const X_PO As Single = 0.22F
@@ -522,18 +522,18 @@ Public Class ProcurementPaymentsPanelBuilder
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         card.Controls.Add(New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         })
         valueLabel = New Label With {
-            .Text = "0", .Font = New Font("Segoe UI", 24, FontStyle.Bold), .ForeColor = valueClr,
-            .AutoSize = True, .Location = New Point(20, 38), .BackColor = Color.Transparent
+            .Text = "0", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
         TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,
-            .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.Add(lblSub)
         subLabelCtl = lblSub
@@ -889,7 +889,7 @@ Public Class ProcurementPaymentsPanelBuilder
                 Dim bb = CType(s, Button)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(bb.Parent.BackColor)
-                    e.Graphics.FillRectangle(bg, bb.ClientRectangle)
+                    e.Graphics.FillBackground(bg, bb.ClientRectangle)
                 End Using
                 Dim rect = bb.ClientRectangle : rect.Inflate(-1, -1)
                 Using br As New SolidBrush(bb.BackColor)

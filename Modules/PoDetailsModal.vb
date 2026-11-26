@@ -514,7 +514,7 @@ Public Module PoDetailsModal
                 Dim g = e.Graphics
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 Using bg As New SolidBrush(CardBg)
-                    g.FillRectangle(bg, b.ClientRectangle)
+                    g.FillBackground(bg, b.ClientRectangle)
                 End Using
                 Dim rect = b.ClientRectangle
                 rect.Width -= 1 : rect.Height -= 1

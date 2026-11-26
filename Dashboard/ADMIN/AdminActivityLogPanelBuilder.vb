@@ -70,7 +70,7 @@ Public Class AdminActivityLogPanelBuilder
     ' Actual rows per page — sized so a full page fits without scrolling.
     Private Shared _pageSize As Integer = MAX_PAGE_SIZE
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 56
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(56, 46)
     Private Const DAY_SEP_H As Integer = 40
     Private Const PAD_BOTTOM As Integer = 12
     Private Const SEARCH_PLACEHOLDER As String = "Search user, action or details…"
@@ -666,7 +666,7 @@ Public Class AdminActivityLogPanelBuilder
         Dim lblWhen As New Label With {
             .Text = If(r.CreatedAt = DateTime.MinValue, "—",
                        r.CreatedAt.ToString("h:mm:ss tt")),
-            .Font = New Font("Consolas", 10),
+            .Font = New Font("Segoe UI", 10),
             .ForeColor = SubText, .AutoSize = True, .BackColor = Color.Transparent
         }
         Dim lblUser As New Label With {

@@ -37,12 +37,12 @@ Public Class InventoryHistoryPanelBuilder
 
     Private Const SEARCH_PLACEHOLDER As String = "Search product or SKU…"
     Private Const SIDE_PAD As Integer = 24
-    Private Const ROW_H As Integer = 62
-    Private Const SUMMARY_H As Integer = 140
+    Private Shared ReadOnly ROW_H As Integer = Theme.Dense(62, 52)
+    Private Shared ReadOnly SUMMARY_H As Integer = Theme.KpiH
     Private Const MAX_PAGE_SIZE As Integer = 50
     ' topRegion 128 + summary (140+12) + spacers 16+16 + card padding 2
     ' + colHeader 44 + pagerBar 52 + bottomPad 12
-    Private Const CHROME_H As Integer = 422
+    Private Shared ReadOnly CHROME_H As Integer = 422 - Theme.KpiSaved
 
     ' Column x positions as a share of the row width (header and rows alike).
     Private Const X_PRODUCT As Single = 0.16F
@@ -389,18 +389,18 @@ Public Class InventoryHistoryPanelBuilder
         AddHandler card.Paint, Sub(s, e) PanelRenderer.Draw(CType(s, Panel), e, True)
         card.Controls.Add(New Label With {
             .Text = caption, .Font = New Font("Segoe UI", 11), .ForeColor = SubText,
-            .AutoSize = True, .Location = New Point(22, 14), .BackColor = Color.Transparent
+            .AutoSize = True, .Location = New Point(22, Theme.KpiCaptionTop), .BackColor = Color.Transparent
         })
         valueLabel = New Label With {
-            .Text = "0", .Font = New Font("Segoe UI", 26, FontStyle.Bold), .ForeColor = valueClr,
-            .AutoSize = True, .Location = New Point(20, 36), .BackColor = Color.Transparent
+            .Text = "0", .Font = New Font("Segoe UI", Theme.KpiValueSize, FontStyle.Bold), .ForeColor = valueClr,
+            .AutoSize = True, .Location = New Point(20, Theme.KpiValueTop), .BackColor = Color.Transparent
         }
         card.Controls.Add(valueLabel)
         TextFit.FitWidth(valueLabel, card)
         Dim lblSub As New Label With {
             .Text = subLabel, .Font = New Font("Segoe UI", 10), .ForeColor = SubText,
             .AutoSize = False, .AutoEllipsis = True, .Height = 22,
-            .Location = New Point(22, 100), .BackColor = Color.Transparent
+            .Location = New Point(22, Theme.KpiSubTop), .BackColor = Color.Transparent
         }
         card.Controls.Add(lblSub)
         AddHandler card.Resize, Sub() lblSub.Width = Math.Max(40, card.Width - 36)

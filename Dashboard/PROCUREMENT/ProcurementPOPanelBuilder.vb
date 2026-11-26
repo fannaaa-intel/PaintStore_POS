@@ -508,8 +508,20 @@ Public Class ProcurementPOPanelBuilder
             "EXPECTED", If(po.HasExpected, po.ExpectedDate.ToString("MMM d, yyyy"), "—"), 230, metaY)
         Dim items As (cap As Label, val As Label) = MakeMetaPair(
             "ITEMS", po.ItemCount & If(po.ItemCount = 1, " item", " items"), 428, metaY)
+        ' The order's value was only visible after opening it.
+        Dim total As (cap As Label, val As Label) = MakeMetaPair(
+            "TOTAL", Peso & po.TotalCost.ToString("N2"), 626, metaY)
         card.Controls.AddRange({ordered.cap, ordered.val, expected.cap, expected.val,
-                                 items.cap, items.val})
+                                 items.cap, items.val, total.cap, total.val})
+
+        ' Past its expected date and still not fully received: same red
+        ' "overdue" call-out as Delivery Tracking and the Procurement dashboard.
+        If po.HasExpected AndAlso po.ExpectedDate.Date < Date.Today AndAlso
+           (po.Status = "Ordered" OrElse po.Status = "Partially Received") Then
+            expected.cap.Text = "EXPECTED  " & ChrW(183) & "  OVERDUE"
+            expected.cap.ForeColor = NegativeClr
+            expected.val.ForeColor = NegativeClr
+        End If
 
 
 
@@ -2846,7 +2858,7 @@ Public Class ProcurementPOPanelBuilder
             Dim brTotalBg As New SolidBrush(Color.FromArgb(0, 60, 50))
 
             ' ── HEADER block ─────────────────────────────────────────────────
-            g.DrawString("Paint POS", fSub, brSub, x, y)
+            g.DrawString(StoreSettings.StoreName, fSub, brSub, x, y)
             y += 18
             g.DrawString(po.PoNo, fTitle, brDark, x, y)
             y += 32

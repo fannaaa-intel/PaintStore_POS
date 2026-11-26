@@ -1,21 +1,44 @@
 ﻿Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Drawing.Printing
+Imports System.Drawing.Text
 Imports System.Windows.Forms
 
+' =============================================================================
+'  ReceiptPrinter  —  thermal-style slips: sales receipt, return slip, cash
+'  count, goods receipt.
+'
+'  ONE RENDERER, TWO OUTPUTS
+'  The preview used to be drawn by one routine (green header card, Segoe UI,
+'  a decorative barcode) and the printout by another (plain text), so the
+'  cashier never saw what would actually come out of the printer. Render()
+'  below now lays out and paints the slip for BOTH: the preview is that exact
+'  drawing on a bitmap, the printout is the same drawing on the printer.
+'
+'  WHAT IT LOOKS LIKE
+'  An 80mm thermal receipt: black on white only (thermal heads cannot print
+'  colour or grey cleanly), monospace columns, the store name in large bold
+'  capitals, dashed and double rules, a big TOTAL line, and a real Code 128
+'  barcode of the receipt number that a scanner can read straight into the
+'  Returns screen's receipt lookup.
+' =============================================================================
 Public Module ReceiptPrinter
 
     ' =========================================================================
-    '  LINE STYLES
+    '  LINE STYLES  (values only appended to, never reordered)
     ' =========================================================================
     Public Enum LineStyle
-        Normal      ' Left label (gray) + right value (ink)
-        Bold        ' Both columns in bold ink — sub-totals, categories
-        Muted       ' Centered italic note — counts, remarks
-        Title       ' Consumed by the header block; not drawn inline
-        Section     ' Uppercase mint category heading (NEW)
-        Divider     ' Dashed horizontal rule
-        Spacer      ' Vertical gap
+        Normal          ' label left, value right (or wrapped text)
+        Bold            ' as Normal, bold — item names, sub-totals
+        Muted           ' small centred note — header details, footers
+        Title           ' store name: large, bold, centred
+        Section         ' bold capital heading
+        Divider         ' ---------- rule
+        Spacer          ' half-line gap
+        Total           ' large bold amount line between double rules
+        Center          ' centred body text
+        DoubleDivider   ' ========== rule
+        Barcode         ' Code 128 barcode of .Right (or .Left) + its text
     End Enum
 
     Public Class RLine
@@ -25,15 +48,17 @@ Public Module ReceiptPrinter
         Public Sub New(Optional left As String = "",
                        Optional right As String = "",
                        Optional style As LineStyle = LineStyle.Normal)
-            Me.Left = left
-            Me.Right = right
+            Me.Left = If(left, "")
+            Me.Right = If(right, "")
             Me.Style = style
         End Sub
     End Class
 
-    ' Convenience constructors
     Public Function Divider() As RLine
         Return New RLine("", "", LineStyle.Divider)
+    End Function
+    Public Function DoubleDivider() As RLine
+        Return New RLine("", "", LineStyle.DoubleDivider)
     End Function
     Public Function Spacer() As RLine
         Return New RLine("", "", LineStyle.Spacer)
@@ -41,237 +66,168 @@ Public Module ReceiptPrinter
     Public Function Section(label As String) As RLine
         Return New RLine(label, "", LineStyle.Section)
     End Function
+    Public Function Center(text As String) As RLine
+        Return New RLine(text, "", LineStyle.Center)
+    End Function
+    Public Function Total(label As String, value As String) As RLine
+        Return New RLine(label, value, LineStyle.Total)
+    End Function
+    Public Function Barcode(data As String) As RLine
+        Return New RLine("", data, LineStyle.Barcode)
+    End Function
 
     ' =========================================================================
-    '  COLOUR PALETTE
+    '  GEOMETRY  (layout units: preview pixels at 1x = printer 1/100 inch)
     ' =========================================================================
-    Private ReadOnly MintDark As Color = Theme.Dark  ' #0A4F42
-    Private ReadOnly MintPrimary As Color = Theme.Primary  ' #00A88E
-    Private ReadOnly MintStripe As Color = Theme.Primary  ' dash stripe
-    Private ReadOnly BgColor As Color = Color.FromArgb(237, 241, 240)   ' scroll area
-    Private ReadOnly CardBg As Color = Color.White
+    Private Const RECEIPT_W As Integer = 280      ' 2.8in, the printable width of an 80mm roll
+    Private Const PAD_X As Integer = 12
+    Private Const PAD_Y As Integer = 14
+    Private Const BARCODE_H As Single = 34
+    Private Const PREVIEW_SCALE As Single = 1.4F
+    Private Const DLG_RADIUS As Integer = 12
+
+    Private ReadOnly InkColor As Color = Color.Black
+    Private ReadOnly MintDark As Color = Theme.Dark
+    Private ReadOnly MintPrimary As Color = Theme.Primary
+    Private ReadOnly DeskBg As Color = Color.FromArgb(226, 232, 230)
     Private ReadOnly BorderClr As Color = Color.FromArgb(208, 220, 216)
     Private ReadOnly SubText As Color = Theme.SubText
-    Private ReadOnly ReceiptInk As Color = Color.FromArgb(28, 32, 30)
-    Private ReadOnly ReceiptGray As Color = Color.FromArgb(115, 128, 123)
-    Private ReadOnly ReceiptDiv As Color = Color.FromArgb(200, 218, 212)
-    Private ReadOnly MetaBg As Color = Color.FromArgb(247, 250, 249)   ' meta row bg
-    Private ReadOnly SectionInk As Color = Theme.Dark  ' section head
 
-    ' =========================================================================
-    '  CONSTANTS
-    ' =========================================================================
-    Private Const RECEIPT_W As Integer = 280   ' narrower = crisper on 80mm thermal
-    Private Const PAD_X As Integer = 18
-    Private Const HEADER_H As Integer = 88    ' taller for logo mark + store name
-    Private Const DLG_RADIUS As Integer = 12   ' shared corner radius for the dialog shell
-
-    ' On-screen preview only — the bitmap is still rendered at RECEIPT_W (the
-    ' real 80mm-thermal-accurate width) and PrintPage() below is completely
-    ' untouched, so actual print output is unaffected. This just makes the
-    ' receipt easier to read on screen by drawing the finished bitmap larger,
-    ' the same way a browser zooms a rendered image without re-flowing it.
-    Private Const PREVIEW_SCALE As Single = 1.4F
-
-    ' =========================================================================
-    '  Local rounded-rect path helper for the bottom-bar buttons.
-    ' =========================================================================
-    ' Previously btnPrint/btnClose used the external FillRoundedRectangle/
-    ' DrawRoundedRectangle extension (defined elsewhere, in Dashboard\
-    ' GraphicsExtensions.vb) to draw their rounded fill. That produced a
-    ' faint pale horizontal sliver right along the top edge of both buttons
-    ' — most likely that extension method builds its path or strokes its
-    ' edge in a way that doesn't blend cleanly with the erase-to-background
-    ' fill used here. Rather than guess at code we don't have visibility
-    ' into, both buttons now build and fill their own GraphicsPath directly
-    ' with this local helper — the same proven, artifact-free pattern
-    ' already used for AppModal's buttons and for topBar/bottomBar above.
-    Private Function ButtonRoundedPath(rect As Rectangle, radius As Integer) As GraphicsPath
-        Dim path As New GraphicsPath()
-        Dim d As Integer = radius * 2
-        path.AddArc(rect.X, rect.Y, d, d, 180, 90)
-        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
-        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
-        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
-        path.CloseFigure()
-        Return path
+    ' Placeholder names callers pass when they have no store name of their own.
+    Private Function ResolveStoreName(name As String) As String
+        If String.IsNullOrWhiteSpace(name) OrElse
+           String.Equals(name, "PAINT STORE", StringComparison.OrdinalIgnoreCase) Then
+            Return StoreSettings.StoreName
+        End If
+        Return name
     End Function
+
+    ' Everything one slip needs, passed to the renderer as a unit.
+    Private Class SlipDoc
+        Public Lines As List(Of RLine)
+        Public ReceiptNo As String
+        Public StoreName As String
+        Public Tagline As String
+        Public IsInternal As Boolean
+    End Class
 
     ' =========================================================================
     '  PREVIEW WINDOW
     ' =========================================================================
     ''' <param name="internal">
-    ''' True for an in-house document (a cash count, a stock sheet) rather than
-    ''' a customer receipt: signature lines instead of a barcode and a
-    ''' thank-you, since nobody purchased anything.
+    ''' True for an in-house document (a cash count) rather than a customer
+    ''' receipt: signature lines instead of a barcode.
     ''' </param>
     Public Sub Preview(documentName As String,
                        lines As List(Of RLine),
                        Optional receiptNo As String = "",
-                  Optional storeName As String = "PAINT STORE",
-                       Optional storeTagline As String = "Official Sales Receipt",
+                       Optional storeName As String = "",
+                       Optional storeTagline As String = "",
                        Optional [internal] As Boolean = False)
 
         If lines Is Nothing OrElse lines.Count = 0 Then Return
 
-        ' Set before the height pre-measure below: MeasureFooterH reads it.
-        _internalFooter = [internal]
+        Dim doc As New SlipDoc With {
+            .Lines = lines, .ReceiptNo = If(receiptNo, ""),
+            .StoreName = ResolveStoreName(storeName),
+            .Tagline = If(String.IsNullOrWhiteSpace(storeTagline), documentName, storeTagline),
+            .IsInternal = [internal]}
 
-        Dim contentW As Integer = RECEIPT_W - PAD_X * 2
-
-        ' ── Pre-measure receipt height ────────────────────────────────────────
-        Dim totalH As Integer = HEADER_H + 22 + 18  ' header + meta + top-pad
-        Using bmp As New Bitmap(1, 1)
-            Using g As Graphics = Graphics.FromImage(bmp)
-                For Each ln In lines
-                    totalH += MeasureLineH(g, ln, contentW)
-                Next
+        ' ── Render the slip once at preview resolution ───────────────────────
+        Dim slipH As Single
+        Using probe As New Bitmap(1, 1)
+            Using g As Graphics = Graphics.FromImage(probe)
+                slipH = Render(g, doc, PAD_X, RECEIPT_W - PAD_X * 2, False, PREVIEW_SCALE)
             End Using
         End Using
-        totalH += MeasureFooterH() + 20  ' barcode footer + bottom pad
-        Dim receiptH As Integer = Math.Max(420, totalH)
+        Dim bmpW As Integer = CInt(RECEIPT_W * PREVIEW_SCALE)
+        Dim bmpH As Integer = CInt(Math.Ceiling(slipH * PREVIEW_SCALE))
+        Dim bmpSlip As New Bitmap(bmpW, bmpH)
+        Using g As Graphics = Graphics.FromImage(bmpSlip)
+            g.Clear(Color.White)
+            g.ScaleTransform(PREVIEW_SCALE, PREVIEW_SCALE)
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+            Render(g, doc, PAD_X, RECEIPT_W - PAD_X * 2, True, PREVIEW_SCALE)
+        End Using
 
-        ' ── Render receipt bitmap ─────────────────────────────────────────────
-        ' Rendered directly at PREVIEW_SCALE resolution (via ScaleTransform)
-        ' rather than drawn small and stretched later — this keeps text and
-        ' lines genuinely crisp instead of a blurred upscale. All the drawing
-        ' code in DrawReceiptToBitmap still thinks in the original RECEIPT_W/
-        ' receiptH coordinate space; the transform handles the rest.
-        Dim bmpReceipt As New Bitmap(CInt(RECEIPT_W * PREVIEW_SCALE), CInt(receiptH * PREVIEW_SCALE))
-        DrawReceiptToBitmap(bmpReceipt, lines, receiptNo, storeName, storeTagline, receiptH, PREVIEW_SCALE)
-
-        ' =========================================================================
-        '  DIALOG FORM
-        ' =========================================================================
+        ' ── Dialog shell ──────────────────────────────────────────────────────
+        ' Fixed at 820px it ran past the bottom of a 1366x768 laptop screen,
+        ' taking the Print button with it. It now fits the working area.
         Dim DIALOG_W As Integer = 520
-        Dim DIALOG_H As Integer = 820
-
-        ' A defined frame colour so the container reads clearly against a
-        ' white background (e.g. the transaction builder) instead of blending in.
+        Dim workH As Integer = Screen.PrimaryScreen.WorkingArea.Height
+        Dim DIALOG_H As Integer = Math.Max(420, Math.Min(820, workH - 40))
         Dim DialogBorder As Color = Color.FromArgb(120, 150, 142)
 
         Dim f As New Form With {
-            .Text = "",
+            .Text = documentName,
             .FormBorderStyle = FormBorderStyle.None,
             .StartPosition = FormStartPosition.CenterParent,
             .BackColor = DialogBorder,
             .Padding = New Padding(1),
             .Width = DIALOG_W,
             .Height = DIALOG_H,
-            .Font = New Font("Segoe UI", 9.5F)
+            .Font = New Font("Segoe UI", 9.5F),
+            .KeyPreview = True,
+            .ShowInTaskbar = False
         }
-
-        ' Rounded form region (r=12)
-        Using gp As New GraphicsPath()
-            Dim d = DLG_RADIUS * 2
-            gp.AddArc(0, 0, d, d, 180, 90)
-            gp.AddArc(f.Width - d, 0, d, d, 270, 90)
-            gp.AddArc(f.Width - d, f.Height - d, d, d, 0, 90)
-            gp.AddArc(0, f.Height - d, d, d, 90, 90)
-            gp.CloseFigure()
-            f.Region = New System.Drawing.Region(gp)
+        Using gp As GraphicsPath = RoundedPath(New Rectangle(0, 0, f.Width, f.Height), DLG_RADIUS)
+            f.Region = New Region(gp)
         End Using
+        AddHandler f.KeyDown, Sub(s, e) If e.KeyCode = Keys.Escape Then f.Close()
 
-        ' ── Top bar (52 px) ───────────────────────────────────────────────────
-        ' Same corner-clip issue as bottomBar: a docked Panel paints a plain
-        ' square rectangle regardless of the Form's rounded Region. It mostly
-        ' "worked" before because MintDark is opaque and the eye doesn't catch
-        ' a square-vs-round seam between two solid fills of different shapes
-        ' at this size — but it's the same underlying bug. Fixed the same way:
-        ' erase to the outer frame color, then fill the true rounded-top shape.
+        ' ── Top bar ───────────────────────────────────────────────────────────
         Dim topBar As New Panel With {.Dock = DockStyle.Top, .Height = 52, .BackColor = MintDark}
         AddHandler topBar.Paint,
             Sub(s, e)
                 Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-
-                Dim r As Integer = DLG_RADIUS
-                Dim d As Integer = r * 2
-                Dim w As Integer = topBar.Width
-                Dim h As Integer = topBar.Height
-
-                ' 1) Erase the panel's square corners into the outer frame color.
-                Using bgBrush As New SolidBrush(DialogBorder)
-                    g.FillRectangle(bgBrush, 0, 0, w, h)
+                Using bg As New SolidBrush(DialogBorder)
+                    g.FillRectangle(bg, 0, 0, topBar.Width, topBar.Height)
                 End Using
-
-                ' 2) Fill the panel's true shape: rounded top, square bottom.
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim r As Integer = DLG_RADIUS, d As Integer = DLG_RADIUS * 2
                 Using path As New GraphicsPath()
-                    path.AddArc(0, 0, d, d, 180, 90)                        ' top-left corner
-                    path.AddArc(w - d, 0, d, d, 270, 90)                    ' top-right corner
-                    path.AddLine(w, r, w, h)                                ' right edge
-                    path.AddLine(w, h, 0, h)                                ' bottom edge
+                    path.AddArc(0, 0, d, d, 180, 90)
+                    path.AddArc(topBar.Width - d, 0, d, d, 270, 90)
+                    path.AddLine(topBar.Width, r, topBar.Width, topBar.Height)
+                    path.AddLine(topBar.Width, topBar.Height, 0, topBar.Height)
                     path.CloseFigure()
                     Using br As New SolidBrush(MintDark)
                         g.FillPath(br, path)
                     End Using
                 End Using
-
-                ' Decorative dash stripe at very bottom of bar
-                Using pen As New Pen(MintStripe, 2.0F) With {.DashStyle = DashStyle.Dash}
-                    pen.DashPattern = {4.0F, 3.0F}
-                    g.DrawLine(pen, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1)
-                End Using
             End Sub
-
         Dim lblDocName As New Label With {
-            .Text = documentName,
-            .Font = New Font("Segoe UI Semibold", 12),
-            .ForeColor = Color.White,
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
-            .Location = New Point(16, 8)}
+            .Text = documentName, .Font = New Font("Segoe UI Semibold", 12),
+            .ForeColor = Color.White, .BackColor = Color.Transparent, .AutoSize = True,
+            .Location = New Point(16, 7), .UseMnemonic = False}
         Dim lblHint As New Label With {
-            .Text = "Review your receipt before printing",
-            .Font = New Font("Segoe UI", 8.5F),
-            .ForeColor = Color.FromArgb(160, 215, 200),
-            .BackColor = Color.Transparent,
-            .AutoSize = True,
-            .Location = New Point(16, 30)}
-
-        ' Circular close button
+            .Text = "This is exactly how it will print",
+            .Font = New Font("Segoe UI", 8.5F), .ForeColor = Color.FromArgb(160, 215, 200),
+            .BackColor = Color.Transparent, .AutoSize = True, .Location = New Point(16, 29)}
         Dim btnX As New Button With {
-            .Text = "×",
-            .Size = New Size(28, 28),
-            .FlatStyle = FlatStyle.Flat,
-            .Font = New Font("Segoe UI", 14),
-            .BackColor = MintDark,
-            .Cursor = Cursors.Hand}
+            .Size = New Size(28, 28), .FlatStyle = FlatStyle.Flat,
+            .BackColor = MintDark, .Cursor = Cursors.Hand, .TabStop = False}
         btnX.FlatAppearance.BorderSize = 0
-        ' Suppress the default grey flat-hover rectangle — we paint our own circle.
         btnX.FlatAppearance.MouseOverBackColor = MintDark
         btnX.FlatAppearance.MouseDownBackColor = MintDark
         Dim xHover As Boolean = False
         AddHandler btnX.Paint,
             Sub(s, e)
-                Dim b = CType(s, Button)
                 Dim g = e.Graphics
+                Using bg As New SolidBrush(MintDark)
+                    g.FillRectangle(bg, btnX.ClientRectangle)
+                End Using
                 g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim rc = b.ClientRectangle : rc.Inflate(-1, -1)
-
-                ' Circle: subtle when idle, bright white when hovered.
-                Dim fillCol = If(xHover, Color.FromArgb(245, 255, 255, 255),
-                                          Color.FromArgb(48, 255, 255, 255))
-                Using br As New SolidBrush(fillCol)
+                Dim rc = btnX.ClientRectangle : rc.Inflate(-1, -1)
+                Using br As New SolidBrush(If(xHover, Color.White, Color.FromArgb(48, 255, 255, 255)))
                     g.FillEllipse(br, rc)
                 End Using
-                Dim ringCol = If(xHover, Color.FromArgb(255, 255, 255, 255),
-                                          Color.FromArgb(110, 255, 255, 255))
-                Using pen As New Pen(ringCol, 1.0F)
-                    g.DrawEllipse(pen, rc)
-                End Using
-
-                ' Glyph: white when idle, dark-green when the circle lights up.
-                ' Drawn as two crossing lines so it sits exactly centred (the
-                ' '×' character's font metrics leave it looking slightly off).
-                Dim glyphCol = If(xHover, MintDark, Color.FromArgb(235, 250, 245))
-                Dim gcx As Single = rc.Left + rc.Width / 2.0F
-                Dim gcy As Single = rc.Top + rc.Height / 2.0F
+                Dim cx As Single = rc.Left + rc.Width / 2.0F, cy As Single = rc.Top + rc.Height / 2.0F
                 Dim arm As Single = rc.Width * 0.22F
-                Using gpen As New Pen(glyphCol, 2.0F) With {
+                Using pen As New Pen(If(xHover, MintDark, Color.White), 2.0F) With {
                         .StartCap = LineCap.Round, .EndCap = LineCap.Round}
-                    g.DrawLine(gpen, gcx - arm, gcy - arm, gcx + arm, gcy + arm)
-                    g.DrawLine(gpen, gcx - arm, gcy + arm, gcx + arm, gcy - arm)
+                    g.DrawLine(pen, cx - arm, cy - arm, cx + arm, cy + arm)
+                    g.DrawLine(pen, cx - arm, cy + arm, cx + arm, cy - arm)
                 End Using
             End Sub
         AddHandler btnX.MouseEnter,
@@ -288,861 +244,577 @@ Public Module ReceiptPrinter
         AddHandler topBar.Resize, Sub() btnX.Location = New Point(topBar.Width - 42, 12)
         topBar.Controls.AddRange({lblDocName, lblHint, btnX})
 
-        ' Drag by top bar
-        Dim _drag As Boolean = False
-        Dim _dragPt As Point
+        Dim dragging As Boolean = False
+        Dim dragAt As Point
         AddHandler topBar.MouseDown,
-      Sub(s, e)
-          _drag = True
-          _dragPt = e.Location
-      End Sub
+            Sub(s, e)
+                dragging = True
+                dragAt = e.Location
+            End Sub
         AddHandler topBar.MouseMove,
             Sub(s, e)
-                If _drag Then f.Location = New Point(f.Left + e.X - _dragPt.X, f.Top + e.Y - _dragPt.Y)
+                If dragging Then f.Location = New Point(f.Left + e.X - dragAt.X, f.Top + e.Y - dragAt.Y)
             End Sub
-        AddHandler topBar.MouseUp, Sub(s, e) _drag = False
+        AddHandler topBar.MouseUp, Sub(s, e) dragging = False
 
-        ' ── Bottom action bar ─────────────────────────────────────────────────
-        ' NOTE on rounded-corner fix: a docked Panel always paints a perfectly
-        ' square rectangle — it has no idea the Form above it is clipped to a
-        ' rounded Region. That's why the bottom corners of the dialog looked
-        ' sharp/broken: this panel's white square corners sat exactly on top
-        ' of where the curve should have been, with no contrasting color to
-        ' reveal the clip underneath.
-        '
-        ' Fix: explicitly carve this panel's own two BOTTOM corners using an
-        ' anti-aliased path, the same way every other rounded surface in this
-        ' codebase is built (AppModal, SaleCompleteModal) — paint the full
-        ' background in the outer frame color (DialogBorder) first, so the
-        ' "removed" corner pixels blend into the 1px frame around the dialog,
-        ' then fill the panel's real (rounded-at-bottom) shape on top. Only
-        ' the bottom corners are rounded here since this panel sits flush
-        ' against the Form's bottom edge; the top edge stays a plain straight
-        ' line because the scroll area above it is a plain rectangle too.
-        Dim bottomBar As New Panel With {
-            .Dock = DockStyle.Bottom,
-            .Height = 60,
-            .BackColor = CardBg}
+        ' ── Bottom bar ────────────────────────────────────────────────────────
+        Dim bottomBar As New Panel With {.Dock = DockStyle.Bottom, .Height = 60, .BackColor = Color.White}
         AddHandler bottomBar.Paint,
             Sub(s, e)
                 Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-
-                Dim r As Integer = DLG_RADIUS
-                Dim d As Integer = r * 2
-                Dim w As Integer = bottomBar.Width
-                Dim h As Integer = bottomBar.Height
-
-                ' 1) Erase the panel's square corners into the outer frame color.
-                Using bgBrush As New SolidBrush(DialogBorder)
-                    g.FillRectangle(bgBrush, 0, 0, w, h)
+                Using bg As New SolidBrush(DialogBorder)
+                    g.FillRectangle(bg, 0, 0, bottomBar.Width, bottomBar.Height)
                 End Using
-
-                ' 2) Fill the panel's true shape: square top, rounded bottom.
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim w = bottomBar.Width, h = bottomBar.Height
+                Dim r As Integer = DLG_RADIUS, d As Integer = DLG_RADIUS * 2
                 Using path As New GraphicsPath()
-                    path.AddLine(0, 0, w, 0)                                ' top edge
-                    path.AddLine(w, 0, w, h - r)                            ' right edge
-                    path.AddArc(w - d, h - d, d, d, 0, 90)                  ' bottom-right corner
-                    path.AddLine(w - r, h, r, h)                            ' bottom edge
-                    path.AddArc(0, h - d, d, d, 90, 90)                     ' bottom-left corner
+                    path.AddLine(0, 0, w, 0)
+                    path.AddLine(w, 0, w, h - r)
+                    path.AddArc(w - d, h - d, d, d, 0, 90)
+                    path.AddLine(w - r, h, r, h)
+                    path.AddArc(0, h - d, d, d, 90, 90)
                     path.CloseFigure()
-                    Using br As New SolidBrush(CardBg)
+                    Using br As New SolidBrush(Color.White)
                         g.FillPath(br, path)
                     End Using
                 End Using
-
-
-            End Sub
-
-        ' Print button (solid mint pill)
-        Dim btnPrint As New Button With {
-            .Text = "🖨  PRINT",
-            .Font = New Font("Segoe UI Semibold", 10),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = MintPrimary,
-            .ForeColor = Color.White,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(120, 38)}
-        btnPrint.FlatAppearance.BorderSize = 0
-        btnPrint.FlatAppearance.BorderColor = CardBg
-        btnPrint.FlatAppearance.MouseOverBackColor = MintDark
-        btnPrint.FlatAppearance.MouseDownBackColor = MintDark
-        AddHandler btnPrint.Paint,
-            Sub(s, e)
-                Dim b = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                ' Erase the button's default square fill into the bottom bar's
-                ' own background first — Button.OnPaint always fills a flat
-                ' square before this handler runs, so without this the corner
-                ' pixels are still that square fill showing through underneath
-                ' the rounded shape, not a true curve.
-                ' REPLACE with:
-                Dim eraseRect = b.ClientRectangle
-                eraseRect.Inflate(1, 1)
-                Using bgBrush As New SolidBrush(CardBg)
-                    g.FillRectangle(bgBrush, eraseRect)
+                Using pen As New Pen(BorderClr)
+                    g.DrawLine(pen, 0, 0, w, 0)
                 End Using
-                Dim rc = b.ClientRectangle : rc.Inflate(-1, -1)
-                Using path As GraphicsPath = ButtonRoundedPath(rc, 8)
-                    Using br As New SolidBrush(b.BackColor)
-                        g.FillPath(br, path)
-                    End Using
-                End Using
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, Color.White,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnPrint.MouseEnter,
-         Sub()
-             btnPrint.BackColor = MintDark
-             btnPrint.Invalidate()
-         End Sub
-        AddHandler btnPrint.MouseLeave,
-            Sub()
-                btnPrint.BackColor = MintPrimary
-                btnPrint.Invalidate()
             End Sub
 
-        ' Close button (subtle ghost)
-        Dim btnClose As New Button With {
-            .Text = "CLOSE",
-            .Font = New Font("Segoe UI Semibold", 10),
-            .FlatStyle = FlatStyle.Flat,
-            .BackColor = Color.FromArgb(238, 243, 241),
-            .ForeColor = SubText,
-            .Cursor = Cursors.Hand,
-            .Size = New Size(90, 38)}
-        btnClose.FlatAppearance.BorderSize = 1
-        btnClose.FlatAppearance.BorderColor = BorderClr
-        AddHandler btnClose.Paint,
-            Sub(s, e)
-                Dim b = CType(s, Button)
-                Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-
-                Dim eraseRect = b.ClientRectangle
-                eraseRect.Inflate(1, 1)
-                Using bgBrush As New SolidBrush(CardBg)
-                    g.FillRectangle(bgBrush, eraseRect)
-                End Using
-                Dim rc = b.ClientRectangle : rc.Inflate(-1, -1)
-                Using path As GraphicsPath = ButtonRoundedPath(rc, 8)
-                    Using br As New SolidBrush(b.BackColor)
-                        g.FillPath(br, path)
-                    End Using
-
-                End Using
-                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
-                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
-            End Sub
-        AddHandler btnClose.MouseEnter,
-     Sub()
-         btnClose.BackColor = Color.FromArgb(220, 232, 228)
-         btnClose.Invalidate()
-     End Sub
-        AddHandler btnClose.MouseLeave,
-            Sub()
-                btnClose.BackColor = Color.FromArgb(238, 243, 241)
-                btnClose.Invalidate()
-            End Sub
+        Dim btnPrint As Button = MakeBarButton("Print", 130, MintPrimary, MintDark, Color.White)
+        Dim btnClose As Button = MakeBarButton("Close", 96, Color.FromArgb(238, 243, 241),
+                                               Color.FromArgb(220, 232, 228), SubText)
         AddHandler btnClose.Click, Sub() f.Close()
-
         AddHandler bottomBar.Resize,
             Sub()
-                Dim cy = (bottomBar.Height - btnPrint.Height) \ 2
-                ' Right margin bumped from 16 to 24px: at 16px the button's
-                ' right edge (x=384 in a 400px dialog) sat only 8px from
-                ' where bottomBar's own rounded bottom-right corner starts
-                ' arcing (x=376) — close enough that the two separate curves
-                ' visually read as one broken/double outline wrapping the
-                ' button. 24px clears it with real breathing room.
+                Dim cy As Integer = (bottomBar.Height - btnPrint.Height) \ 2
                 btnPrint.Location = New Point(bottomBar.Width - btnPrint.Width - 24, cy)
                 btnClose.Location = New Point(btnPrint.Left - btnClose.Width - 8, cy)
             End Sub
         bottomBar.Controls.AddRange({btnPrint, btnClose})
 
-        ' ── Scroll area ───────────────────────────────────────────────────────
-        Dim scroll As New Panel With {
-            .Dock = DockStyle.Fill,
-            .BackColor = BgColor,
-            .AutoScroll = True}
-
-        ' Receipt card with layered shadow.
-        ' dispW/dispH are bmpReceipt's actual pixel size (already rendered
-        ' natively at PREVIEW_SCALE in Preview() above) — used here purely
-        ' for layout: sizing the card, shadow, and border around it.
-        Dim dispW As Integer = CInt(RECEIPT_W * PREVIEW_SCALE)
-        Dim dispH As Integer = CInt(receiptH * PREVIEW_SCALE)
-        Dim cardW As Integer = dispW + 14
-        Dim cardH As Integer = dispH + 14
-        Dim receiptCard As New Panel With {
-            .Width = cardW,
-            .Height = cardH,
-            .BackColor = Color.Transparent}
-
-        AddHandler receiptCard.Paint,
+        ' ── Desk + paper ──────────────────────────────────────────────────────
+        Dim desk As New Panel With {.Dock = DockStyle.Fill, .BackColor = DeskBg, .AutoScroll = True}
+        Dim paper As New Panel With {
+            .Name = "receiptPaper",
+            .Width = bmpW + 20, .Height = bmpH + 24, .BackColor = Color.Transparent}
+        AddHandler paper.Paint,
             Sub(s, e)
                 Dim g = e.Graphics
-                g.SmoothingMode = SmoothingMode.AntiAlias
-                Dim ox = 6, oy = 6
-
-                ' Layered drop shadow — sized to the scaled-up card.
-                For i As Integer = 7 To 1 Step -1
-                    Dim a = CInt(6 + (7 - i) * 8)
-                    Using pen As New Pen(Color.FromArgb(Math.Min(55, a), 10, 60, 50), 1.0F)
-                        g.DrawRectangle(pen,
-                            ox - i, oy - i + 3,
-                            dispW + i * 2 - 1,
-                            dispH + i * 2 - 1)
+                Const ox As Integer = 10, oy As Integer = 8
+                ' soft drop shadow
+                For i As Integer = 6 To 1 Step -1
+                    Using br As New SolidBrush(Color.FromArgb(10, 20, 40, 34))
+                        g.FillRectangle(br, ox - i + 2, oy - i + 5, bmpW + i * 2 - 4, bmpH + i * 2 - 4)
                     End Using
                 Next
-
-                ' White card
-                g.FillRectangle(Brushes.White, ox, oy, dispW, dispH)
-
-                ' Receipt image — bmpReceipt was rendered natively at
-                ' PREVIEW_SCALE resolution (see Preview()), so it's drawn
-                ' here 1:1, no further stretching needed.
-                g.DrawImage(bmpReceipt, ox, oy)
-
-                ' 0.5pt border
-                Using pen As New Pen(BorderClr, 0.5F)
-                    g.DrawRectangle(pen, ox, oy, dispW - 1, dispH - 1)
+                ' 1:1 with no resampling: a sized DrawImage interpolates even at
+                ' the same size, which smeared every bar edge by half a pixel
+                ' and softened the text.
+                Dim oldInterp = g.InterpolationMode, oldOffset = g.PixelOffsetMode
+                g.InterpolationMode = InterpolationMode.NearestNeighbor
+                g.PixelOffsetMode = PixelOffsetMode.Half
+                g.DrawImage(bmpSlip, New Rectangle(ox, oy, bmpW, bmpH),
+                            New Rectangle(0, 0, bmpW, bmpH), GraphicsUnit.Pixel)
+                g.InterpolationMode = oldInterp
+                g.PixelOffsetMode = oldOffset
+                ' torn top and bottom edges, as the cutter leaves a thermal roll
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Using br As New SolidBrush(DeskBg)
+                    Const tooth As Integer = 8
+                    For x As Integer = 0 To bmpW Step tooth
+                        g.FillPolygon(br, New Point() {
+                            New Point(ox + x, oy - 1), New Point(ox + x + tooth \ 2, oy + 4),
+                            New Point(ox + x + tooth, oy - 1)})
+                        g.FillPolygon(br, New Point() {
+                            New Point(ox + x, oy + bmpH + 1), New Point(ox + x + tooth \ 2, oy + bmpH - 4),
+                            New Point(ox + x + tooth, oy + bmpH + 1)})
+                    Next
                 End Using
             End Sub
-
-        AddHandler scroll.Resize,
+        AddHandler desk.Resize,
             Sub()
-                Dim availW = scroll.ClientSize.Width
-                Dim availH = scroll.ClientSize.Height
-                Dim cx = Math.Max(16, (availW - receiptCard.Width) \ 2)
-                ' Centre vertically when the receipt fits; otherwise keep a top
-                ' margin (≥34) so it never collides with the green header and can
-                ' still scroll when the receipt is tall.
-                Dim cy = Math.Max(34, (availH - receiptCard.Height) \ 2)
-                receiptCard.Location = New Point(cx, cy)
+                paper.Location = New Point(Math.Max(8, (desk.ClientSize.Width - paper.Width) \ 2),
+                                           Math.Max(16, (desk.ClientSize.Height - paper.Height) \ 2))
             End Sub
-        scroll.Controls.Add(receiptCard)
+        desk.Controls.Add(paper)
+        ' The wheel scrolls the paper even while the pointer is over it.
+        AddHandler paper.MouseEnter, Sub() desk.Focus()
 
-        ' ── Print action ──────────────────────────────────────────────────────
+        ' ── Print ─────────────────────────────────────────────────────────────
         AddHandler btnPrint.Click,
             Sub()
-                Dim ni As Integer = 0
-                ' A fresh PrintDocument per click, so it must be disposed per
-                ' click too -- it owns unmanaged printer/spooler resources and
-                ' reprinting repeatedly leaked one every time.
-                Using doc As New PrintDocument()
-                    doc.DocumentName = documentName
-                    doc.DefaultPageSettings.PaperSize = New PaperSize("Receipt", RECEIPT_W, 1100)
-                    doc.DefaultPageSettings.Margins = New Margins(12, 12, 12, 12)
-                    doc.OriginAtMargins = True
-                    AddHandler doc.PrintPage,
-                        Sub(ps, pe)
-                            PrintPage(pe, lines, ni, storeName, storeTagline, receiptNo)
-                        End Sub
-                    Try
-                        Using pd As New PrintDialog With {.Document = doc}
-                            If pd.ShowDialog() = DialogResult.OK Then doc.Print()
-                        End Using
-                    Catch ex As Exception
-                        AppModal.Show("Print failed:" & Environment.NewLine & ErrorLog.ForUser(ex),
-                            "Print Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                    End Try
-                End Using
+                Try
+                    PrintSlip(documentName, doc)
+                Catch ex As Exception
+                    AppModal.Show("Print failed:" & Environment.NewLine & ErrorLog.ForUser(ex),
+                                  "Print Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End Try
             End Sub
 
-        f.Controls.AddRange({topBar, bottomBar, scroll})
+        f.Controls.AddRange({desk, bottomBar, topBar})
+        f.AcceptButton = btnPrint
         f.ShowDialog()
-        bmpReceipt.Dispose()
+        f.Dispose()
+        bmpSlip.Dispose()
     End Sub
 
+    Private Function MakeBarButton(text As String, width As Integer, rest As Color,
+                                   hover As Color, fore As Color) As Button
+        Dim b As New Button With {
+            .Text = text, .Font = New Font("Segoe UI Semibold", 10), .FlatStyle = FlatStyle.Flat,
+            .BackColor = rest, .ForeColor = fore, .Cursor = Cursors.Hand, .Size = New Size(width, 38)}
+        b.FlatAppearance.BorderSize = 0
+        b.FlatAppearance.MouseOverBackColor = hover
+        b.FlatAppearance.MouseDownBackColor = hover
+        AddHandler b.Paint,
+            Sub(s, e)
+                Dim g = e.Graphics
+                g.FillBackground(Brushes.White, b.ClientRectangle)
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                Dim rc = b.ClientRectangle : rc.Inflate(-1, -1)
+                Using path As GraphicsPath = RoundedPath(rc, 8)
+                    Using br As New SolidBrush(b.BackColor)
+                        g.FillPath(br, path)
+                    End Using
+                End Using
+                TextRenderer.DrawText(g, b.Text, b.Font, b.ClientRectangle, b.ForeColor,
+                    TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+            End Sub
+        AddHandler b.MouseEnter,
+            Sub()
+                b.BackColor = hover
+                b.Invalidate()
+            End Sub
+        AddHandler b.MouseLeave,
+            Sub()
+                b.BackColor = rest
+                b.Invalidate()
+            End Sub
+        Return b
+    End Function
+
+    Private Function RoundedPath(rect As Rectangle, radius As Integer) As GraphicsPath
+        Dim path As New GraphicsPath()
+        Dim d As Integer = radius * 2
+        path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+        path.CloseFigure()
+        Return path
+    End Function
+
     ' =========================================================================
-    '  DRAW RECEIPT BITMAP
+    '  PRINT
     ' =========================================================================
-    Private Sub DrawReceiptToBitmap(bmp As Bitmap,
-                                     lines As List(Of RLine),
-                                     receiptNo As String,
-                                     storeName As String,
-                                     storeTagline As String,
-                                     receiptH As Integer,
-                                     Optional scale As Single = 1.0F)
-        Using g As Graphics = Graphics.FromImage(bmp)
-            g.Clear(Color.White)
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit
-            g.SmoothingMode = SmoothingMode.AntiAlias
+    Private Sub PrintSlip(documentName As String, doc As SlipDoc)
+        Using pdoc As New PrintDocument()
+            pdoc.DocumentName = documentName
+            pdoc.OriginAtMargins = False
+            pdoc.DefaultPageSettings.Margins = New Margins(8, 8, 8, 8)
 
-            ' Everything below this point still thinks in the original
-            ' RECEIPT_W / receiptH coordinate space (same numbers as before).
-            ' This transform stretches that coordinate space to match the
-            ' larger bitmap, so text/lines/the barcode are drawn natively at
-            ' the higher resolution instead of being scaled as a finished
-            ' image — the result is crisp at any PREVIEW_SCALE, not blurry.
-            If scale <> 1.0F Then g.ScaleTransform(scale, scale)
-
-            Dim contentW As Integer = RECEIPT_W - PAD_X * 2
-
-            ' ── Fonts ──────────────────────────────────────────────────────────
-            Using fNormal As New Font("Consolas", 8.5F),
-                  fBold As New Font("Consolas", 8.5F, FontStyle.Bold),
-                  fMuted As New Font("Consolas", 8.0F, FontStyle.Italic),
-                  fSection As New Font("Segoe UI", 7.5F, FontStyle.Bold),
-                  fTitle As New Font("Segoe UI Semibold", 13.5F),
-                  fSub As New Font("Segoe UI", 8.0F),
-                  fMeta As New Font("Segoe UI", 7.5F)
-
-                Dim blk As New SolidBrush(ReceiptInk)
-                Dim gry As New SolidBrush(ReceiptGray)
-                Dim mnt As New SolidBrush(SectionInk)
-                Dim wht As New SolidBrush(Color.White)
-                Dim halfW As New SolidBrush(Color.FromArgb(180, 220, 210))
-                Dim cfmt As New StringFormat With {.Alignment = StringAlignment.Center}
-                Dim lfmt As New StringFormat With {.Alignment = StringAlignment.Near,
-                                                    .Trimming = StringTrimming.EllipsisCharacter}
-                Dim rfmt As New StringFormat With {.Alignment = StringAlignment.Far}
-
-                ' ── Header block ───────────────────────────────────────────────
-                Using hBr As New SolidBrush(MintDark)
-                    g.FillRectangle(hBr, 0, 0, bmp.Width, HEADER_H)
+            ' One continuous slip: the page is as long as the receipt, which a
+            ' thermal roll driver cuts after. A driver that ignores custom
+            ' sizes still works -- the slip then continues on further pages.
+            Dim contentW As Integer = RECEIPT_W - 16
+            Dim slipH As Single
+            Using probe As New Bitmap(1, 1)
+                Using g As Graphics = Graphics.FromImage(probe)
+                    slipH = Render(g, doc, 0, contentW, False, 2.0F)
                 End Using
+            End Using
+            ' The probe above is a 96-dpi bitmap; the printer lays out at 100
+            ' units per inch, so allow for the slightly taller text.
+            pdoc.DefaultPageSettings.PaperSize =
+                New PaperSize("Receipt", RECEIPT_W, Math.Max(300, CInt(Math.Ceiling(slipH * 1.06F)) + 40))
 
-                ' Logo circle
-                Dim cR = 18
-                Dim cX = RECEIPT_W \ 2
-                Dim cY = 18
-                Dim circleCx = cX
-                Dim circleCy = cY + cR          ' true centre of the circle
-                Using cBr As New SolidBrush(Color.FromArgb(30, 255, 255, 255))
-                    g.FillEllipse(cBr, cX - cR, cY, cR * 2, cR * 2)
-                End Using
-                Using cPen As New Pen(Color.FromArgb(80, 255, 255, 255), 1.0F)
-                    g.DrawEllipse(cPen, cX - cR, cY, cR * 2, cR * 2)
-                End Using
-                ' Logo: paint.png recoloured white, centred in the circle.
-                ' Falls back to the drawn drop-icon if the file can't be located.
-                Dim logoImg As Image = LoadLogoImage()
-                If logoImg IsNot Nothing Then
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic
-                    DrawLogoWhite(g, logoImg, circleCx, circleCy, 24)
-                    logoImg.Dispose()
-                Else
-                    DrawDropIcon(g, circleCx, circleCy, 7, Color.FromArgb(200, 255, 255, 255))
-                End If
+            Dim page As Integer = 0
+            Dim printedH As Single = -1
+            AddHandler pdoc.PrintPage,
+                Sub(ps, pe)
+                    Dim mb As Rectangle = pe.MarginBounds
+                    Dim g As Graphics = pe.Graphics
+                    Dim devPerUnit As Single = g.DpiX / 100.0F
+                    ' Measured on the printer itself, so paging is exact.
+                    If printedH < 0 Then printedH = Render(g, doc, mb.Left, mb.Width, False, devPerUnit, topY:=mb.Top)
+                    Dim state = g.Save()
+                    g.SetClip(mb)
+                    g.TranslateTransform(0, -page * CSng(mb.Height))
+                    Render(g, doc, mb.Left, mb.Width, True, devPerUnit, topY:=mb.Top)
+                    g.Restore(state)
+                    page += 1
+                    pe.HasMorePages = page * mb.Height < printedH - PAD_Y
+                End Sub
 
-                ' Store name
-                Using fStore As New Font("Segoe UI Semibold", 11.5F)
-                    Dim storeRect As New RectangleF(0, cY + cR * 2 + 6, RECEIPT_W, 22)
-                    g.DrawString(storeName, fStore, wht, storeRect, cfmt)
-                End Using
-
-                ' Tagline
-                Dim tagRect As New RectangleF(0, cY + cR * 2 + 30, RECEIPT_W, 16)
-                g.DrawString(storeTagline, fSub, halfW, tagRect, cfmt)
-
-                ' Decorative stripe at header bottom
-                Using pen As New Pen(MintStripe, 2.0F) With {.DashStyle = DashStyle.Dash}
-                    pen.DashPattern = {4.0F, 3.0F}
-                    g.DrawLine(pen, 0, HEADER_H - 1, bmp.Width, HEADER_H - 1)
-                End Using
-
-                ' ── Meta row (date / receipt no) ───────────────────────────────
-                Dim metaH = 20
-                Using metaBr As New SolidBrush(MetaBg)
-                    g.FillRectangle(metaBr, 0, HEADER_H, bmp.Width, metaH)
-                End Using
-                Using pen As New Pen(ReceiptDiv, 0.5F) With {.DashStyle = DashStyle.Dash}
-                    g.DrawLine(pen, 0, HEADER_H + metaH, bmp.Width, HEADER_H + metaH)
-                End Using
-                Dim dateStr = "Date: " & DateTime.Now.ToString("MMM dd, yyyy")
-                Dim recStr = If(String.IsNullOrEmpty(receiptNo), "", "Receipt #" & receiptNo)
-                Dim metaRect As New RectangleF(PAD_X, HEADER_H + 3, contentW, 14)
-                g.DrawString(dateStr, fMeta, gry, metaRect, lfmt)
-                g.DrawString(recStr, fMeta, gry, metaRect, rfmt)
-
-                ' ── Body lines ─────────────────────────────────────────────────
-                Dim y As Single = HEADER_H + metaH + 10
-
-                For Each ln In lines
-                    If ln.Style = LineStyle.Title Then Continue For  ' header block handles it
-
-                    Dim lh As Single
-
-                    Select Case ln.Style
-
-                        Case LineStyle.Spacer
-                            y += fNormal.GetHeight(g) * 0.45F
-
-                        Case LineStyle.Divider
-                            lh = fNormal.GetHeight(g)
-                            Using pen As New Pen(ReceiptDiv, 0.75F) With {.DashStyle = DashStyle.Dash}
-                                pen.DashPattern = {3.0F, 3.0F}
-                                g.DrawLine(pen, PAD_X, y + lh / 2, PAD_X + contentW, y + lh / 2)
-                            End Using
-                            y += lh
-
-                        Case LineStyle.Section
-                            ' Uppercase mint label, slight extra top spacing
-                            y += 4
-                            lh = fSection.GetHeight(g) + 2
-                            Using br As New SolidBrush(SectionInk)
-                                Dim txt = ln.Left.ToUpper()
-                                g.DrawString(txt, fSection, br,
-                                    New RectangleF(PAD_X, y, contentW, lh), lfmt)
-                            End Using
-                            y += lh
-                            ' Hairline underline in mint
-                            Using pen As New Pen(Color.FromArgb(80, MintPrimary), 0.5F)
-                                g.DrawLine(pen, PAD_X, y, PAD_X + contentW, y)
-                            End Using
-                            y += 3
-
-                        Case LineStyle.Bold
-                            lh = fBold.GetHeight(g) + 3
-                            If String.IsNullOrEmpty(ln.Right) Then
-                                g.DrawString(ln.Left, fBold, blk,
-                                    New RectangleF(PAD_X, y, contentW, lh), lfmt)
-                            Else
-                                Dim rw = g.MeasureString(ln.Right, fBold).Width + 2
-                                g.DrawString(ln.Left, fBold, blk,
-                                    New RectangleF(PAD_X, y, contentW - rw, lh), lfmt)
-                                g.DrawString(ln.Right, fBold, blk,
-                                    New RectangleF(PAD_X, y, contentW, lh), rfmt)
-                            End If
-                            y += lh
-
-                        Case LineStyle.Muted
-                            lh = fMuted.GetHeight(g) + 2
-                            g.DrawString(ln.Left, fMuted, gry,
-                                New RectangleF(PAD_X, y, contentW, lh), cfmt)
-                            y += lh
-
-                        Case Else   ' Normal — left in gray, right in ink
-                            lh = fNormal.GetHeight(g) + 2
-                            If String.IsNullOrEmpty(ln.Right) Then
-                                Dim sz = g.MeasureString(ln.Left, fNormal, contentW)
-                                Dim h = Math.Max(lh, sz.Height)
-                                g.DrawString(ln.Left, fNormal, gry,
-                                    New RectangleF(PAD_X, y, contentW, h), lfmt)
-                                y += h
-                            Else
-                                Dim rw = g.MeasureString(ln.Right, fNormal).Width + 2
-                                g.DrawString(ln.Left, fNormal, gry,
-                                    New RectangleF(PAD_X, y, contentW - rw, lh), lfmt)
-                                g.DrawString(ln.Right, fNormal, blk,
-                                    New RectangleF(PAD_X, y, contentW, lh), rfmt)
-                                y += lh
-                            End If
-
-                    End Select
-                Next
-
-                ' ── Footer ─────────────────────────────────────────────────────
-                Dim footerY As Integer = receiptH - MeasureFooterH()
-
-                ' Top divider of footer
-                Using pen As New Pen(ReceiptDiv, 0.5F) With {.DashStyle = DashStyle.Dash}
-                    pen.DashPattern = {3.0F, 3.0F}
-                    g.DrawLine(pen, PAD_X, footerY, PAD_X + contentW, footerY)
-                End Using
-                footerY += 10
-
-                If _internalFooter Then
-                    ' Signature blocks. A cash count is handed from the cashier
-                    ' to whoever verifies it, so the paper needs somewhere for
-                    ' both of them to sign -- that is what makes it a record
-                    ' rather than a printout.
-                    Using fSigLbl As New Font("Segoe UI", 7.0F)
-                        Using fSigName As New Font("Segoe UI Semibold", 8.0F)
-                            Dim sigFmt As New StringFormat With {.Alignment = StringAlignment.Near}
-                            For Each sig In New String() {"Counted by", "Verified by"}
-                                Using pen As New Pen(ReceiptDiv, 0.8F)
-                                    g.DrawLine(pen, PAD_X, footerY + 22, PAD_X + contentW, footerY + 22)
-                                End Using
-                                g.DrawString(sig, fSigLbl, gry,
-                                    New RectangleF(PAD_X, footerY + 24, contentW, 12), sigFmt)
-                                footerY += 44
-                            Next
-                        End Using
-                    End Using
-
-                    Using fNote As New Font("Segoe UI", 7.5F, FontStyle.Italic)
-                        Using nBr As New SolidBrush(Color.FromArgb(148, 160, 155))
-                            g.DrawString("Internal document - not a customer receipt", fNote, nBr,
-                                New RectangleF(0, footerY, bmp.Width, 16), cfmt)
-                        End Using
-                    End Using
-                Else
-                    ' Barcode
-                    DrawBarcode(g, receiptNo, PAD_X, footerY, contentW)
-                    footerY += 32
-
-                    ' Serial number
-                    Dim serial = BuildSerial(receiptNo)
-                    Using fSerial As New Font("Consolas", 7.0F)
-                        g.DrawString(serial, fSerial, gry,
-                            New RectangleF(0, footerY, bmp.Width, 14), cfmt)
-                    End Using
-                    footerY += 14
-
-                    ' Thank-you note
-                    Dim thankRect As New RectangleF(0, footerY + 4, bmp.Width, 30)
-                    Using fThank As New Font("Segoe UI", 8.0F)
-                        Using tBr As New SolidBrush(Color.FromArgb(148, 160, 155))
-                            g.DrawString("Thank you for your purchase!", fThank, tBr, thankRect, cfmt)
-                        End Using
-                    End Using
-                End If
+            Using pd As New PrintDialog With {.Document = pdoc, .UseEXDialog = True}
+                If pd.ShowDialog() = DialogResult.OK Then pdoc.Print()
             End Using
         End Using
     End Sub
 
     ' =========================================================================
-    '  PRINT PAGE HANDLER
+    '  RENDERER — lays the slip out and (when draw=True) paints it.
+    '  Returns the height used. devPerUnit = device pixels per layout unit,
+    '  used to snap barcode bars to whole printer dots so they scan.
     ' =========================================================================
-    Private Sub PrintPage(pe As PrintPageEventArgs,
-                          lines As List(Of RLine),
-                          ByRef ni As Integer,
-                          storeName As String,
-                          storeTagline As String,
-                          receiptNo As String)
+    Private Function Render(g As Graphics, doc As SlipDoc, x0 As Single, w As Single,
+                            draw As Boolean, devPerUnit As Single,
+                            Optional topY As Single = PAD_Y) As Single
+        Using fBody As New Font("Consolas", 8.0F),
+              fBold As New Font("Consolas", 8.0F, FontStyle.Bold),
+              fSmall As New Font("Consolas", 7.0F),
+              fStore As New Font("Consolas", 12.0F, FontStyle.Bold),
+              fTotal As New Font("Consolas", 11.0F, FontStyle.Bold),
+              inkBr As New SolidBrush(InkColor)
 
-        Using fN As New Font("Consolas", 8.0F),
-              fB As New Font("Consolas", 8.0F, FontStyle.Bold),
-              fT As New Font("Segoe UI Semibold", 11.0F),
-              fM As New Font("Consolas", 7.5F, FontStyle.Italic),
-              fSc As New Font("Segoe UI", 7.0F, FontStyle.Bold),
-              fMt As New Font("Segoe UI", 7.0F)
+            Dim y As Single = topY
+            Dim bodyH As Single = fBody.GetHeight(g)
 
-            Dim pg = pe.Graphics
-            Dim lx = CSng(pe.MarginBounds.Left)
-            Dim w = CSng(pe.MarginBounds.Width)
-            Dim y = CSng(pe.MarginBounds.Top)
-            Dim bot = CSng(pe.MarginBounds.Bottom)
-            Dim blk As New SolidBrush(Color.Black)
-            Dim gry As New SolidBrush(Color.FromArgb(110, 110, 110))
-            Dim mnt As New SolidBrush(Color.FromArgb(10, 79, 66))
-            Dim cf As New StringFormat With {.Alignment = StringAlignment.Center}
-            Dim lf As New StringFormat With {.Alignment = StringAlignment.Near,
-                                              .Trimming = StringTrimming.EllipsisCharacter}
-            Dim rf As New StringFormat With {.Alignment = StringAlignment.Far}
+            ' ── small layout helpers ─────────────────────────────────────────
+            Dim centred As Func(Of String, Font, Single) =
+                Function(text As String, fnt As Font) As Single
+                    If String.IsNullOrEmpty(text) Then Return 0
+                    Dim sf As New StringFormat With {.Alignment = StringAlignment.Center}
+                    Dim h As Single = g.MeasureString(text, fnt, CInt(w), sf).Height
+                    If draw Then g.DrawString(text, fnt, inkBr, New RectangleF(x0, y, w, h + 1), sf)
+                    Return h
+                End Function
 
-            ' Print header on first page only
-            If ni = 0 Then
-                ' Store name
-                Dim sh As Single = fT.GetHeight(pg) + 4
-                pg.DrawString(storeName, fT, blk, New RectangleF(lx, y, w, sh), cf)
-                y += sh
-                ' Tagline
-                Dim sth = fMt.GetHeight(pg) + 2
-                pg.DrawString(storeTagline, fMt, gry, New RectangleF(lx, y, w, sth), cf)
-                y += sth
-                ' Meta (date + receipt no)
-                Dim metaH = fMt.GetHeight(pg) + 2
-                Dim dateStr = "Date: " & DateTime.Now.ToString("MMM dd, yyyy")
-                Dim recStr = If(String.IsNullOrEmpty(receiptNo), "", "#" & receiptNo)
-                pg.DrawString(dateStr, fMt, gry, New RectangleF(lx, y, w, metaH), lf)
-                pg.DrawString(recStr, fMt, gry, New RectangleF(lx, y, w, metaH), rf)
-                y += metaH
-                ' Header divider
-                Using pen As New Pen(Color.FromArgb(180, 180, 180), 0.5F)
-                    pg.DrawLine(pen, lx, y + 2, lx + w, y + 2)
-                End Using
-                y += 8
-            End If
+            Dim wrapped As Func(Of String, Font, Single) =
+                Function(text As String, fnt As Font) As Single
+                    Dim h As Single = Math.Max(fnt.GetHeight(g), g.MeasureString(text, fnt, CInt(w)).Height)
+                    If draw Then g.DrawString(text, fnt, inkBr, New RectangleF(x0, y, w, h + 1))
+                    Return h
+                End Function
 
-            While ni < lines.Count
-                Dim ln = lines(ni)
-                Dim lh As Single
-
-                Select Case ln.Style
-                    Case LineStyle.Spacer
-                        y += fN.GetHeight(pg) * 0.45F
-
-                    Case LineStyle.Divider
-                        lh = fN.GetHeight(pg)
-                        If y + lh > bot Then Exit While
-                        Using pen As New Pen(Color.FromArgb(180, 180, 180), 0.5F) With {.DashStyle = DashStyle.Dash}
-                            pg.DrawLine(pen, lx, y + lh / 2, lx + w, y + lh / 2)
-                        End Using
-                        y += lh
-
-                    Case LineStyle.Section
-                        lh = fSc.GetHeight(pg) + 4
-                        If y + lh > bot Then Exit While
-                        pg.DrawString(ln.Left.ToUpper(), fSc, mnt,
-                            New RectangleF(lx, y, w, lh), lf)
-                        Using pen As New Pen(Color.FromArgb(60, 0, 168, 142), 0.5F)
-                            pg.DrawLine(pen, lx, y + lh, lx + w, y + lh)
-                        End Using
-                        y += lh + 2
-
-                    Case LineStyle.Title
-                        ' Printed inline if not at top (fallback)
-                        lh = fT.GetHeight(pg) + 4
-                        If y + lh > bot Then Exit While
-                        pg.DrawString(ln.Left, fT, blk, New RectangleF(lx, y, w, lh), cf)
-                        y += lh
-
-                    Case LineStyle.Bold
-                        Dim fnt = fB
-                        lh = fnt.GetHeight(pg) + 1
-                        If y + lh > bot Then Exit While
-                        If String.IsNullOrEmpty(ln.Right) Then
-                            Dim h = Math.Max(lh, pg.MeasureString(ln.Left, fnt, CInt(w)).Height)
-                            pg.DrawString(ln.Left, fnt, blk, New RectangleF(lx, y, w, h), lf)
-                            y += h
-                        Else
-                            Dim rw = pg.MeasureString(ln.Right, fnt).Width + 2
-                            pg.DrawString(ln.Left, fnt, blk, New RectangleF(lx, y, w - rw, lh), lf)
-                            pg.DrawString(ln.Right, fnt, blk, New RectangleF(lx, y, w, lh), rf)
-                            y += lh
-                        End If
-
-                    Case LineStyle.Muted
-                        lh = fM.GetHeight(pg) + 1
-                        If y + lh > bot Then Exit While
-                        pg.DrawString(ln.Left, fM, gry, New RectangleF(lx, y, w, lh), cf)
-                        y += lh
-
-                    Case Else   ' Normal
-                        lh = fN.GetHeight(pg) + 1
-                        If y + lh > bot Then Exit While
-                        If String.IsNullOrEmpty(ln.Right) Then
-                            Dim h = Math.Max(lh, pg.MeasureString(ln.Left, fN, CInt(w)).Height)
-                            pg.DrawString(ln.Left, fN, gry, New RectangleF(lx, y, w, h), lf)
-                            y += h
-                        Else
-                            Dim rw = pg.MeasureString(ln.Right, fN).Width + 2
-                            pg.DrawString(ln.Left, fN, gry, New RectangleF(lx, y, w - rw, lh), lf)
-                            pg.DrawString(ln.Right, fN, blk, New RectangleF(lx, y, w, lh), rf)
-                            y += lh
-                        End If
-                End Select
-
-                ni += 1
-            End While
-
-            pe.HasMorePages = (ni < lines.Count)
-        End Using
-    End Sub
-
-    ' =========================================================================
-    '  MEASURE HELPERS
-    ' =========================================================================
-    Private Function MeasureLineH(g As Graphics, ln As RLine, contentW As Integer) As Integer
-        If ln.Style = LineStyle.Title Then Return 0
-        Using fN As New Font("Consolas", 8.5F),
-              fB As New Font("Consolas", 8.5F, FontStyle.Bold),
-              fM As New Font("Consolas", 8.0F, FontStyle.Italic),
-              fSc As New Font("Segoe UI", 7.5F, FontStyle.Bold)
-            Select Case ln.Style
-                Case LineStyle.Spacer : Return CInt(fN.GetHeight(g) * 0.45F)
-                Case LineStyle.Divider : Return CInt(fN.GetHeight(g))
-                Case LineStyle.Section : Return CInt(fSc.GetHeight(g) + 2 + 3 + 4) ' label + hairline gap + top pad
-                Case LineStyle.Bold : Return CInt(fB.GetHeight(g) + 3)
-                Case LineStyle.Muted : Return CInt(fM.GetHeight(g) + 2)
-                Case Else
-                    If String.IsNullOrEmpty(ln.Right) Then
-                        Dim sz = g.MeasureString(ln.Left, fN, contentW)
-                        Return CInt(Math.Max(fN.GetHeight(g), sz.Height) + 2)
+            ' Label on the left, amount flush right. A label too long for the
+            ' space left by the amount wraps instead of running under it.
+            Dim pair As Func(Of String, String, Font, Single) =
+                Function(left As String, right As String, fnt As Font) As Single
+                    Dim rw As Single = g.MeasureString(right, fnt).Width
+                    Dim lw As Single = Math.Max(20.0F, w - rw - 6)
+                    Dim h As Single = Math.Max(fnt.GetHeight(g), g.MeasureString(left, fnt, CInt(lw)).Height)
+                    If draw Then
+                        g.DrawString(left, fnt, inkBr, New RectangleF(x0, y, lw, h + 1))
+                        Dim rf As New StringFormat With {.Alignment = StringAlignment.Far}
+                        g.DrawString(right, fnt, inkBr, New RectangleF(x0, y, w, fnt.GetHeight(g) + 1), rf)
                     End If
-                    Return CInt(fN.GetHeight(g) + 2)
-            End Select
+                    Return h
+                End Function
+
+            ' A rule typed out of characters, like a receipt printer prints it.
+            Dim rule As Func(Of Char, Single) =
+                Function(ch As Char) As Single
+                    If draw Then
+                        Dim probe As String = New String(ch, 20)
+                        Dim cw As Single = g.MeasureString(probe, fBody, PointF.Empty,
+                                                           StringFormat.GenericTypographic).Width / 20.0F
+                        Dim n As Integer = Math.Max(4, CInt(Math.Floor(w / Math.Max(1.0F, cw))))
+                        Dim sf As New StringFormat(StringFormat.GenericTypographic) With {.Alignment = StringAlignment.Center}
+                        g.DrawString(New String(ch, n), fBody, inkBr, New RectangleF(x0 - 2, y, w + 4, bodyH + 1), sf)
+                    End If
+                    Return bodyH
+                End Function
+
+            ' ── auto header for slips that do not carry their own ───────────
+            Dim hasTitle As Boolean = doc.Lines.Any(Function(l) l.Style = LineStyle.Title)
+            If Not hasTitle Then
+                y += DrawLogo(g, x0, y, w, draw)
+                y += centred(doc.StoreName.ToUpperInvariant(), fStore) + 2
+                y += centred(doc.Tagline.ToUpperInvariant(), fBold)
+                y += rule("="c)
+                ' Only what the slip's own lines do not already say (the cash
+                ' count prints its session number and print time itself).
+                Dim saysNo As Boolean = doc.Lines.Any(Function(l) l.Right = doc.ReceiptNo)
+                Dim saysWhen As Boolean = doc.Lines.Any(
+                    Function(l) l.Left.StartsWith("Printed", StringComparison.OrdinalIgnoreCase) OrElse
+                                l.Left.StartsWith("Date", StringComparison.OrdinalIgnoreCase))
+                If doc.ReceiptNo <> "" AndAlso Not saysNo Then y += pair("No.", doc.ReceiptNo, fBody)
+                If Not saysWhen Then y += pair("Printed", DateTime.Now.ToString("MMM d, yyyy  h:mm tt"), fBody)
+                If (doc.ReceiptNo <> "" AndAlso Not saysNo) OrElse Not saysWhen Then y += rule("-"c)
+            End If
+
+            ' ── body ─────────────────────────────────────────────────────────
+            Dim firstTitle As Boolean = True
+            For Each ln In doc.Lines
+                Select Case ln.Style
+                    Case LineStyle.Title
+                        If firstTitle Then y += DrawLogo(g, x0, y, w, draw)
+                        firstTitle = False
+                        y += centred(ln.Left.ToUpperInvariant(), fStore) + 2
+                    Case LineStyle.Muted
+                        y += centred(ln.Left, fSmall)
+                    Case LineStyle.Center
+                        y += centred(ln.Left, fBody)
+                    Case LineStyle.Spacer
+                        y += bodyH * 0.5F
+                    Case LineStyle.Divider
+                        y += rule("-"c)
+                    Case LineStyle.DoubleDivider
+                        y += rule("="c)
+                    Case LineStyle.Section
+                        y += 2
+                        y += wrapped(ln.Left.ToUpperInvariant(), fBold)
+                    Case LineStyle.Total
+                        y += 2
+                        y += pair(ln.Left, ln.Right, fTotal)
+                        y += 2
+                    Case LineStyle.Barcode
+                        Dim data As String = If(ln.Right <> "", ln.Right, ln.Left)
+                        y += 4
+                        y += DrawCode128(g, data, x0, y, w, devPerUnit, draw)
+                        y += 1
+                        y += centred(data, fSmall)
+                    Case LineStyle.Bold
+                        y += If(ln.Right = "", wrapped(ln.Left, fBold), pair(ln.Left, ln.Right, fBold))
+                    Case Else
+                        y += If(ln.Right = "", wrapped(ln.Left, fBody), pair(ln.Left, ln.Right, fBody))
+                End Select
+            Next
+
+            ' ── footer ───────────────────────────────────────────────────────
+            If doc.IsInternal Then
+                ' A cash count is handed from the cashier to whoever verifies
+                ' it, so the paper has somewhere for both of them to sign.
+                y += rule("-"c)
+                For Each who In {"Counted by", "Verified by"}
+                    y += bodyH * 1.6F
+                    If draw Then
+                        Using pen As New Pen(InkColor, 0.75F)
+                            g.DrawLine(pen, x0, y, x0 + w, y)
+                        End Using
+                    End If
+                    y += 2
+                    y += wrapped(who, fSmall)
+                Next
+                y += bodyH * 0.5F
+                y += centred("Internal document - not a customer receipt", fSmall)
+            ElseIf doc.ReceiptNo <> "" AndAlso
+                   Not doc.Lines.Any(Function(l) l.Style = LineStyle.Barcode) Then
+                y += rule("-"c)
+                y += 2
+                y += DrawCode128(g, doc.ReceiptNo, x0, y, w, devPerUnit, draw)
+                y += 1
+                y += centred(doc.ReceiptNo, fSmall)
+            End If
+
+            Return (y - topY) + PAD_Y * 2
         End Using
     End Function
 
-    ' An internal document is not a customer receipt: no barcode to scan, no
-    ' sale to thank anyone for. It is signed instead, because a cash count is
-    ' a handover between two people.
-    Private _internalFooter As Boolean = False
-
-    Private Function MeasureFooterH() As Integer
-        If _internalFooter Then
-            ' divider gap + pad + two signature blocks + note
-            Return 10 + 10 + 44 + 44 + 18
-        End If
-        Return 10 + 10 + 32 + 14 + 20  ' divider gap + pad + barcode + serial + thanks
-    End Function
-
-    ' =========================================================================
-    '  BARCODE HELPER
-    ' =========================================================================
-    ''' <summary>
-    ''' Draws a Code39-style barcode pseudo-graphic derived from the receipt number.
-    ''' Not a standards-compliant barcode — purely decorative / scannable aesthetic.
-    ''' </summary>
-    Private Sub DrawBarcode(g As Graphics, receiptNo As String,
-                             x As Integer, y As Integer, totalW As Integer)
-        ' Build bar widths from character codes (2 widths: narrow=2, wide=5)
-        Dim src = If(String.IsNullOrEmpty(receiptNo), "000000", receiptNo)
-        Dim bars As New List(Of Integer)
-        For Each c In src
-            Dim v = Asc(c)
-            For b As Integer = 0 To 6
-                bars.Add(If((v >> b) And 1, 5, 2))
-            Next
-        Next
-        ' Pad / trim to fill totalW
-        Dim totalBars As Integer = bars.Sum()
-        Dim scale As Single = CSng(totalW) / Math.Max(totalBars, 1)
-
-        Dim cx As Single = x
-        For i As Integer = 0 To bars.Count - 1
-            Dim bw = Math.Max(1, CInt(bars(i) * scale))
-            If i Mod 2 = 0 Then  ' even = black bar
-                g.FillRectangle(Brushes.Black, cx, y, bw - 1, 26)
+    ' The store mark (paint.png, black line art) above the name, as a thermal
+    ' printer prints a logo bitmap. Returns the height used (0 if no file).
+    Private Function DrawLogo(g As Graphics, x0 As Single, y As Single, w As Single, draw As Boolean) As Single
+        Const SIZE As Integer = 30
+        Dim img As Image = LoadLogoImage()
+        If img Is Nothing Then Return 0
+        Try
+            If draw Then
+                Dim src As Rectangle = GetOpaqueBounds(img)
+                Dim aspect As Single = src.Width / CSng(Math.Max(1, src.Height))
+                Dim dw As Single = If(aspect >= 1, SIZE, SIZE * aspect)
+                Dim dh As Single = If(aspect >= 1, SIZE / aspect, SIZE)
+                Dim old = g.InterpolationMode
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic
+                g.DrawImage(img, New RectangleF(x0 + (w - dw) / 2.0F, y + (SIZE - dh) / 2.0F, dw, dh),
+                            src, GraphicsUnit.Pixel)
+                g.InterpolationMode = old
             End If
-            cx += bw
-            If cx >= x + totalW Then Exit For
-        Next
-    End Sub
-
-    Private Function BuildSerial(receiptNo As String) As String
-        Dim d = DateTime.Now
-        Return If(String.IsNullOrEmpty(receiptNo), "000000", receiptNo) &
-               "-" & d.ToString("yyyy") &
-               "-" & d.ToString("MMdd") &
-               "-POS"
+            Return SIZE + 4
+        Finally
+            img.Dispose()
+        End Try
     End Function
 
     ' =========================================================================
-    '  LOGO HELPERS (paint.png for header circle)
+    '  CODE 128 BARCODE
+    '
+    '  A real symbol (Code B for text, Code C for runs of digits), so a USB
+    '  scanner reads the receipt number into the Returns lookup. Bars are
+    '  snapped to whole device pixels -- printer dots on paper -- because a
+    '  bar drawn 2.4 dots wide comes out as 2 or 3 and the code no longer reads.
     ' =========================================================================
-    ' Looks for paint.png next to the executable and a few parent folders up
-    ' (covers running from bin\Debug while the file sits at the project root).
-    ' Loaded via a stream so the file is never locked. Returns Nothing if absent.
+    Private ReadOnly Code128Patterns As String() = {
+        "11011001100", "11001101100", "11001100110", "10010011000", "10010001100",
+        "10001001100", "10011001000", "10011000100", "10001100100", "11001001000",
+        "11001000100", "11000100100", "10110011100", "10011011100", "10011001110",
+        "10111001100", "10011101100", "10011100110", "11001110010", "11001011100",
+        "11001001110", "11011100100", "11001110100", "11101101110", "11101001100",
+        "11100101100", "11100100110", "11101100100", "11100110100", "11100110010",
+        "11011011000", "11011000110", "11000110110", "10100011000", "10001011000",
+        "10001000110", "10110001000", "10001101000", "10001100010", "11010001000",
+        "11000101000", "11000100010", "10110111000", "10110001110", "10001101110",
+        "10111011000", "10111000110", "10001110110", "11101110110", "11010001110",
+        "11000101110", "11011101000", "11011100010", "11011101110", "11101011000",
+        "11101000110", "11100010110", "11101101000", "11101100010", "11100011010",
+        "11101111010", "11001000010", "11110001010", "10100110000", "10100001100",
+        "10010110000", "10010000110", "10000101100", "10000100110", "10110010000",
+        "10110000100", "10011010000", "10011000010", "10000110100", "10000110010",
+        "11000010010", "11001010000", "11110111010", "11000010100", "10001111010",
+        "10100111100", "10010111100", "10010011110", "10111100100", "10011110100",
+        "10011110010", "11110100100", "11110010100", "11110010010", "11011011110",
+        "11011110110", "11110110110", "10101111000", "10100011110", "10001011110",
+        "10111101000", "10111100010", "11110101000", "11110100010", "10111011110",
+        "10111101110", "11101011110", "11110101110", "11010000100", "11010010000",
+        "11010011100"}
+    Private Const CODE128_STOP As String = "1100011101011"
+    Private Const START_B As Integer = 104, START_C As Integer = 105
+    Private Const TO_CODE_B As Integer = 100, TO_CODE_C As Integer = 99
+
+    ' Symbol values (start ... data ... checksum), without the stop pattern.
+    Public Function Code128Values(data As String) As List(Of Integer)
+        Dim s As String = If(data, "")
+        Dim vals As New List(Of Integer)
+        Dim digitRun = Function(at As Integer) As Integer
+                           Dim n As Integer = 0
+                           While at + n < s.Length AndAlso Char.IsDigit(s(at + n))
+                               n += 1
+                           End While
+                           Return n
+                       End Function
+        Dim inC As Boolean = digitRun(0) >= 4 AndAlso digitRun(0) Mod 2 = 0 OrElse
+                             (digitRun(0) = s.Length AndAlso s.Length >= 2 AndAlso s.Length Mod 2 = 0)
+        vals.Add(If(inC, START_C, START_B))
+        Dim i As Integer = 0
+        While i < s.Length
+            If inC Then
+                If i + 1 < s.Length AndAlso Char.IsDigit(s(i)) AndAlso Char.IsDigit(s(i + 1)) Then
+                    vals.Add((AscW(s(i)) - 48) * 10 + (AscW(s(i + 1)) - 48))
+                    i += 2
+                Else
+                    vals.Add(TO_CODE_B) : inC = False
+                End If
+            Else
+                Dim run As Integer = digitRun(i)
+                If run >= 4 Then
+                    ' An odd run sends its first digit in Code B so the rest pairs up.
+                    If run Mod 2 = 1 Then
+                        vals.Add(AscW(s(i)) - 32) : i += 1
+                    End If
+                    vals.Add(TO_CODE_C) : inC = True
+                Else
+                    Dim c As Integer = AscW(s(i))
+                    If c < 32 OrElse c > 126 Then c = AscW("?"c)
+                    vals.Add(c - 32)
+                    i += 1
+                End If
+            End If
+        End While
+        Dim sum As Integer = vals(0)
+        For k As Integer = 1 To vals.Count - 1
+            sum += vals(k) * k
+        Next
+        vals.Add(sum Mod 103)
+        Return vals
+    End Function
+
+    ' The full module string (1 = bar, 0 = space) including the stop pattern.
+    Public Function Code128Modules(data As String) As String
+        Dim sb As New System.Text.StringBuilder()
+        For Each v In Code128Values(data)
+            sb.Append(Code128Patterns(v))
+        Next
+        sb.Append(CODE128_STOP)
+        Return sb.ToString()
+    End Function
+
+    Private Function DrawCode128(g As Graphics, data As String, x0 As Single, y As Single,
+                                 w As Single, devPerUnit As Single, draw As Boolean) As Single
+        If String.IsNullOrEmpty(data) Then Return 0
+        Dim modules As String = Code128Modules(data)
+        ' 10-module quiet zone each side; widest whole-pixel module that fits.
+        Dim availDev As Single = w * devPerUnit
+        Dim modDev As Integer = Math.Max(1, CInt(Math.Floor(availDev / (modules.Length + 20))))
+        modDev = Math.Min(modDev, 4)
+        Dim modW As Single = modDev / devPerUnit
+        Dim totalW As Single = modules.Length * modW
+        If draw Then
+            Dim startDev As Single = CSng(Math.Round((x0 + (w - totalW) / 2.0F) * devPerUnit))
+            Dim xs As Single = startDev / devPerUnit
+            Dim oldSmooth = g.SmoothingMode, oldOffset = g.PixelOffsetMode
+            g.SmoothingMode = SmoothingMode.None
+            g.PixelOffsetMode = PixelOffsetMode.Half
+            Dim i As Integer = 0
+            While i < modules.Length
+                If modules(i) = "1"c Then
+                    Dim j As Integer = i
+                    While j < modules.Length AndAlso modules(j) = "1"c
+                        j += 1
+                    End While
+                    g.FillRectangle(Brushes.Black, xs + i * modW, y, (j - i) * modW, BARCODE_H)
+                    i = j
+                Else
+                    i += 1
+                End If
+            End While
+            g.SmoothingMode = oldSmooth
+            g.PixelOffsetMode = oldOffset
+        End If
+        Return BARCODE_H
+    End Function
+
+    ' =========================================================================
+    '  LOGO HELPERS
+    ' =========================================================================
+    ' paint.png next to the executable or a few folders up. Loaded via a copy
+    ' so the file is never locked. Nothing if absent.
     Private Function LoadLogoImage() As Image
         Try
-            Dim curDir As String = Application.StartupPath
+            Dim dir As String = Application.StartupPath
             For i As Integer = 0 To 6
-                If String.IsNullOrEmpty(curDir) Then Exit For
-                Dim p As String = System.IO.Path.Combine(curDir, "paint.png")
-                If System.IO.File.Exists(p) Then
-                    Using fs As New System.IO.FileStream(p, IO.FileMode.Open, IO.FileAccess.Read)
-                        Return New Bitmap(Image.FromStream(fs))
+                If String.IsNullOrEmpty(dir) Then Exit For
+                Dim p As String = IO.Path.Combine(dir, "paint.png")
+                If IO.File.Exists(p) Then
+                    Using fs As New IO.FileStream(p, IO.FileMode.Open, IO.FileAccess.Read)
+                        Using src As Image = Image.FromStream(fs)
+                            Return New Bitmap(src)
+                        End Using
                     End Using
                 End If
-                curDir = System.IO.Path.GetDirectoryName(curDir)
+                dir = IO.Path.GetDirectoryName(dir)
             Next
         Catch
-            ' Ignore — caller falls back to the drawn drop-icon.
         End Try
         Return Nothing
     End Function
 
-    ' Draws the logo recoloured to white (paint.png is black line-art), scaled
-    ' into a box of the given size and centred on (cx, cy).
-    '
-    ' IMPORTANT: this centers on the image's actual VISIBLE (non-transparent)
-    ' content, not its full canvas. If paint.png has asymmetric transparent
-    ' padding around the artwork — e.g. more empty space on one side than
-    ' the other — centering on the raw canvas bounds reproduces that
-    ' asymmetry on screen (the icon looks shifted inside its circle even
-    ' though the destination box itself is correctly centered). Measuring
-    ' the real ink bounding box first and centering on THAT fixes it
-    ' regardless of how the source PNG happens to be cropped/padded.
-    Private Sub DrawLogoWhite(g As Graphics, img As Image, cx As Integer, cy As Integer, boxSize As Integer)
-        Dim srcRect As Rectangle = GetOpaqueBounds(img)
-
-        ' Fit srcRect into boxSize preserving its aspect ratio (letterboxed,
-        ' not stretched) — otherwise a non-square ink bounding box would
-        ' still get squeezed into a square destination and look distorted.
-        Dim srcAspect As Single = srcRect.Width / CSng(Math.Max(1, srcRect.Height))
-        Dim fitW As Integer = boxSize
-        Dim fitH As Integer = boxSize
-        If srcAspect > 1.0F Then
-            fitH = CInt(boxSize / srcAspect)
-        ElseIf srcAspect < 1.0F Then
-            fitW = CInt(boxSize * srcAspect)
-        End If
-
-        Dim dest As New Rectangle(cx - fitW \ 2, cy - fitH \ 2, fitW, fitH)
-        Dim cm As New System.Drawing.Imaging.ColorMatrix(New Single()() {
-            New Single() {0, 0, 0, 0, 0},
-            New Single() {0, 0, 0, 0, 0},
-            New Single() {0, 0, 0, 0, 0},
-            New Single() {0, 0, 0, 1, 0},
-            New Single() {1, 1, 1, 0, 1}})
-        Using ia As New System.Drawing.Imaging.ImageAttributes()
-            ia.SetColorMatrix(cm)
-            g.DrawImage(img, dest, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height,
-                        GraphicsUnit.Pixel, ia)
-        End Using
-    End Sub
-
-    ' Scans a Bitmap's alpha channel to find the tight bounding box of its
-    ' actual visible (non-transparent) pixels. Falls back to the full image
-    ' bounds for non-Bitmap images (e.g. some Image.FromStream results) or
-    ' if anything goes wrong reading pixel data.
+    ' Tight bounds of the visible (non-transparent) pixels, so an icon with
+    ' uneven transparent padding still centres.
     Private Function GetOpaqueBounds(img As Image) As Rectangle
         Try
             Dim bmp = TryCast(img, Bitmap)
             If bmp Is Nothing Then Return New Rectangle(0, 0, img.Width, img.Height)
-
-            ' GetPixel in a double loop is slow on large bitmaps. This only
-            ' needs an approximate bounding box for centering a small icon,
-            ' so scan a capped-size working copy and scale the result back
-            ' up — keeps this fast even if paint.png turns out to be large.
-            Const MAX_SCAN As Integer = 200
-            Dim scanBmp As Bitmap = bmp
+            Const MAX_SCAN As Integer = 160
             Dim scale As Single = 1.0F
-            Dim disposeScan As Boolean = False
+            Dim scan As Bitmap = bmp
+            Dim owned As Boolean = False
             If bmp.Width > MAX_SCAN OrElse bmp.Height > MAX_SCAN Then
                 scale = Math.Max(bmp.Width, bmp.Height) / CSng(MAX_SCAN)
-                Dim sw As Integer = Math.Max(1, CInt(bmp.Width / scale))
-                Dim sh As Integer = Math.Max(1, CInt(bmp.Height / scale))
-                scanBmp = New Bitmap(bmp, sw, sh)
-                disposeScan = True
+                scan = New Bitmap(bmp, Math.Max(1, CInt(bmp.Width / scale)), Math.Max(1, CInt(bmp.Height / scale)))
+                owned = True
             End If
-
-            Dim minX As Integer = scanBmp.Width
-            Dim minY As Integer = scanBmp.Height
-            Dim maxX As Integer = -1
-            Dim maxY As Integer = -1
-
-            For y As Integer = 0 To scanBmp.Height - 1
-                For x As Integer = 0 To scanBmp.Width - 1
-                    If scanBmp.GetPixel(x, y).A > 10 Then
-                        If x < minX Then minX = x
-                        If x > maxX Then maxX = x
-                        If y < minY Then minY = y
-                        If y > maxY Then maxY = y
+            Dim minX = scan.Width, minY = scan.Height, maxX = -1, maxY = -1
+            For yy As Integer = 0 To scan.Height - 1
+                For xx As Integer = 0 To scan.Width - 1
+                    If scan.GetPixel(xx, yy).A > 10 Then
+                        minX = Math.Min(minX, xx)
+                        maxX = Math.Max(maxX, xx)
+                        minY = Math.Min(minY, yy)
+                        maxY = Math.Max(maxY, yy)
                     End If
                 Next
             Next
-
-            If disposeScan Then scanBmp.Dispose()
-
-            If maxX < minX OrElse maxY < minY Then
-                ' Fully transparent image — nothing to bound, use full canvas.
-                Return New Rectangle(0, 0, img.Width, img.Height)
-            End If
-
-            Return New Rectangle(
-                CInt(minX * scale), CInt(minY * scale),
-                CInt((maxX - minX + 1) * scale), CInt((maxY - minY + 1) * scale))
+            If owned Then scan.Dispose()
+            If maxX < minX Then Return New Rectangle(0, 0, img.Width, img.Height)
+            Return New Rectangle(CInt(minX * scale), CInt(minY * scale),
+                                 CInt((maxX - minX + 1) * scale), CInt((maxY - minY + 1) * scale))
         Catch
             Return New Rectangle(0, 0, img.Width, img.Height)
         End Try
     End Function
-
-    ' =========================================================================
-    '  DROP-ICON HELPER (paint drop for header circle — fallback)
-    ' =========================================================================
-    Private Sub DrawDropIcon(g As Graphics, cx As Integer, cy As Integer,
-                              r As Integer, col As Color)
-        Using br As New SolidBrush(col)
-            ' Body: small ellipse
-            g.FillEllipse(br, cx - r, cy - r, r * 2, r * 2)
-            ' Tip: triangle above
-            Dim tip() As PointF = {
-                New PointF(cx, cy - r - r),
-                New PointF(cx - r * 0.6F, cy - r + 2),
-                New PointF(cx + r * 0.6F, cy - r + 2)
-            }
-            g.FillPolygon(br, tip)
-        End Using
-    End Sub
-
-
 
 End Module

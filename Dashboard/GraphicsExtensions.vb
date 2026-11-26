@@ -18,6 +18,21 @@ Module GraphicsExtensions
         End Using
     End Sub
 
+    ' Paints the square background behind a rounded button/card. With
+    ' anti-aliasing on, a rectangle that starts at (0,0) covers only half of
+    ' the first pixel row and column, so the control's own BackColor bled
+    ' through as a faint line along the top and left edges of every rounded
+    ' button (Settings tabs, PDF/Print, Change Password...). Filling with
+    ' anti-aliasing off covers every pixel; the rounded shape drawn on top
+    ' keeps its smooth edges.
+    <Extension>
+    Public Sub FillBackground(g As Graphics, brush As Brush, rect As Rectangle)
+        Dim old As SmoothingMode = g.SmoothingMode
+        g.SmoothingMode = SmoothingMode.None
+        g.FillRectangle(brush, rect)
+        g.SmoothingMode = old
+    End Sub
+
     Private Function RoundedRect(rect As Rectangle, radius As Integer) As GraphicsPath
         Dim path As New GraphicsPath()
         Dim d As Integer = radius * 2

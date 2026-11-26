@@ -599,7 +599,7 @@ Public Module ChangePasswordModal
                 g.SmoothingMode = SmoothingMode.AntiAlias
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality
                 Using bgBrush As New SolidBrush(CardBg)
-                    g.FillRectangle(bgBrush, b.ClientRectangle)
+                    g.FillBackground(bgBrush, b.ClientRectangle)
                 End Using
                 Dim rect = b.ClientRectangle
                 rect.Width -= 1 : rect.Height -= 1

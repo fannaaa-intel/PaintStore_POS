@@ -66,6 +66,41 @@ Public Module Theme
     Public ReadOnly Success As Color = Color.FromArgb(0, 160, 106)
     Public ReadOnly SuccessBg As Color = Color.FromArgb(200, 240, 225)
 
+    ' ── Density ──────────────────────────────────────────────────────────────
+    ' The store's laptops are 1366x768 (or 1080p at 125%, which this
+    ' DPI-unaware app also sees as ~864px tall). There the 140px KPI cards and
+    ' 62-76px table rows left room for only 3-5 rows on Item List, Stock
+    ' Levels, Transaction History and the paged Admin/Procurement lists
+    ' ("Page 1 of 78"). On a short screen everything uses the Compact sizes
+    ' below; on a tall one nothing changes.
+    '
+    ' Set PAINTPOS_DENSITY=compact or =comfortable to force either layout.
+    Public ReadOnly Compact As Boolean = DetectCompact()
+
+    Private Function DetectCompact() As Boolean
+        Dim forced As String = Environment.GetEnvironmentVariable("PAINTPOS_DENSITY")
+        If String.Equals(forced, "compact", StringComparison.OrdinalIgnoreCase) Then Return True
+        If String.Equals(forced, "comfortable", StringComparison.OrdinalIgnoreCase) Then Return False
+        Try
+            Return System.Windows.Forms.Screen.PrimaryScreen.WorkingArea.Height < 900
+        Catch
+            Return False
+        End Try
+    End Function
+
+    ' Picks the comfortable or compact value for the current screen.
+    Public Function Dense(comfortable As Integer, compactValue As Integer) As Integer
+        Return If(Compact, compactValue, comfortable)
+    End Function
+
+    ' KPI ("stat") cards: caption, big figure, one-line note underneath.
+    Public ReadOnly KpiH As Integer = Dense(140, 96)
+    Public ReadOnly KpiSaved As Integer = 140 - KpiH          ' height freed vs. the full card
+    Public ReadOnly KpiCaptionTop As Integer = Dense(14, 9)
+    Public ReadOnly KpiValueTop As Integer = Dense(36, 27)
+    Public ReadOnly KpiSubTop As Integer = Dense(100, 67)
+    Public ReadOnly KpiValueSize As Single = If(Compact, 20.0F, 26.0F)
+
     ' ── Type ─────────────────────────────────────────────────────────────────
     Public Const FamilyName As String = "Segoe UI"
     Public Const FamilySemibold As String = "Segoe UI Semibold"
